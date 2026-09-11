@@ -1,0 +1,18 @@
+[
+  {
+    "type": "feed",
+    "height": 100
+  },
+  {
+    "type": "feed",
+    "height": 186
+  },
+  {
+    "type": "cut",
+    "value": "full"
+  },
+  {
+    "type": "feed",
+    "height": 30
+  }
+]

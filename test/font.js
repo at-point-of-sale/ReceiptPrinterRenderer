@@ -6,6 +6,16 @@ import {assert} from 'chai';
 /* Draw code points next to each other in cells of a given size, the way the
    painter puts the characters of a line next to each other */
 
+/**
+ * A row of cells
+ *
+ * @param  {object}     font         The font to draw with
+ * @param  {number[]}   codepoints   The code points to draw
+ * @param  {number}     cellWidth    Width of a cell in dots
+ * @param  {number}     cellHeight   Height of a cell in dots
+ * @param  {object}     [options]    Style options for renderGlyph
+ * @return {object}                  The bitmap
+ */
 function strip(font, codepoints, cellWidth, cellHeight, options = {}) {
   const result = Bitmap.create(cellWidth * codepoints.length, cellHeight);
 
@@ -19,6 +29,16 @@ function strip(font, codepoints, cellWidth, cellHeight, options = {}) {
 
 /* Draw code points below each other, the way the painter stacks lines */
 
+/**
+ * A column of cells
+ *
+ * @param  {object}     font         The font to draw with
+ * @param  {number[]}   codepoints   The code points to draw
+ * @param  {number}     cellWidth    Width of a cell in dots
+ * @param  {number}     cellHeight   Height of a cell in dots
+ * @param  {object}     [options]    Style options for renderGlyph
+ * @return {object}                  The bitmap
+ */
 function stack(font, codepoints, cellWidth, cellHeight, options = {}) {
   const result = Bitmap.create(cellWidth, cellHeight * codepoints.length);
 
@@ -32,6 +52,12 @@ function stack(font, codepoints, cellWidth, cellHeight, options = {}) {
 
 /* The row of a bitmap with the most ink, which is the rule of a strip */
 
+/**
+ * The row of a bitmap with the most black dots
+ *
+ * @param  {object}   bitmap   The bitmap to look at
+ * @return {string}            That row, as ASCII art
+ */
 function busiestRow(bitmap) {
   return toAscii(bitmap)
       .map((line) => ({line, ink: line.split('#').length - 1}))

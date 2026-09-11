@@ -1,5 +1,6 @@
 import {toPbm} from './formats/pbm.js';
 import {toImageData} from './formats/image-data.js';
+import EscPosRenderer from './renderers/esc-pos.js';
 
 /*
     ReceiptPrinterRenderer
@@ -8,8 +9,7 @@ import {toImageData} from './formats/image-data.js';
     helpers. The type definitions below are the contract between the renderers
     and the printer drivers that use them, see documentation/design.md.
 
-    The implementation follows the design document. Nothing below is final until
-    the first renderer lands.
+    The implementation follows the design document.
 */
 
 /**
@@ -66,10 +66,12 @@ import {toImageData} from './formats/image-data.js';
  * @property {string} [codepageMapping]      Codepage mapping the commands were encoded with, defaults to 'epson'
  * @property {RenderCommand[]} [commands]    Command types that appear in the output, the rest is dropped
  * @property {number} [maxHeight]            Maximum height of an image item, taller segments are split
- * @property {number} [lineSpacing]          Default line spacing in dots, defaults to 30
+ * @property {number} [lineSpacing]          Default line spacing in dots, defaults to the profile
+ * @property {string|object} [profile]       Printer family defaults, a name or a profile, defaults to 'epson'
  * @property {number} [feedThreshold]        Runs of blank rows at least this tall become feed items
+ * @property {object} [font]                 Font data, in the packed format of the built in fonts
  */
 
-/* EscPosRenderer and StarPrntRenderer are added when the renderers land */
+/* StarPrntRenderer is added when it lands */
 
-export {toPbm, toImageData};
+export {EscPosRenderer, toPbm, toImageData};

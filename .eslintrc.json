@@ -18,5 +18,15 @@
       1,
       120
     ]
-  }
+  },
+  "overrides": [
+    {
+      "files": [
+        "test/**/*.js"
+      ],
+      "env": {
+        "mocha": true
+      }
+    }
+  ]
 }

@@ -6,6 +6,9 @@ import {assert} from 'chai';
 /* A stand in for the ImageData of the browser, so that the test does not need
    canvas or any other native module */
 
+/**
+ * The part of ImageData that toImageData() uses
+ */
 class FakeImageData {
   /**
      * @param  {Uint8ClampedArray}   data     The pixels

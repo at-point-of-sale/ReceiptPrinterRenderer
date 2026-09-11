@@ -61,3 +61,39 @@ export function fromAscii(lines) {
 export function art(bitmap) {
   return toAscii(bitmap).join('\n');
 }
+
+/**
+ * The first rows in which two bitmaps differ, as ASCII art, for a test report
+ *
+ * @param  {object}   actual     The bitmap the code produced
+ * @param  {object}   expected   The bitmap the fixture holds
+ * @param  {number}   [limit]    Number of differing rows to show
+ * @return {string}              The report
+ */
+export function diff(actual, expected, limit = 6) {
+  const lines = [];
+
+  if (actual.width !== expected.width || actual.height !== expected.height) {
+    lines.push(`size ${actual.width}x${actual.height}, expected ${expected.width}x${expected.height}`);
+  }
+
+  const left = toAscii(actual);
+  const right = toAscii(expected);
+  const rows = Math.max(left.length, right.length);
+
+  let shown = 0;
+
+  for (let y = 0; y < rows && shown < limit; y++) {
+    if (left[y] === right[y]) {
+      continue;
+    }
+
+    lines.push(`row ${y}`);
+    lines.push(`  actual   ${left[y] || ''}`);
+    lines.push(`  expected ${right[y] || ''}`);
+
+    shown++;
+  }
+
+  return lines.join('\n');
+}

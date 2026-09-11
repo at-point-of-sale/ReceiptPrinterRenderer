@@ -14,6 +14,11 @@ import CodepageEncoder from '@point-of-sale/codepage-encoder';
     See documentation/design.md for the formats.
 */
 
+/**
+ * The contents of generated/mapping.js, the codepage mappings per language
+ *
+ * @return {string}   The source of the module
+ */
 function generateMappings() {
   let output = 'const codepageMappings = {\n';
 
@@ -55,6 +60,11 @@ function generateMappings() {
   return output;
 }
 
+/**
+ * The contents of generated/profiles.js, the defaults per printer family
+ *
+ * @return {string}   The source of the module
+ */
 function generateProfiles() {
   let output = 'const printerProfiles = {\n';
 
