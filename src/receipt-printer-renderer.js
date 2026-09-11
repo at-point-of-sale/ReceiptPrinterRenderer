@@ -1,6 +1,7 @@
 import {toPbm} from './formats/pbm.js';
 import {toImageData} from './formats/image-data.js';
 import EscPosRenderer from './renderers/esc-pos.js';
+import StarPrntRenderer from './renderers/star-prnt.js';
 
 /*
     ReceiptPrinterRenderer
@@ -63,15 +64,13 @@ import EscPosRenderer from './renderers/esc-pos.js';
 /**
  * @typedef {object} RendererOptions
  * @property {number} width                  Width of the print area in dots, a multiple of 8
- * @property {string} [codepageMapping]      Codepage mapping the commands were encoded with, defaults to 'epson'
+ * @property {string} [codepageMapping]      Codepage mapping the commands were encoded with, per language
  * @property {RenderCommand[]} [commands]    Command types that appear in the output, the rest is dropped
  * @property {number} [maxHeight]            Maximum height of an image item, taller segments are split
  * @property {number} [lineSpacing]          Default line spacing in dots, defaults to the profile
- * @property {string|object} [profile]       Printer family defaults, a name or a profile, defaults to 'epson'
+ * @property {string|object} [profile]       Printer family defaults, a name or a profile, per language
  * @property {number} [feedThreshold]        Runs of blank rows at least this tall become feed items
  * @property {object} [font]                 Font data, in the packed format of the built in fonts
  */
 
-/* StarPrntRenderer is added when it lands */
-
-export {EscPosRenderer, toPbm, toImageData};
+export {EscPosRenderer, StarPrntRenderer, toPbm, toImageData};

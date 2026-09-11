@@ -305,7 +305,8 @@ The complete set of commands ReceiptPrinterEncoder version 3 emits for the `star
 | `0x20`..`0xFF` | printable byte | Decoded through the current codepage, one cell in the current style. |
 | `LF` | line feed | Commit the current line. |
 | `CR` | carriage return | Ignored. |
-| `ESC @` `CAN` | initialize and cancel | Reset all state to the defaults. |
+| `ESC @` | initialize | Reset all state to the defaults. |
+| `CAN` | cancel | Throw away the line that is being composed, without advancing the paper. The encoder sends it right behind `ESC @`, where the line buffer is already empty. |
 | `ESC GS t n` | select codepage | Look up `n` in the Star codepage mapping. |
 | `ESC GS P 0`, `ESC GS P 1` | print mode | Emitted by the encoder's flush around a job. No effect on rendering. |
 
@@ -320,7 +321,7 @@ The complete set of commands ReceiptPrinterEncoder version 3 emits for the `star
 | `ESC RS F n` | font | 0 font A, 1 font B, 9x24 in the Star profile. |
 | `ESC GS a n` | alignment | 0 left, 1 center, 2 right. |
 | `ESC 0` | line spacing 3 mm | 24 dots, used around column images. |
-| `ESC z 1` | line spacing 4 mm | 32 dots, the default. |
+| `ESC z 1` | line spacing 4 mm | Back to the default line spacing, 32 dots in the Star profile. |
 
 The encoder emits nothing for italic on StarPRNT, so there is nothing to ignore.
 
@@ -332,14 +333,14 @@ The encoder emits nothing for italic on StarPRNT, so there is nothing to ignore.
 | `ESC GS y S 0 n` | QR model | 1 or 2, rendered as model 2. |
 | `ESC GS y S 2 n` | QR module size | `n` dots per module. |
 | `ESC GS y S 1 n` | QR error correction | 0 L, 1 M, 2 Q, 3 H. |
-| `ESC GS y D 1 0 nL nH d..` | QR store data | Data for the next print. |
+| `ESC GS y D 1 NUL nL nH d..` | QR store data | Data for the next print. |
 | `ESC GS y P` | QR print | Draw the symbol as a block. |
 | `ESC GS x S 0 ..`, `S 1`, `S 2`, `S 3` | PDF417 parameters | Parsed and stored. |
-| `ESC GS x D 1 ..` | PDF417 store data | Parsed. |
+| `ESC GS x D nL nH d..` | PDF417 store data | Parsed. No function byte, unlike the QR command. |
 | `ESC GS x P` | PDF417 print | Not rendered in version 1, see the ESC/POS table. |
 | `ESC X nL nH d.. LF CR` | column image, 24 dots | One strip of 24 rows, three bytes per column, with the line spacing at 24 dots the strips join. |
 | `ESC d n` | cut | 0 full, 1 partial, 2 full with feed, 3 partial with feed. |
-| `ESC BEL n1 n2` then `BEL` or `SUB` | pulse | `n1` on time and `n2` off time in units of 10 ms, `BEL` drawer 1, `SUB` drawer 2. |
+| `ESC BEL n1 n2` then `BEL` or `SUB` | pulse | `n1` on time and `n2` off time in units of 10 ms, for the first drawer only. `BEL` and `FS` pulse drawer 1 with that width, `SUB` and `EM` pulse drawer 2 for the fixed 200 ms on and 200 ms off of the specification. |
 
 The Star barcode symbology numbers the encoder emits and the GS1 DataBar variants follow the same rendered and not rendered split as the ESC/POS table.
 

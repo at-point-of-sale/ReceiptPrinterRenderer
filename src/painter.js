@@ -290,6 +290,15 @@ class Painter {
   }
 
   /**
+     * Throw away the line that is being composed, without advancing the paper.
+     * The Star CAN command cancels the print data of the line buffer, which is
+     * this, and ESC @ does it as part of a full initialize.
+     */
+  cancel() {
+    this.#line = {cells: [], x: 0, height: 0};
+  }
+
+  /**
      * Place a bitmap in the current line, at the cursor, as if it were one wide
      * cell. Column mode images are strips of 24 rows that sit inside normal
      * lines, this is how they get there.
