@@ -1,0 +1,67 @@
+{
+    "name": "@point-of-sale/receipt-printer-renderer",
+    "version": "0.1.0",
+    "description": "Render ESC/POS commands created by ReceiptPrinterEncoder to 1-bit images, for printers that only support graphics",
+    "type": "module",
+    "exports": {
+        "types": "./dist/receipt-printer-renderer.d.ts",
+        "browser": {
+            "import": "./dist/receipt-printer-renderer.esm.js",
+            "require": "./dist/receipt-printer-renderer.umd.js",
+            "script": "./dist/receipt-printer-renderer.umd.js"
+        },
+        "import": "./dist/receipt-printer-renderer.mjs",
+        "require": "./dist/receipt-printer-renderer.cjs"
+    },
+    "main": "dist/receipt-printer-renderer.cjs",
+    "module": "dist/receipt-printer-renderer.mjs",
+    "types": "dist/receipt-printer-renderer.d.ts",
+    "scripts": {
+        "build": "npm run generate && tsc && rollup -c && rm -rf dist/tmp",
+        "generate": "node tools/generate.js",
+        "lint": "eslint --fix src/*.js src/**/*.js",
+        "mocha": "mocha test/",
+        "test": "npm run lint && npm run mocha"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/NielsLeenheer/ReceiptPrinterRenderer.git"
+    },
+    "keywords": [
+        "pos",
+        "escpos",
+        "starprnt",
+        "receipt",
+        "printer",
+        "renderer",
+        "raster",
+        "tsp100"
+    ],
+    "author": "Niels Leenheer",
+    "license": "MIT",
+    "bugs": {
+        "url": "https://github.com/NielsLeenheer/ReceiptPrinterRenderer/issues"
+    },
+    "homepage": "https://github.com/NielsLeenheer/ReceiptPrinterRenderer#readme",
+    "devDependencies": {
+        "@point-of-sale/receipt-printer-encoder": "^3.0.0",
+        "@rollup/plugin-commonjs": "^24.1.0",
+        "@rollup/plugin-node-resolve": "^15.0.2",
+        "@rollup/plugin-terser": "^0.4.1",
+        "chai": "^4.3.7",
+        "eslint": "^8.39.0",
+        "eslint-config-google": "^0.14.0",
+        "javascript-stringify": "^2.1.0",
+        "mocha": "^10.2.0",
+        "rollup": "^3.20.7",
+        "rollup-plugin-dts": "^6.3.0",
+        "typescript": "^5.9.3"
+    },
+    "dependencies": {
+        "@point-of-sale/codepage-encoder": "^3.0.0",
+        "lean-qr": "^2.4.1"
+    },
+    "files": [
+        "dist"
+    ]
+}

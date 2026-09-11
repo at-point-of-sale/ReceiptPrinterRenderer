@@ -1,0 +1,50 @@
+# ReceiptPrinterRenderer
+
+Render the ESC/POS and StarPRNT commands created by [ReceiptPrinterEncoder](https://github.com/NielsLeenheer/ReceiptPrinterEncoder) to 1-bit images, for receipt printers that only support graphics, such as the Star TSP100 series and Bluetooth "cat" printers.
+
+- [About ReceiptPrinterRenderer](README.md)
+- [Design document](documentation/design.md)
+
+<br>
+
+> This library is part of [@point-of-sale](https://point-of-sale.dev), a collection of libraries for interfacing browsers and Node with Point of Sale devices such as receipt printers, barcode scanners and customer facing displays.
+
+<br>
+
+## About ReceiptPrinterRenderer
+
+Some receipt printers have no fonts and no barcode engine. They only accept images. This library takes the bytes produced by ReceiptPrinterEncoder, interprets them the way a real printer would, and produces a stream of image segments and the few commands the target printer still understands, such as cut and pulse.
+
+```js
+import { EscPosRenderer } from '@point-of-sale/receipt-printer-renderer';
+
+const renderer = new EscPosRenderer({
+    width: 576,
+    codepageMapping: 'epson',
+    commands: ['cut', 'pulse', 'feed'],
+});
+
+const items = renderer.render(bytes);
+
+/* items is an array of image segments and commands, for example:
+
+   [
+       { type: 'image', width: 576, height: 412, data: Uint8Array },
+       { type: 'cut', value: 'partial' },
+   ]
+*/
+```
+
+There is an `EscPosRenderer` and a `StarPrntRenderer`, sharing the same painter and output format. The renderer is normally not used directly, but constructed by a printer driver such as [WebUSBReceiptPrinter](https://github.com/NielsLeenheer/WebUSBReceiptPrinter), which passes the images on to the printer in the format the printer expects. Applications keep using ReceiptPrinterEncoder exactly as they do for printers with native ESC/POS support.
+
+This project is in the design stage. See the [design document](documentation/design.md) for the architecture, the output contract and the plan for driver support.
+
+<br>
+
+-----
+
+<br>
+
+This library has been created by Niels Leenheer under the [MIT license](LICENSE). Feel free to use it in your products. The development of this library is sponsored by Salonhub.
+
+<a href="https://salonhub.nl"><img src="https://salonhub.nl/assets/images/salonhub.svg" width=140></a>
