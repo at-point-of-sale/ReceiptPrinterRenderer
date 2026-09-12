@@ -479,3 +479,359 @@ for (const language of languages) {
     );
   }
 }
+
+/*
+    The hand assembled fixtures.
+
+    ReceiptPrinterEncoder does not emit the commands of section 12 of the
+    implementation plan, so the streams of these fixtures are written out byte
+    by byte here. They are rendered and written the same way the receipts above
+    are, into test/fixtures/<language>/raw, so that the fixture helpers find
+    them as a group of their own and the encoder fixtures keep their directory
+    to themselves.
+
+    The fixtures that exist in both languages are written so that the two
+    streams print the same paper, which is what test/parity.js checks for them.
+*/
+
+const ESC = 0x1b;
+const FS = 0x1c;
+const RS = 0x1e;
+const LF = 0x0a;
+const HT = 0x09;
+const NUL = 0x00;
+const EOT = 0x04;
+const BEL = 0x07;
+
+/**
+ * Build a byte stream from strings, numbers and arrays of numbers, so that a
+ * fixture reads like the specification
+ *
+ * @param  {...(string|number|number[])}   parts   The pieces of the stream
+ * @return {Uint8Array}                            The stream
+ */
+function stream(...parts) {
+  const result = [];
+
+  for (const part of parts) {
+    if (typeof part === 'string') {
+      for (let i = 0; i < part.length; i++) {
+        result.push(part.charCodeAt(i) & 0xff);
+      }
+    } else if (Array.isArray(part)) {
+      result.push(...part);
+    } else {
+      result.push(part);
+    }
+  }
+
+  return Uint8Array.from(result);
+}
+
+/**
+ * A raster mode setting command, its value as ASCII digits closed with a NUL
+ *
+ * @param  {string}   command   The letter of the command, or the two letters of a margin
+ * @param  {number}   value     The value of the setting
+ * @return {number[]}           The bytes of the command
+ */
+function raster(command, value) {
+  return Array.from(stream(ESC, '*r', command, String(value), NUL));
+}
+
+/**
+ * A row of raster data, with the trailing white bytes trimmed the way
+ * StarGraphicsPrinterEncoder trims them
+ *
+ * @param  {number[]}   bytes    The bytes of the row, eight dots per byte
+ * @param  {boolean}    [feed]   False for the k command, which holds the position
+ * @return {number[]}            The bytes of the command
+ */
+function rasterRow(bytes, feed = true) {
+  const row = bytes.slice();
+
+  while (row.length > 1 && row[row.length - 1] === 0x00) {
+    row.pop();
+  }
+
+  return [feed ? 0x62 : 0x6b, row.length & 0xff, row.length >> 8, ...row];
+}
+
+/**
+ * The rows of a rectangle of black dots, as raster data commands
+ *
+ * @param  {number}   left     Left edge in bytes of eight dots
+ * @param  {number}   bytes    Width in bytes of eight dots
+ * @param  {number}   rows     Number of rows
+ * @return {number[]}          The commands
+ */
+function rasterBlock(left, bytes, rows) {
+  const row = new Array(left + bytes).fill(0x00);
+
+  row.fill(0xff, left, left + bytes);
+
+  const result = [];
+
+  for (let y = 0; y < rows; y++) {
+    result.push(...rasterRow(row));
+  }
+
+  return result;
+}
+
+/* The twelve code points an international character set replaces, which is
+   what the international fixture prints for every set it selects */
+
+const NATIONAL = '#$@[\\]^`{|}~';
+
+const raw = {
+  /*
+      ESC ! n against the individual commands. The two streams set the same
+      state in the two languages: ESC ! carries the font, the bold, the two
+      size bits and the underline in one byte, StarPRNT has a command for each
+      of them.
+  */
+
+  'print-mode': {
+    'esc-pos': stream(
+        ESC, '@',
+        'Plain text', LF,
+        ESC, '!', 0x08, 'Bold text', LF,
+        ESC, '!', 0x10, 'Double height', LF,
+        ESC, '!', 0x20, 'Double width', LF,
+        ESC, '!', 0x30, 'Double both', LF,
+        ESC, '!', 0x80, 'Underline', LF,
+        ESC, '!', 0x01, 'Font B', LF,
+        ESC, '!', 0x00, 'Plain again', LF,
+        ESC, 'G', 1, 'Double strike', LF,
+        ESC, 'G', 0, 'Plain to the end', LF,
+    ),
+
+    'star-prnt': stream(
+        ESC, '@',
+        'Plain text', LF,
+        ESC, 'E', 'Bold text', ESC, 'F', LF,
+        ESC, 'h', 1, 'Double height', ESC, 'h', 0, LF,
+        ESC, 'W', 1, 'Double width', ESC, 'W', 0, LF,
+        ESC, 'h', 1, ESC, 'W', 1, 'Double both', ESC, 'h', 0, ESC, 'W', 0, LF,
+        ESC, '-', 1, 'Underline', ESC, '-', 0, LF,
+        ESC, RS, 'F', 1, 'Font B', ESC, RS, 'F', 0, LF,
+        'Plain again', LF,
+        ESC, 'E', 'Double strike', ESC, 'F', LF,
+        'Plain to the end', LF,
+    ),
+  },
+
+  /*
+      ESC R n, the international character sets. The same twelve bytes are
+      printed in every set, so the fixture is the table itself. Both languages
+      number these sets the same way, so the streams are identical.
+  */
+
+  'international': (() => {
+    const bytes = [ESC, 0x40];
+
+    for (const set of [0, 1, 2, 3, 5, 6, 7, 8, 11, 13]) {
+      bytes.push(ESC, 0x52, set, ...stream(NATIONAL), LF);
+    }
+
+    bytes.push(ESC, 0x52, 0, ...stream('Back to the USA set'), LF);
+
+    return {'esc-pos': Uint8Array.from(bytes), 'star-prnt': Uint8Array.from(bytes)};
+  })(),
+
+  /*
+      ESC { n, upside down printing. Every line that is committed while it is
+      on is rotated by 180 degrees, the feed order of the lines is not.
+  */
+
+  'upside-down': {
+    'esc-pos': stream(
+        ESC, '@',
+        'Right side up', LF,
+        ESC, '{', 1,
+        'Upside down one', LF,
+        'Upside down two', LF,
+        ESC, 'a', 1, 'Centred upside down', LF, ESC, 'a', 0,
+        ESC, '{', 0,
+        'Right side up again', LF,
+    ),
+  },
+
+  /*
+      ESC SP n, the right side character spacing, which grows with the width
+      multiplier.
+  */
+
+  'spacing': {
+    'esc-pos': stream(
+        ESC, '@',
+        'Tight', LF,
+        ESC, ' ', 4, 'Spaced by four dots', LF,
+        0x1d, '!', 0x11, 'Spaced and double', LF, 0x1d, '!', 0x00,
+        ESC, ' ', 0, 'Tight again', LF,
+    ),
+  },
+
+  /*
+      HT and ESC D, the tab stops. The first line uses the default stop every
+      eight characters, the three columns land on the stops of ESC D, and the
+      last line has no stops at all: ESC D NUL cancels every one of them, after
+      which a tab does nothing. The same commands exist in both languages.
+  */
+
+  'tabs': (() => {
+    const bytes = Array.from(stream(
+        ESC, '@',
+        'A', HT, 'B', HT, 'C', HT, 'D', LF,
+        ESC, 'D', 10, 20, 30, NUL,
+        'Item', HT, 'Qty', HT, 'Price', LF,
+        'Coffee', HT, '2', HT, '5.00', LF,
+        'Tea', HT, '1', HT, '2.25', LF,
+        'Cake', HT, '3', HT, '7.50', LF,
+        ESC, 'D', NUL,
+        'A', HT, 'B', HT, 'C', HT, 'D', LF,
+    ));
+
+    return {'esc-pos': Uint8Array.from(bytes), 'star-prnt': Uint8Array.from(bytes)};
+  })(),
+
+  /*
+      ESC $ and ESC \, the absolute and the relative print position, with the
+      horizontal motion unit of GS P in between. The last line moves back over
+      the text that was just printed, which is what a negative distance does.
+  */
+
+  'positions': {
+    'esc-pos': stream(
+        ESC, '@',
+        'Left', ESC, '$', 240, 0, 'Middle', ESC, '$', 0xa4, 1, 'Right', LF,
+        'A', ESC, '\\', 60, 0, 'B', ESC, '\\', 60, 0, 'C', LF,
+        0x1d, 'P', 180, 180,
+        'Unit', ESC, '$', 200, 0, 'at 200 units of 1/180 inch', LF,
+        0x1d, 'P', 0, 0,
+        'ABC', ESC, '\\', 0xe8, 0xff, '___', LF,
+        ESC, '$', 0, 0, 'Back at the left margin', LF,
+    ),
+  },
+
+  /*
+      The left margin and the print area, in dots on ESC/POS and in characters
+      on StarPRNT. Two characters of font A are 24 dots and the area of 38
+      characters is 456, so both streams print in the same place.
+  */
+
+  'margins': {
+    'esc-pos': stream(
+        ESC, '@',
+        'Over the full width of the paper', LF,
+        0x1d, 'L', 24, 0,
+        0x1d, 'W', 0xc8, 1,
+        'Inside the margins', LF,
+        ESC, 'a', 1, 'Centred inside', LF,
+        ESC, 'a', 2, 'Right inside', LF,
+        ESC, 'a', 0,
+        0x1d, 'L', 0, 0,
+        0x1d, 'W', 0x40, 2,
+        'Over the full width again', LF,
+    ),
+
+    'star-prnt': stream(
+        ESC, '@',
+        'Over the full width of the paper', LF,
+        ESC, 'l', 2,
+        ESC, 'Q', 40,
+        'Inside the margins', LF,
+        ESC, 0x1d, 'a', 1, 'Centred inside', LF,
+        ESC, 0x1d, 'a', 2, 'Right inside', LF,
+        ESC, 0x1d, 'a', 0,
+        ESC, 'l', 0,
+        ESC, 'Q', 48,
+        'Over the full width again', LF,
+    ),
+  },
+
+  /*
+      The Kanji group. There is no CJK font here, so a lead byte and its trail
+      byte become two cells of the fallback glyph, which is the width a printer
+      gives the character. The first block is Shift JIS, the second one JIS,
+      where every pair of printable bytes is one character.
+  */
+
+  'multibyte': {
+    'esc-pos': stream(
+        ESC, '@',
+        'Kanji mode off', LF,
+        FS, '&', FS, 'C', 1,
+        'ABC', [0x93, 0xfa, 0x96, 0x7b], 'DEF', LF,
+        FS, '.',
+        'Kanji mode off again', LF,
+        FS, 'C', 0, FS, '&',
+        [0x30, 0x21, 0x30, 0x22, 0x30, 0x23], LF,
+        FS, '.',
+        FS, '!', 0x0c, FS, '-', 1, FS, 'S', 2, 2, FS, 'W', 1,
+        'The parsed commands change nothing', LF,
+    ),
+  },
+
+  /*
+      A raster mode job, the way the TSP100 driver builds one: enter raster
+      mode, store the modes while the buffer is empty, send the rows, and let
+      ESC FF NUL print them and cut. The k row is deployed without a line feed,
+      so the b row behind it ORs into the same row of dots.
+  */
+
+  'star-raster': {
+    'star-prnt': stream(
+        ESC, '*rR',
+        ESC, '*rA',
+        raster('Q', 0),
+        raster('P', 0),
+        raster('E', 1),
+        ESC, BEL, 10, 50,
+        raster('ml', 1),
+        raster('F', 13),
+        rasterBlock(5, 12, 16),
+        raster('Y', 24),
+        rasterRow([0xff, 0x00, 0x00, 0xff], false),
+        rasterBlock(0, 2, 1),
+        rasterBlock(5, 12, 8),
+        ESC, 0x0c, NUL,
+        raster('D', 1),
+        ESC, 0x0c, EOT,
+        ESC, '*rB',
+    ),
+  },
+};
+
+for (const language of languages) {
+  const directory = path.join(fixtures, language.name, 'raw');
+  const Renderer = language.renderer;
+
+  fs.mkdirSync(directory, {recursive: true});
+
+  console.log(`${language.name}, hand assembled`);
+
+  for (const [name, streams] of Object.entries(raw)) {
+    const bytes = streams[language.name];
+
+    if (!bytes) {
+      continue;
+    }
+
+    const items = new Renderer(RENDERER).render(bytes);
+    const bitmap = stitch(items, {width: WIDTH});
+
+    fs.writeFileSync(path.join(directory, `${name}.bin`), bytes);
+    fs.writeFileSync(path.join(directory, `${name}.pbm`), toPbm(bitmap));
+    fs.writeFileSync(
+        path.join(directory, `${name}.items.json`),
+        JSON.stringify(commands(items), null, 2) + '\n',
+    );
+
+    console.log(
+        `  ${name.padEnd(12)} ${String(bytes.length).padStart(6)} bytes  ` +
+      `${String(bitmap.height).padStart(5)} rows  ${items.length} items`,
+    );
+  }
+}

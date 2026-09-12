@@ -279,6 +279,27 @@ class Bitmap {
   }
 
   /**
+     * Turn a bitmap upside down, which is what ESC { does to every line it
+     * prints: the dots are mirrored horizontally and vertically at once.
+     *
+     * @param  {Image}   bitmap   The bitmap to rotate
+     * @return {Image}            A new bitmap of the same size, rotated by 180 degrees
+     */
+  static rotate180(bitmap) {
+    const result = Bitmap.create(bitmap.width, bitmap.height);
+
+    for (let y = 0; y < bitmap.height; y++) {
+      for (let x = 0; x < bitmap.width; x++) {
+        if (Bitmap.getPixel(bitmap, x, y)) {
+          Bitmap.setPixel(result, bitmap.width - 1 - x, bitmap.height - 1 - y, 1);
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /**
      * The bytes of one row without the white bytes at its right edge, which is
      * what printers that trim their rows need. An all white row is one byte, so
      * that a row is never empty. A bitmap without width has no rows at all, and

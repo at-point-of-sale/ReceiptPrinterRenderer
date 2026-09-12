@@ -2,6 +2,7 @@ import Painter from '../src/painter.js';
 import Bitmap from '../src/bitmap.js';
 import profiles from '../generated/profiles.js';
 import {stitch} from '../src/formats/stitch.js';
+import {toAscii, fromAscii} from './helpers/ascii.js';
 import {assert} from 'chai';
 
 /* A narrow printer, eight columns of font A, so that a line fits on screen */
@@ -757,6 +758,451 @@ describe('Painter', function() {
 
       assert.equal(bitmap.height, 30);
       assert.equal(Bitmap.getPixel(bitmap, 3, 10), 1);
+    });
+  });
+
+  describe('spacing()', function() {
+    it('should leave the space behind every cell', function() {
+      const paper = painter();
+
+      paper.spacing(4);
+      paper.text('AA');
+      paper.lineFeed();
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      /* The second cell starts one cell plus four dots from the left */
+
+      assert.equal(Bitmap.getPixel(bitmap, 3, 10), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 3 + 16, 10), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 3 + 12, 10), 0);
+    });
+
+    it('should scale the space with the width multiplier', function() {
+      const paper = painter({width: 576});
+
+      paper.spacing(4);
+      paper.style({width: 2});
+      paper.text('AA');
+      paper.lineFeed();
+
+      const bitmap = stitch(paper.end(), {width: 576});
+
+      /* The cell of 24 dots and the space of eight behind it: the second cell
+         is the first one 32 dots to the right */
+
+      for (let x = 0; x < 24; x++) {
+        for (let y = 0; y < 48; y++) {
+          assert.equal(
+              Bitmap.getPixel(bitmap, x + 32, y),
+              Bitmap.getPixel(bitmap, x, y),
+              `dot ${x}, ${y}`,
+          );
+        }
+      }
+    });
+
+    it('should not count the space of the last cell in the alignment', function() {
+      const spaced = painter();
+      const plain = painter();
+
+      spaced.align('right');
+      spaced.spacing(4);
+      spaced.text('A');
+      spaced.lineFeed();
+
+      plain.align('right');
+      plain.text('A');
+      plain.lineFeed();
+
+      assert.deepEqual(spaced.end(), plain.end());
+    });
+
+    it('should refuse a spacing that is not a positive number of dots', function() {
+      const paper = painter();
+
+      paper.spacing(4);
+      paper.spacing(-1);
+      paper.text('AA');
+      paper.lineFeed();
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(Bitmap.getPixel(bitmap, 3 + 16, 10), 1);
+    });
+  });
+
+  describe('position()', function() {
+    it('should move the cursor', function() {
+      const paper = painter();
+
+      paper.position(24);
+      paper.text('A');
+      paper.lineFeed();
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(Bitmap.getPixel(bitmap, 27, 10), 1);
+      assert.equal(paper.cursor, 0);
+    });
+
+    it('should report where the cursor is', function() {
+      const paper = painter();
+
+      paper.text('AB');
+
+      assert.equal(paper.cursor, 24);
+
+      paper.position(48);
+
+      assert.equal(paper.cursor, 48);
+    });
+
+    it('should ignore a position beyond the print area', function() {
+      const paper = painter();
+
+      paper.text('A');
+      paper.position(WIDTH + 1);
+
+      assert.equal(paper.cursor, 12);
+    });
+
+    it('should ignore a position that is not a number of dots', function() {
+      const paper = painter();
+
+      paper.position(-1);
+      paper.position(1.5);
+
+      assert.equal(paper.cursor, 0);
+    });
+  });
+
+  describe('tabs() and tab()', function() {
+    it('should move to the next stop of eight characters by default', function() {
+      const paper = painter({width: 576});
+
+      paper.text('A');
+      paper.tab();
+
+      assert.equal(paper.cursor, 96);
+    });
+
+    it('should move to the stops it was given, in characters', function() {
+      const paper = painter();
+
+      paper.tabs([2, 4]);
+      paper.tab();
+
+      assert.equal(paper.cursor, 24);
+
+      paper.tab();
+
+      assert.equal(paper.cursor, 48);
+    });
+
+    it('should do nothing past the last stop', function() {
+      const paper = painter();
+
+      paper.tabs([2]);
+      paper.tab();
+      paper.tab();
+
+      assert.equal(paper.cursor, 24);
+    });
+
+    it('should put the cursor past the print area when the stop is outside it', function() {
+      const paper = painter();
+
+      paper.tabs([8]);
+      paper.tab();
+
+      /* One dot beyond the area, so that the next cell wraps to a new line */
+
+      assert.equal(paper.cursor, WIDTH + 1);
+
+      paper.text('A');
+      paper.lineFeed();
+
+      assert.equal(paper.end()[0].height, 60);
+    });
+
+    it('should take the character width of the current font', function() {
+      const paper = painter();
+
+      paper.font('B');
+      paper.tabs([2]);
+      paper.tab();
+
+      assert.equal(paper.cursor, 18);
+    });
+
+    it('should stop at a stop that does not ascend', function() {
+      const paper = painter();
+
+      paper.tabs([2, 1, 4]);
+      paper.tab();
+      paper.tab();
+
+      assert.equal(paper.cursor, 24);
+    });
+
+    it('should cancel every stop for an empty list', function() {
+      const paper = painter({width: 576});
+
+      paper.tabs([2]);
+      paper.tabs([]);
+      paper.tab();
+
+      assert.equal(paper.cursor, 0);
+    });
+
+    it('should go back to the default stops for null', function() {
+      const paper = painter({width: 576});
+
+      paper.tabs([]);
+      paper.tabs(null);
+      paper.tab();
+
+      assert.equal(paper.cursor, 96);
+    });
+
+    it('should go back to the default stops on a reset', function() {
+      const paper = painter({width: 576});
+
+      paper.tabs([]);
+      paper.reset();
+      paper.tab();
+
+      assert.equal(paper.cursor, 96);
+    });
+
+    it('should count the character spacing in the width of a character', function() {
+      const paper = painter({width: 576});
+
+      paper.spacing(4);
+      paper.tabs([2]);
+      paper.tab();
+
+      assert.equal(paper.cursor, 32);
+    });
+  });
+
+  describe('margins()', function() {
+    it('should start the line at the left margin', function() {
+      const paper = painter();
+
+      paper.margins({left: 12});
+      paper.text('A');
+      paper.lineFeed();
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(Bitmap.getPixel(bitmap, 15, 10), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 3, 10), 0);
+    });
+
+    it('should align inside the print area', function() {
+      const paper = painter();
+
+      paper.margins({left: 12, width: 24});
+      paper.align('right');
+      paper.text('A');
+      paper.lineFeed();
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(Bitmap.getPixel(bitmap, 27, 10), 1);
+    });
+
+    it('should wrap at the print area', function() {
+      const paper = painter();
+
+      paper.margins({width: 24});
+      paper.text('AAA');
+      paper.lineFeed();
+
+      assert.equal(paper.end()[0].height, 60);
+    });
+
+    it('should clamp a print area that does not fit on the paper', function() {
+      const clamped = painter();
+      const full = painter();
+
+      clamped.margins({width: WIDTH * 2});
+      clamped.align('right');
+      clamped.text('A');
+      clamped.lineFeed();
+
+      full.align('right');
+      full.text('A');
+      full.lineFeed();
+
+      assert.deepEqual(clamped.end(), full.end());
+    });
+
+    it('should be ignored while a line is being composed', function() {
+      const margin = painter();
+      const plain = painter();
+
+      for (const paper of [margin, plain]) {
+        paper.text('A');
+
+        if (paper === margin) {
+          paper.margins({left: 12});
+        }
+
+        paper.lineFeed();
+        paper.text('A');
+        paper.lineFeed();
+      }
+
+      assert.deepEqual(margin.end(), plain.end());
+    });
+
+    it('should be ignored when the cursor was moved on an empty line', function() {
+      const margin = painter();
+      const plain = painter();
+
+      for (const paper of [margin, plain]) {
+        paper.position(12);
+
+        if (paper === margin) {
+          paper.margins({left: 12});
+        }
+
+        paper.text('A');
+        paper.lineFeed();
+      }
+
+      assert.deepEqual(margin.end(), plain.end());
+    });
+
+    it('should not apply to a block that asks for the paper', function() {
+      const paper = painter();
+
+      paper.margins({left: 8, width: 16});
+      paper.block(black(WIDTH, 4), {margins: false});
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(Bitmap.getPixel(bitmap, 0, 0), 1);
+      assert.equal(Bitmap.getPixel(bitmap, WIDTH - 1, 0), 1);
+    });
+
+    it('should apply to a block as well', function() {
+      const paper = painter();
+
+      paper.margins({left: 8, width: 16});
+      paper.block(black(16, 4));
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(Bitmap.getPixel(bitmap, 7, 0), 0);
+      assert.equal(Bitmap.getPixel(bitmap, 8, 0), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 23, 0), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 24, 0), 0);
+    });
+
+    it('should be reset by reset()', function() {
+      const paper = painter();
+
+      paper.margins({left: 12});
+      paper.reset();
+      paper.text('A');
+      paper.lineFeed();
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(Bitmap.getPixel(bitmap, 3, 10), 1);
+    });
+  });
+
+  describe('upperline and upside down', function() {
+    it('should draw the upperline along the top of the cell', function() {
+      const paper = painter();
+
+      paper.style({upperline: 2});
+      paper.text('A');
+      paper.lineFeed();
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(Bitmap.getPixel(bitmap, 0, 0), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 11, 1), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 12, 0), 0);
+      assert.equal(Bitmap.getPixel(bitmap, 0, 2), 0);
+    });
+
+    it('should rotate a committed line by 180 degrees', function() {
+      const upright = painter();
+      const rotated = painter();
+
+      upright.text('Ab');
+      upright.lineFeed();
+
+      rotated.style({upsideDown: true});
+      rotated.text('Ab');
+      rotated.lineFeed();
+
+      assert.deepEqual(
+          toAscii(stitch(rotated.end(), {width: WIDTH})),
+          toAscii(Bitmap.rotate180(stitch(upright.end(), {width: WIDTH}))),
+      );
+    });
+
+    it('should rotate a block by 180 degrees', function() {
+      const paper = painter();
+      const block = fromAscii(['####', '#...', '#...']);
+
+      paper.style({upsideDown: true});
+      paper.block(block);
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(Bitmap.getPixel(bitmap, WIDTH - 1, 2), 1);
+      assert.equal(Bitmap.getPixel(bitmap, WIDTH - 4, 2), 1);
+      assert.equal(Bitmap.getPixel(bitmap, WIDTH - 1, 0), 1);
+      assert.equal(Bitmap.getPixel(bitmap, WIDTH - 4, 0), 0);
+    });
+
+    it('should keep the order of the lines', function() {
+      const paper = painter();
+
+      paper.style({upsideDown: true});
+      paper.text('A');
+      paper.lineFeed();
+      paper.block(black(WIDTH, 4));
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(bitmap.height, 34);
+      assert.equal(Bitmap.getPixel(bitmap, 0, 32), 1);
+    });
+  });
+
+  describe('placeholder()', function() {
+    it('should draw the fallback glyph of the font', function() {
+      const paper = painter();
+      const fallback = painter();
+
+      paper.placeholder(2);
+      paper.lineFeed();
+
+      fallback.text('��');
+      fallback.lineFeed();
+
+      assert.deepEqual(paper.end(), fallback.end());
+    });
+
+    it('should draw nothing for a count of zero', function() {
+      const paper = painter();
+      const empty = painter();
+
+      paper.placeholder(0);
+      paper.lineFeed();
+      empty.lineFeed();
+
+      assert.deepEqual(paper.end(), empty.end());
     });
   });
 });

@@ -24,6 +24,7 @@ import {pdf417 as encodePdf417} from './symbologies/pdf417.js';
  * @property {string} vendor                          Name of the printer family
  * @property {number} lineSpacing                     Default line spacing in dots
  * @property {number} motionUnit                      Default vertical motion units per dot
+ * @property {number} [dpi]                           Resolution of the printer, for the horizontal motion unit of GS P
  * @property {{A: CellSize, B: CellSize}} fonts       Cell size of font A and font B
  */
 
@@ -84,11 +85,21 @@ import {pdf417 as encodePdf417} from './symbologies/pdf417.js';
  * The current print style, as the printers style commands set it
  *
  * @typedef {object} Style
- * @property {boolean} bold       Overstrike
- * @property {number} underline   Underline thickness in dots, 0, 1 or 2
- * @property {boolean} invert     White on black
- * @property {number} width       Horizontal size multiplier, 1 to 8
- * @property {number} height      Vertical size multiplier, 1 to 8
+ * @property {boolean} bold        Overstrike
+ * @property {number} underline    Underline thickness in dots, 0, 1 or 2
+ * @property {number} upperline    Upperline thickness in dots, 0, 1 or 2
+ * @property {boolean} invert      White on black
+ * @property {number} width        Horizontal size multiplier, 1 to 8
+ * @property {number} height       Vertical size multiplier, 1 to 8
+ * @property {boolean} upsideDown  Rotate every committed line by 180 degrees
+ */
+
+/**
+ * The left margin and the width of the print area, in dots
+ *
+ * @typedef {object} Margins
+ * @property {number} [left]    Left margin in dots, from the left edge of the paper
+ * @property {number} [width]   Width of the print area in dots, null for the whole paper
  */
 
 /* The built in fonts the two printer fonts are drawn from. Font A is the 12x24
@@ -104,7 +115,18 @@ const INITIAL_ROWS = 256;
 /* The style the human readable text of a barcode is drawn in, which is never
    the style of the text around it */
 
-const PLAIN = {bold: false, underline: 0, invert: false, width: 1, height: 1};
+const PLAIN = {bold: false, underline: 0, upperline: 0, invert: false, width: 1, height: 1};
+
+/* The default tab stops of a printer, every eight characters of font A, and
+   the most stops ESC D can set */
+
+const TAB_INTERVAL = 8;
+const MAX_TAB_STOPS = 32;
+
+/* The code point of the glyph a multibyte character is drawn with, which the
+   font draws as its fallback box */
+
+const PLACEHOLDER = 0xfffd;
 
 /* White dot rows between the bars of a barcode and its human readable text.
    The cell of the font has no room of its own above a capital, so without a
@@ -136,6 +158,10 @@ class Painter {
   #align;
   #lineSpacing;
   #defaultLineSpacing;
+  #spacing;
+  #tabs;
+  #margins;
+  #upsideDown;
 
   #line;
 
@@ -237,11 +263,35 @@ class Painter {
      * emitted are kept, which is what ESC @ does on a real printer.
      */
   reset() {
-    this.#style = {bold: false, underline: 0, invert: false, width: 1, height: 1};
+    this.#style = {bold: false, underline: 0, upperline: 0, invert: false, width: 1, height: 1};
     this.#font = 'A';
     this.#align = 'left';
     this.#lineSpacing = this.#defaultLineSpacing;
-    this.#line = {cells: [], x: 0, height: 0};
+    this.#spacing = 0;
+    this.#tabs = null;
+    this.#margins = {left: 0, width: null};
+    this.#upsideDown = false;
+    this.#line = this.#empty();
+  }
+
+  /**
+     * Width of one character of the current font in dots, which is what the
+     * margins and the tab stops of the Star commands are counted in
+     *
+     * @return {number}   Width of a cell in dots
+     */
+  get characterWidth() {
+    return this.#cells[this.#font].width;
+  }
+
+  /**
+     * Where the next cell goes, in dots from the left margin, which is what
+     * ESC \ counts its distance from
+     *
+     * @return {number}   Position of the cursor
+     */
+  get cursor() {
+    return this.#line.x;
   }
 
   /**
@@ -257,13 +307,30 @@ class Painter {
     for (const character of value) {
       const cell = this.#cell(character.codePointAt(0));
 
-      this.#place(cell);
+      this.#place(cell, this.#spacing * this.#style.width);
+    }
+  }
+
+  /**
+     * Append cells of the fallback glyph, which is what a multibyte character
+     * becomes on a printer without the font for it. One Kanji character is two
+     * cells wide, so that the layout around it stays right.
+     *
+     * @param  {number}   count   Number of cells to draw
+     */
+  placeholder(count) {
+    for (let cell = 0; cell < count; cell++) {
+      this.#place(this.#cell(PLACEHOLDER), this.#spacing * this.#style.width);
     }
   }
 
   /**
      * Change one or more style properties. Properties that are not given keep
      * their value.
+     *
+     * Upside down is not a property of a cell but of the line it lands on: it
+     * rotates every line that is committed from here on, so it is kept apart
+     * from the style the cells are drawn in.
      *
      * @param  {Partial<Style>}   changes   The properties to change
      */
@@ -272,11 +339,132 @@ class Painter {
       return;
     }
 
-    for (const property of ['bold', 'underline', 'invert', 'width', 'height']) {
+    for (const property of ['bold', 'underline', 'upperline', 'invert', 'width', 'height']) {
       if (typeof changes[property] !== 'undefined') {
         this.#style[property] = changes[property];
       }
     }
+
+    if (typeof changes.upsideDown !== 'undefined') {
+      this.#upsideDown = changes.upsideDown === true;
+    }
+  }
+
+  /**
+     * Change the space that follows every cell, which ESC SP sets. The space is
+     * scaled with the width multiplier, as the printer scales it, and it is not
+     * part of the width the alignment centres, so a centred line with character
+     * spacing is centred on its characters.
+     *
+     * @param  {number}   dots   Extra dots after every cell
+     */
+  spacing(dots) {
+    if (!Number.isInteger(dots) || dots < 0) {
+      return;
+    }
+
+    this.#spacing = dots;
+  }
+
+  /**
+     * Move the cursor to an absolute position on the line, in dots from the
+     * left margin, which is what ESC $ and HT do. A position beyond the print
+     * area is ignored, the way a printer ignores it.
+     *
+     * @param  {number}   dots   Position in dots from the left margin
+     */
+  position(dots) {
+    if (!Number.isInteger(dots) || dots < 0 || dots > this.#area()) {
+      return;
+    }
+
+    this.#line.x = dots;
+  }
+
+  /**
+     * Set the tab stops, in characters of the current font, which is what
+     * ESC D does. An empty list cancels every stop, after which a tab does
+     * nothing at all, and `null` goes back to the default of a stop every eight
+     * characters, which is what an initialize does. Stops have to ascend, a
+     * stop that does not ends the list, and a printer holds at most 32 of them.
+     *
+     * A character is as wide as the cell plus the character spacing of
+     * `spacing()`, which is how the ESC/POS reference of ESC D defines the
+     * unit: the character width includes the right side spacing.
+     *
+     * @param  {number[]|null}   columns   The stops in characters, [] for none, null for the defaults
+     */
+  tabs(columns) {
+    if (columns === null || typeof columns === 'undefined') {
+      this.#tabs = null;
+      return;
+    }
+
+    if (!Array.isArray(columns)) {
+      return;
+    }
+
+    const width = this.#tabUnit();
+    const stops = [];
+
+    for (const column of columns) {
+      if (!Number.isInteger(column) || column < 1 || stops.length >= MAX_TAB_STOPS) {
+        break;
+      }
+
+      const position = column * width;
+
+      if (stops.length && position <= stops[stops.length - 1]) {
+        break;
+      }
+
+      stops.push(position);
+    }
+
+    this.#tabs = stops;
+  }
+
+  /**
+     * Move the cursor to the next tab stop, which is what HT does. A tab past
+     * the last stop does nothing, and neither does a tab when every stop was
+     * cancelled. A stop that lies outside the print area puts the cursor one
+     * dot beyond the area instead, so that the next character wraps to a new
+     * line, which is what the ESC/POS reference of HT describes.
+     */
+  tab() {
+    const stops = this.#tabs === null ? this.#defaultTabs() : this.#tabs;
+    const area = this.#area();
+
+    for (const stop of stops) {
+      if (stop <= this.#line.x) {
+        continue;
+      }
+
+      this.#line.x = stop < area ? stop : area + 1;
+
+      return;
+    }
+  }
+
+  /**
+     * Set the left margin and the width of the print area, both in dots.
+     *
+     * The commands that set them are only effective at the beginning of a
+     * line, so a line that is already being composed, or whose cursor has been
+     * moved, makes the whole command do nothing, the way a printer drops it.
+     * A width that does not fit on the paper is clamped to it.
+     *
+     * @param  {Margins}   changes   The margins to change, the others keep their value
+     */
+  margins(changes) {
+    if (!changes || this.#line.cells.length !== 0 || this.#line.x !== 0) {
+      return;
+    }
+
+    this.#margins = {
+      left: typeof changes.left === 'undefined' ? this.#margins.left : Math.max(0, changes.left),
+      width: typeof changes.width === 'undefined' ? this.#margins.width : changes.width,
+    };
   }
 
   /**
@@ -353,7 +541,7 @@ class Painter {
      * this, and ESC @ does it as part of a full initialize.
      */
   cancel() {
-    this.#line = {cells: [], x: 0, height: 0};
+    this.#line = this.#empty();
   }
 
   /**
@@ -371,18 +559,31 @@ class Painter {
      * Commit the pending line, then draw a bitmap on a line of its own, aligned
      * the way the current alignment says, and advance the paper by its height.
      *
-     * @param  {Bitmap}   bitmap   The block to draw
+     * Blocks that are not laid out by the line mode, the rows of the Star
+     * raster mode, ask for `margins: false`: they carry their own position and
+     * are placed on the paper itself, so a left margin of the line mode does
+     * not shift them and a print area does not clip them.
+     *
+     * @param  {Bitmap}   bitmap      The block to draw
+     * @param  {object}   [options]   `{margins: false}` to ignore the print area
      */
-  block(bitmap) {
+  block(bitmap, options) {
+    const paper = options ? options.margins === false : false;
+
     if (this.#line.cells.length) {
       this.lineFeed();
+    } else {
+      this.#line = this.#empty();
     }
 
     const line = Bitmap.create(this.#width, bitmap.height);
+    const offset = paper ?
+      this.#offset(bitmap.width, this.#width) :
+      this.#margins.left + this.#offset(bitmap.width);
 
-    Bitmap.blit(bitmap, line, this.#offset(bitmap.width), 0);
+    Bitmap.blit(bitmap, line, offset, 0);
 
-    this.#append(line);
+    this.#append(this.#upsideDown ? Bitmap.rotate180(line) : line);
   }
 
   /**
@@ -629,8 +830,8 @@ class Painter {
     name = name || this.#font;
     style = style || this.#style;
 
-    const key = `${name}|${codepoint}|${style.bold ? 1 : 0}${style.underline}${style.invert ? 1 : 0}` +
-      `|${style.width}x${style.height}`;
+    const key = `${name}|${codepoint}|${style.bold ? 1 : 0}${style.underline}${style.upperline || 0}` +
+      `${style.invert ? 1 : 0}|${style.width}x${style.height}`;
 
     if (this.#cache.has(key)) {
       return this.#cache.get(key);
@@ -646,6 +847,7 @@ class Painter {
       heightMultiplier: style.height,
       bold: style.bold,
       underline: style.underline,
+      upperline: style.upperline || 0,
       invert: style.invert,
       stretch: Font.isBoxDrawing(codepoint),
     });
@@ -681,29 +883,83 @@ class Painter {
   }
 
   /**
+     * An empty line, which is what a line is before anything is placed on it
+     * and right after it is committed
+     *
+     * @return {object}   The line
+     */
+  #empty() {
+    return {cells: [], x: 0, extent: 0, height: 0};
+  }
+
+  /**
+     * Width of the print area in dots, the paper without the margins. A print
+     * area that does not fit on the paper is clamped to it.
+     *
+     * @return {number}   Width in dots
+     */
+  #area() {
+    const left = Math.min(this.#margins.left, this.#width);
+    const width = this.#margins.width === null ? this.#width - left : this.#margins.width;
+
+    return Math.max(0, Math.min(width, this.#width - left));
+  }
+
+  /**
+     * The width of one character for the tab stops: the cell plus the character
+     * spacing behind it, which is the unit the ESC/POS reference of ESC D uses
+     *
+     * @return {number}   Width in dots
+     */
+  #tabUnit() {
+    return this.characterWidth + this.#spacing;
+  }
+
+  /**
+     * The tab stops of a printer that was not given any: one every eight
+     * characters of font A, over the width of the paper. A stop beyond the
+     * print area is still a stop, tab() sends the cursor past the area for it.
+     *
+     * @return {number[]}   The stops in dots from the left margin
+     */
+  #defaultTabs() {
+    const stops = [];
+    const step = (this.#cells.A.width + this.#spacing) * TAB_INTERVAL;
+
+    for (let stop = step; stop <= this.#width && stops.length < MAX_TAB_STOPS; stop += step) {
+      stops.push(stop);
+    }
+
+    return stops;
+  }
+
+  /**
      * Put a cell on the current line, wrapping to the next line when it does
      * not fit on the rest of this one
      *
-     * @param  {Bitmap}   cell   The cell to place
+     * @param  {Bitmap}   cell        The cell to place
+     * @param  {number}   [spacing]   Dots to leave behind the cell, the character spacing
      */
-  #place(cell) {
-    if (this.#line.x > 0 && this.#line.x + cell.width > this.#width) {
+  #place(cell, spacing = 0) {
+    if (this.#line.x > 0 && this.#line.x + cell.width > this.#area()) {
       this.lineFeed();
     }
 
     this.#line.cells.push({bitmap: cell, x: this.#line.x});
-    this.#line.x += cell.width;
+    this.#line.extent = Math.max(this.#line.extent, this.#line.x + cell.width);
+    this.#line.x += cell.width + spacing;
     this.#line.height = Math.max(this.#line.height, cell.height);
   }
 
   /**
      * Where content of a given width starts, for the current alignment
      *
-     * @param  {number}   used   Width of the content in dots
-     * @return {number}          Horizontal position of the left edge
+     * @param  {number}   used     Width of the content in dots
+     * @param  {number}   [area]   Width of the print area, the current one when it is left out
+     * @return {number}            Horizontal position of the left edge, from the left margin
      */
-  #offset(used) {
-    const free = Math.max(0, this.#width - used);
+  #offset(used, area) {
+    const free = Math.max(0, (typeof area === 'number' ? area : this.#area()) - used);
 
     if (this.#align === 'center') {
       return free >> 1;
@@ -718,15 +974,17 @@ class Painter {
 
   /**
      * Commit the current line: draw its cells into a line of the right height,
-     * aligned, and append the rows.
+     * aligned inside the print area, and append the rows.
      *
      * @param  {number}   minimum   Smallest height of the line in dots
      */
   #commit(minimum) {
     const line = this.#line;
     const height = Math.max(minimum, line.height);
+    const margins = this.#margins;
+    const area = this.#area();
 
-    this.#line = {cells: [], x: 0, height: 0};
+    this.#line = this.#empty();
 
     if (height === 0) {
       return;
@@ -738,13 +996,13 @@ class Painter {
     }
 
     const bitmap = Bitmap.create(this.#width, height);
-    const offset = this.#offset(line.x);
+    const offset = margins.left + this.#offset(line.extent, area);
 
     for (const cell of line.cells) {
       Bitmap.blit(cell.bitmap, bitmap, offset + cell.x, 0);
     }
 
-    this.#append(bitmap);
+    this.#append(this.#upsideDown ? Bitmap.rotate180(bitmap) : bitmap);
   }
 
   /**

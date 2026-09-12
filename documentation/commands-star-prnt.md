@@ -19,6 +19,7 @@ Render the ESC/POS and StarPRNT commands created by [ReceiptPrinterEncoder](http
   - [QR codes](#qr-codes)
   - [PDF417](#pdf417)
   - [Images](#images)
+  - [Raster mode](#raster-mode)
   - [Cut and drawer](#cut-and-drawer)
   - [Printer state and status](#printer-state-and-status)
   - [Not supported yet](#not-supported-yet)
@@ -32,7 +33,7 @@ This page lists every command `StarPrntRenderer` recognises, what it does to the
 
 The renderer emulates a Star printer. It interprets the bytes the way the firmware does, including the cases where the firmware prints nothing at all: a barcode with invalid data, a symbol wider than the paper, an argument outside the range of its command, which leaves the setting as it was rather than clipping it.
 
-It deliberately differs from the hardware in a few places, each of them because the behaviour is not on the wire and no hardware check settled it. They are marked in the notes below, and these are all of them: the module widths of `ESC b`, the line spacing of an `ESC z n` that is not `0` or `1`, the feeds of `ESC I`, `ESC J` and `ESC a`, the four dot gap between the bars of a barcode and its human readable text, the reading of `ESC GS x S 0`, a QR model 1 drawn as a model 2 symbol, the basic 43 character set of Code 93, and the minimum of three data codewords of a PDF417 symbol.
+It deliberately differs from the hardware in a few places, each of them because the behaviour is not on the wire and no hardware check settled it. They are marked in the notes below, and these are all of them: the module widths of `ESC b`, the line spacing of an `ESC z n` that is not `0` or `1`, the feeds of `ESC I`, `ESC J` and `ESC a`, the four dot gap between the bars of a barcode and its human readable text, the reading of `ESC GS x S 0`, a QR model 1 drawn as a model 2 symbol, the basic 43 character set of Code 93, the minimum of three data codewords of a PDF417 symbol, the reading of `ESC h n` and `ESC Q n`, `ESC R n` leaving the sets above 13 alone, `ESC SP n`, whose length and effect are both unsettled, and the tear bar mode of raster mode read as a partial cut.
 
 Two differences are the printer itself rather than the renderer, and both show up when the same receipt is printed in both languages: a pulse to the second drawer is fixed at 200 ms on and 200 ms off, because the width is not on the wire, and the size multipliers of `ESC i` stop at six where `GS ! n` of ESC/POS goes to eight.
 
@@ -63,8 +64,9 @@ A Star command is `ESC` and a command byte, or `ESC GS` or `ESC RS` and a comman
 | `CAN` | cancel | Rendered | Throws away the print data of the line that is being composed, without advancing the paper. The encoder sends it right behind `ESC @`, where the line buffer is already empty. |
 | `ESC @` | initialize | Rendered | Resets style, font, alignment, line spacing, codepage and the stored QR code and PDF417 parameters, and discards a half composed line. The pulse width of `ESC BEL` survives it, as it does on a Star printer. Rows that were already committed stay on the paper, the command does not flush. |
 | `ESC GS P n` | print mode | Parsed | `ESC GS P 0` and `ESC GS P 1` switch the printer between page and line units, which changes when the printer prints and not what it prints. The encoder's flush emits both around a job. |
-| `ESC FF n` | print the buffer in mode n | Reported | The mode byte, which is `NUL`, `EOT`, `EM` or `LF`, is consumed with the command, so that it is not executed as a command of its own: `EM` would open a drawer and `LF` would feed a line. |
-| other bytes below `0x20` | — | Skipped | Everything that is not `LF`, `CR`, `CAN`, `BEL`, `FS`, `SUB`, `EM` or `ESC` is ignored, the way a printer ignores it. `HT` falls in here. |
+| `ESC FF n` | execute a raster mode | Rendered | `ESC FF NUL` runs the FF mode, `ESC FF EOT` the EOT mode and `ESC FF EM` the EM mode: the raster image buffer is printed and, when the stored mode cuts, a `cut` item follows it, see [Raster mode](#raster-mode). Any other mode byte is reported, and it is consumed with the command either way, so that it is not executed as a command of its own: `EM` would open a drawer and `LF` would feed a line. |
+| `HT` | horizontal tab | Rendered | Moves the cursor to the next tab stop, see [Alignment and position](#alignment-and-position). |
+| other bytes below `0x20` | — | Skipped | Everything that is not `HT`, `LF`, `CR`, `CAN`, `BEL`, `FS`, `SUB`, `EM` or `ESC` is ignored, the way a printer ignores it. |
 
 <br>
 
@@ -75,12 +77,13 @@ A Star command is `ESC` and a command byte, or `ESC GS` or `ESC RS` and a comman
 | `ESC E` | bold on | Rendered | Drawn as overstrike, the glyph twice with a one dot horizontal offset, which is what the print head does. |
 | `ESC F` | bold off | Rendered | |
 | `ESC - n` | underline | Rendered | `0` off, `1` on, and the ASCII digits `48` and `49` for the same two. The Star underline is one dot thick, there is no second thickness. Any other value leaves the underline as it was. |
+| `ESC _ n` | upperline | Rendered | The same values, drawn along the top of the cell the way the underline is drawn along the bottom, one dot thick and across the spaces between the characters. An inverted cell gets no upperline, the same rule the underline follows. |
 | `ESC 4` | invert on | Rendered | The cell is drawn white on black; the space the line spacing leaves below the line stays white. |
 | `ESC 5` | invert off | Rendered | |
 | `ESC i h w` | character size | Rendered | The height multiplier first and the width multiplier second, both the value plus one, so `0` to `5` and the ASCII digits `48` to `53` give a multiplier of 1 to 6. A value outside that range leaves the size as it was, as a Star printer does, rather than clipping to six: the multipliers of seven and eight that `GS ! n` of ESC/POS carries have no value in this command. Glyphs are scaled by repeating dots. |
 | `ESC RS F n` | font | Rendered | `0` or `48` font A, 12 by 24 dots, `1` or `49` font B, 9 by 24 dots in the Star profile and 9 by 17 in the Epson profile. Font C, `2`, has no glyphs here and leaves the font as it was. |
-| `ESC W n` | character expansion, double width | Reported | [Section 12](#not-supported-yet). |
-| `ESC h n` | character height | Reported | [Section 12](#not-supported-yet). |
+| `ESC W n` | character expansion, double width | Rendered | `1` or `49` is double width, `0` or `48` is back to one. Any other value leaves the width as it was. |
+| `ESC h n` | character height | Rendered | The multiplier is the value plus one, the way `ESC i` counts it, so `1` is double height and `0` is back to one, and the ASCII digits `48` to `53` do the same. A value outside that range leaves the height as it was. **The multiplier of the value plus one is the StarPRNT reading of this command; the Star Line Mode documentation describes it as a double height switch, where `0` and `1` mean the same thing as here.** |
 | `ESC ( n` | select character expansion | Reported | |
 | `ESC ) n` | cancel character expansion | Reported | |
 | `ESC RS C n` | character style | Reported | |
@@ -112,9 +115,11 @@ Runs of blank rows of at least `feedThreshold` dots become `feed` items and spli
 | Command | Name | Status | Notes |
 |---|---|---|---|
 | `ESC GS a n` | alignment | Rendered | `0` or `48` left, `1` or `49` centre, `2` or `50` right. Applied when the line is committed, over the free width of the line, and to blocks when they are drawn. Any other value leaves the alignment as it was. |
-| `ESC D n1..nk NUL` | horizontal tab positions | Reported | Consumed up to the `NUL`. [Section 12](#not-supported-yet). |
-| `ESC l n` | left margin | Reported | [Section 12](#not-supported-yet). |
-| `ESC Q n` | right margin | Reported | [Section 12](#not-supported-yet). |
+| `HT` | horizontal tab | Rendered | Moves the cursor to the first tab stop beyond it. A tab with no stop behind it does nothing, and neither does one when every stop was cancelled. A stop that lies outside the print area puts the cursor one dot beyond the area, so that the character behind the tab wraps to a new line. |
+| `ESC D n1..nk NUL` | horizontal tab positions | Rendered | Up to 32 stops, each `n` times the width of a character of the font that is current when the command arrives, which is the cell of that font: this language has no command that sets a character spacing. The stops have to ascend, one that does not ends the list. `ESC D NUL` cancels every stop, after which `HT` does nothing at all, and `ESC @` puts the default back, a stop every eight characters of font A. |
+| `ESC l n` | left margin | Rendered | The left margin, `n` characters of the current font. The command is only effective at the beginning of a line: a line that already holds characters, or whose cursor was moved, makes the printer drop it, and this renderer drops it too. |
+| `ESC Q n` | right margin | Rendered | The column the print area ends at, counted from the left edge of the paper, so the area is `n` minus the left margin characters wide. It is only effective at the beginning of a line, like `ESC l`. A value that is not beyond the left margin leaves the area at the paper minus the left margin, which is where a printer without a right margin prints. Wrapping, the alignment and the tab stops all work inside the area. **That the right margin is a column rather than a width is the reading that makes `ESC l` and `ESC Q` line up with `GS L` and `GS W` of ESC/POS; no hardware check settled it.** |
+| `ESC SP n` | right side character spacing | Reported | Consumed with one argument byte, so that the stream stays in sync, and reported. **The Star Line Mode specification text that was available here does not define this command at all, so neither its length nor its effect is settled: the one argument byte is a best effort and nothing is rendered.** |
 | `ESC RS A n` | print area | Reported | |
 | `ESC GS \ n1 n2` | vertical position | Reported | |
 
@@ -125,7 +130,7 @@ Runs of blank rows of at least `feedThreshold` dots become `feed` items and spli
 | Command | Name | Status | Notes |
 |---|---|---|---|
 | `ESC GS t n` | select codepage | Rendered | `n` is looked up in the `codepageMapping` the renderer was built with, which has to be the mapping the encoder used. The printer starts in entry `0` of that mapping, the Star specific standard character set, and `ESC @` returns to it; an unknown number lands there as well, and so does a codepage the codepage encoder does not implement. |
-| `ESC R n` | international character set | Reported | [Section 12](#not-supported-yet). |
+| `ESC R n` | international character set | Rendered | Sets `0` to `13`: USA, France, Germany, United Kingdom, Denmark I, Sweden, Italy, Spain I, Japan, Norway, Denmark II, Spain II, Latin America and Korea. The set replaces the twelve code points `0x23`, `0x24`, `0x40`, `0x5B`, `0x5C`, `0x5D`, `0x5E`, `0x60`, `0x7B`, `0x7C`, `0x7D` and `0x7E`, after the codepage decoding and only for those twelve bytes. `ESC @` goes back to the set that replaces nothing. **Star numbers these sets the way Epson does and the renderer uses the Epson table for them; Star also defines sets above 13, and those tables are not in the specification text that was available here, so a number above 13 leaves the set as it was.** |
 | `ESC c n` | select character set | Reported | |
 
 <br>
@@ -208,7 +213,39 @@ A symbol never holds fewer than three data codewords: one codeword of data and t
 | `ESC L nL nH d..` | bit image, fine density | Rendered | A strip of eight rows, one byte per column, with the number of data bytes in the two length bytes. One dot per column. |
 | `ESC K nL nH d..` | bit image, normal density | Rendered | The same, but every column is printed twice, so the image keeps its proportions at half the resolution. |
 | `ESC k nL nH d..` | bit image, quadruple density | Reported | Consumed with its length. Its horizontal scale has no obvious reading, so it draws nothing. [Section 13](#not-supported-yet). |
-| `ESC * r ..` | raster mode group | Reported | The raster commands of the TSP100 family, `ESC * r R`, `A`, `B`, `C`, `a` and `b`, the margins `ESC * r m l n NUL` and `ESC * r m r n NUL`, and the commands that carry their parameter as ASCII digits up to a `NUL`. Each is consumed with its own length. An `ESC *` that is not followed by an `r` is consumed as one argument byte. [Section 12](#not-supported-yet). |
+| `ESC * r ..` | raster mode group | Rendered | The raster commands of the TSP100 family, see [Raster mode](#raster-mode). An `ESC *` that is not followed by an `r` is consumed as one argument byte and reported. |
+
+<br>
+
+### Raster mode
+
+Raster mode is a second way to print, and the only one a TSP100 has: rows of dots go into an image buffer and an execute command prints the buffer, feeds and cuts. The renderer reads it, so a job that a driver built from the items of this renderer with [StarGraphicsPrinterEncoder](https://github.com/NielsLeenheer/StarGraphicsPrinterEncoder) renders back to the receipt it was made from.
+
+Two rules of the mode shape the parsing. A setting is ignored while data is in the image buffer, so a job stores the mode of a cut before it sends the rows of that segment. And an execute command on an empty buffer does nothing at all, so a job that has to cut without rows sends one blank row first.
+
+| Command | Name | Status | Notes |
+|---|---|---|---|
+| `ESC * r R` | initialize raster mode | Rendered | Throws the image buffer away and puts the margins and the modes back to their initial values. |
+| `ESC * r A` | enter raster mode | Rendered | The same, and `b` and `k` are the row commands from here on instead of the letters b and k. |
+| `ESC * r B` | quit raster mode | Rendered | Prints what is left in the buffer, performing the EOT mode, and leaves raster mode. That is the specification itself, not a reading: raster mode ends by executing the EOT mode when raster data still remains in the image buffer, so a job that quits with rows in the buffer and the initial mode of a model with a cutter cuts the paper. |
+| `ESC * r C` | clear raster data | Rendered | Throws the image buffer away without printing it. |
+| `b n1 n2 d..` | raster data with a line feed | Rendered | One row of `n1 + n2 * 256` bytes of dots, eight dots per byte, placed at the left margin of the raster and padded with white to the width of the paper. Data is written into the row with an OR, and the position moves to the next row. A row that is wider than the paper is cut off. The rows are drawn on the paper itself: the left margin and the print area of the line mode, `ESC l` and `ESC Q`, neither shift them nor clip them, only `ESC * r m l` moves them. |
+| `k n1 n2 d..` | raster data | Rendered | The same without the line feed, so the command behind it writes into the same row. |
+| `ESC * r Y n NUL` | move down n dots | Rendered | Moves the position `n` dots down. A row that was being built by a `k` command is the first of those dots, so it is closed and `n` minus one blank rows follow it; with no row in hand the whole `n` are blank rows. They become a `feed` item when the driver supports one. `n` is clamped to 65535, a dot count larger than any paper. |
+| `ESC * r E n NUL` | set the EOT mode | Rendered | The mode `ESC FF EOT` performs. |
+| `ESC * r F n NUL` | set the FF mode | Rendered | The mode `ESC FF NUL` performs. |
+| `ESC * r e n NUL` | set the EM mode | Rendered | The mode `ESC FF EM` performs. |
+| `ESC FF NUL`, `ESC FF EOT`, `ESC FF EM` | execute a mode | Rendered | Prints the image buffer and cuts when the stored mode says so: `8` and `9` are a full cut, `12` and `13` a partial one, and `3`, which feeds to the tear bar of a model without a cutter, is read as a partial cut as well, because a tear bar is the closest thing to a cut the item stream has. `0`, `1` and `2` print without cutting, and so does every mode the table does not define. A printer with a cutter starts at `13`, which is the mode a job that sets none is read with. An execute command with an empty buffer does nothing. |
+| `ESC * r D n NUL` | drive drawer | Rendered | `1` opens the first drawer, `2` the second and `3` both, and `0` opens none. The times are the ones of the line mode commands, so `ESC BEL` still sets the width of the first drawer and the second one is fixed at 200 ms on and 200 ms off. The specification has the printer ignore this command while data is in the image buffer; the renderer prints that data first instead, so that the paper is right whatever a stream does. |
+| `ESC * r m l n NUL` | left margin of the raster | Rendered | `n` bytes of eight dots from the left edge of the paper. The rows that follow are placed there. |
+| `ESC * r m r n NUL` | right margin of the raster | Parsed | Stored and not used: a row is cut off at the paper, not at the right margin. |
+| `ESC * r P n NUL` | page length | Parsed | The paper of the renderer has no pages. |
+| `ESC * r Q n NUL` | print quality | Parsed | |
+| `ESC * r t n NUL` | top margin | Parsed | |
+| `ESC * r K n NUL` | print colour | Parsed | The second colour of a two colour paper roll. |
+| `ESC * r a`, `ESC * r b` | start and end a block | Parsed | The command emulator mode of the specification. |
+
+Rows that are still in the image buffer when the stream ends are printed, so that a job that forgot its execute command is not lost.
 
 <br>
 
@@ -238,21 +275,14 @@ These commands change nothing about the paper of the receipt that is being rende
 | `ESC RS a n` | print start control | Reported | |
 | `ESC RS d n` | print density | Reported | |
 | `ESC RS r n` | print speed | Reported | |
+| `ESC GS BEL m n1 n2` | buzzer | Reported | Three argument bytes. The buzzer is not part of the paper and the item stream has no sound, so it is reported and nothing happens. |
+| `ESC GS EM DC1 m n1 n2`, `ESC GS EM DC2 m n1 n2` | buzzer | Reported | Four argument bytes, the `DC1` or `DC2` included. |
 
 <br>
 
 ### Not supported yet
 
 These are the common StarPRNT and Star Line Mode commands the renderer parses but does not render, and what is planned for them. The sections are the ones of the [implementation plan](implementation-plan.md).
-
-**Section 12, text layout.**
-
-- `ESC W n` double width and `ESC h n` double height, setting the same size state that `ESC i` sets.
-- `ESC _ n` upperline, drawn along the top rows of the cell the way the underline is drawn along the bottom.
-- `ESC l n` left margin and `ESC Q n` right margin, in characters of the current font.
-- `ESC R n` international character set, with Star's own table.
-- The raster mode as a renderable input: `ESC * r A` and `ESC * r R` to reset the raster state, `b` and `k` for a row with and without a feed, `ESC * r Y n NUL` to feed rows, `ESC * r E` and `F` to store the modes, `ESC FF NUL` and `ESC FF EOT` to flush and emit a cut item where the stored mode cuts, `ESC * r D n NUL` for a pulse item, and `ESC * r B` to leave raster mode. With this the renderer reproduces what a TSP100 prints from the USB driver's wrapper.
-- The buzzer commands `ESC GS BEL`, `ESC GS EM DC1` and `ESC GS EM DC2`, to be consumed with their lengths and reported.
 
 **Section 13, images.**
 
@@ -269,4 +299,5 @@ These are the common StarPRNT and Star Line Mode commands the renderer parses bu
 - User defined characters: glyphs downloaded into the printer.
 - NV logos: images stored in the printer, which the renderer cannot draw. `ESC FS p` will report an `unknown` item and print nothing.
 - Status and settings commands, `ESC GS ETX`, `ESC GS #`, `ESC GS b`, `ESC GS c`, `ESC RS a`, `ESC RS d`, `ESC RS r` and the rest of [Printer state and status](#printer-state-and-status): there is no channel back to the host, and the settings do not change the paper.
+- The buzzer, `ESC GS BEL` and `ESC GS EM`: the item stream carries paper, cuts and drawers, and no sound.
 - Maxicode and the composite symbologies, which this command set has no selector for in anything the renderer parses.

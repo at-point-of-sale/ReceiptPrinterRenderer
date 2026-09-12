@@ -174,3 +174,41 @@ describe('parity between the renderers', function() {
     });
   }
 });
+
+describe('parity of the hand assembled fixtures', function() {
+  /*
+      The fixtures of test/tools/make-fixtures.js that are written by hand
+      exist in the language that has the command, so only the ones that exist
+      in both are compared here: the print mode against the individual Star
+      commands, the international character sets both languages number the same
+      way, the tab stops, which are the same command in both, and the margins,
+      which ESC/POS counts in dots and StarPRNT in characters.
+  */
+
+  const shared = names('esc-pos/raw').filter((name) => names('star-prnt/raw').includes(name));
+
+  it('should have fixtures in both languages to compare', function() {
+    assert.deepEqual(shared, ['international', 'margins', 'print-mode', 'tabs']);
+  });
+
+  for (const name of shared) {
+    it(`should render ${name} the same in both languages`, function() {
+      const left = new EscPosRenderer(OPTIONS).render(fixture('esc-pos/raw', name).bytes);
+      const right = new StarPrntRenderer(OPTIONS).render(fixture('star-prnt/raw', name).bytes);
+
+      const paper = {
+        'esc-pos': stitch(left, {width: WIDTH}),
+        'star-prnt': stitch(right, {width: WIDTH}),
+      };
+
+      if (dots(paper['esc-pos']) !== dots(paper['star-prnt'])) {
+        assert.fail(
+            `${name} renders differently in the two languages\n` +
+          diff(paper['star-prnt'], paper['esc-pos']),
+        );
+      }
+
+      assert.deepEqual(commands(right), commands(left));
+    });
+  }
+});

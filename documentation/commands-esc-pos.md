@@ -32,7 +32,7 @@ This page lists every ESC/POS command `EscPosRenderer` recognises, what it does 
 
 The renderer emulates an Epson ESC/POS printer. It interprets the bytes the way the firmware does, including the cases where the firmware prints nothing at all: a barcode with invalid data, a symbol wider than the paper, an argument outside the range of its command. It does not improve on the printer, so `ESC 4` italic is ignored exactly as an Epson ignores it.
 
-It deliberately differs from the hardware in a few places, each of them because the behaviour is not on the wire and no hardware check settled it. They are marked in the notes below, and these are all of them: the four dot gap between the bars of a barcode and its human readable text, the approximations of `ESC J` and `ESC d`, the vertical motion unit of `GS P`, a QR model 1 drawn as a model 2 symbol, the basic 43 character set of Code 93, and the minimum of three data codewords of a PDF417 symbol.
+It deliberately differs from the hardware in a few places, each of them because the behaviour is not on the wire and no hardware check settled it. They are marked in the notes below, and these are all of them: the four dot gap between the bars of a barcode and its human readable text, the approximations of `ESC J` and `ESC d`, the default horizontal motion unit of `GS P`, a QR model 1 drawn as a model 2 symbol, the basic 43 character set of Code 93, the minimum of three data codewords of a PDF417 symbol, the placeholder cells of the Kanji group, the initial code system of `FS C`, `FS ( C` and with it UTF-8 not being decoded, sets 16 and 17 of `ESC R` replacing nothing, the feed order of `ESC { n`, and the argument lengths of `DLE DC4 3` and `DLE DC4 7`.
 
 <br>
 
@@ -59,8 +59,11 @@ Every command in the tables below knows how many argument bytes it has, so a com
 | `LF` | line feed | Rendered | Commits the line that is being composed and advances the paper. |
 | `CR` | carriage return | Skipped | Does not move the paper. The encoder ends every line with `LF CR`. |
 | `ESC @` | initialize | Rendered | Resets style, font, alignment, line spacing, motion units, codepage and the stored barcode, QR code and PDF417 parameters. It also discards a half composed line, because the command initializes the line buffer along with the printer. Rows that were already committed stay on the paper, the command does not flush. |
-| `FS .` | cancel Kanji mode | Parsed | No effect on rendering, there is no Kanji mode to leave. The encoder sends it right behind `ESC @`. |
-| other bytes below `0x20` | — | Skipped | Everything that is not `LF`, `CR`, `ESC`, `GS` or `FS` is ignored, the way a printer ignores it. `HT` and the `DLE` real time commands fall in here: their bytes are read one by one and ignored, and an argument byte of `0x20` or above would print as a character. |
+| `HT` | horizontal tab | Rendered | Moves the cursor to the next tab stop, see [Alignment and position](#alignment-and-position). |
+| `DLE` | real time prefix | Reported | `DLE EOT`, `DLE ENQ` and `DLE DC4` are consumed with their own lengths, see [Printer state and status](#printer-state-and-status). |
+| `FS &` | select Kanji mode | Rendered | The bytes that follow are read as multibyte characters, see [Codepages and character sets](#codepages-and-character-sets). |
+| `FS .` | cancel Kanji mode | Rendered | Back to one byte per character. The encoder sends it right behind `ESC @`, where there is no Kanji mode to leave. |
+| other bytes below `0x20` | — | Skipped | Everything that is not `HT`, `LF`, `CR`, `DLE`, `ESC`, `GS` or `FS` is ignored, the way a printer ignores it. |
 
 <br>
 
@@ -68,15 +71,15 @@ Every command in the tables below knows how many argument bytes it has, so a com
 
 | Command | Name | Status | Notes |
 |---|---|---|---|
-| `ESC E n` | bold | Rendered | Bit 0 of `n`, so every odd value switches it on. Drawn as overstrike, the glyph twice with a one dot horizontal offset, which is what the print head does. |
+| `ESC E n` | bold | Rendered | Bit 0 of `n`, so every odd value switches it on. Drawn as overstrike, the glyph twice with a one dot horizontal offset, which is what the print head does. Emphasis and the double strike of `ESC G` are two settings of the printer, and a cell is drawn bold while either of them is on, so `ESC G 0` does not undo an `ESC E 1`. |
 | `ESC - n` | underline | Rendered | `0` off, `1` one dot thick, `2` two dots thick, along the bottom of the cell and across the spaces between characters. The ASCII digits `48`, `49` and `50` are accepted for the same three. Any other value leaves the underline as it was, instead of throwing. |
 | `ESC 4 n` | italic | Parsed | Ignored, as Epson hardware ignores it. The encoder emits it for `italic()`, so a receipt that asks for italic prints upright, on paper and here. |
 | `GS B n` | invert | Rendered | Bit 0 of `n`. The cell is drawn white on black; the gap the line spacing leaves below the line stays white. |
 | `GS ! n` | character size | Rendered | Width multiplier in the high nibble plus one, height multiplier in the low nibble plus one, both 1 to 8. Bits 3 and 7 are masked off, so there is no value this command refuses. Glyphs are scaled by repeating dots, as a printer scales them. |
 | `ESC M n` | font | Rendered | `0` or `48` font A, 12 by 24 dots, `1` or `49` font B, 9 by 17 dots in the Epson profile and 9 by 24 in the Star profile. Font C, `2` or `50`, has no glyphs here and leaves the font as it was. |
-| `ESC ! n` | print mode | Reported | Font, bold, double height, double width and underline in one byte. [Section 12](#not-supported-yet). |
-| `ESC G n` | double strike | Reported | [Section 12](#not-supported-yet). |
-| `ESC { n` | upside down printing | Reported | [Section 12](#not-supported-yet). |
+| `ESC ! n` | print mode | Rendered | Font, emphasis, double height, double width and underline in one byte: bit 0 font B, bit 3 emphasis, bit 4 double height, bit 5 double width, bit 7 underline. It sets the same state as the individual commands and clears what it does not set, so `ESC ! 0` is plain font A text, with the double strike of `ESC G` as the one exception: that is a setting of its own and bit 3 does not clear it. A `GS !` behind it decides the size, and an `ESC !` behind a `GS !` overrides that size with its two bits. |
+| `ESC G n` | double strike | Rendered | Bit 0 of `n`, drawn as bold. A print head strikes the same dots twice, which is not visible on a thermal printer; the overstrike of bold is the closest thing on paper and it is what the firmware of a thermal printer does with the command. It is a setting of its own next to the emphasis of `ESC E` and bit 3 of `ESC !`, and the cell is bold while either of them is on. |
+| `ESC { n` | upside down printing | Rendered | Bit 0 of `n`. Every line that is committed while it is on, blocks included, is rotated by 180 degrees over the full width of the paper, so a left aligned line comes out at the right edge upside down. **The order in which the lines are fed does not change, which is a simplification: a printer holds the whole page and prints it bottom up, which needs the page mode this renderer does not have.** |
 | `ESC V n` | rotate 90 degrees | Reported | |
 | `ESC r n` | print colour | Reported | The second colour of a two colour paper roll. |
 
@@ -105,13 +108,14 @@ Runs of blank rows of at least `feedThreshold` dots become `feed` items and spli
 | Command | Name | Status | Notes |
 |---|---|---|---|
 | `ESC a n` | alignment | Rendered | `0` or `48` left, `1` or `49` centre, `2` or `50` right. Applied when the line is committed, over the free width of the line, and to blocks when they are drawn. Any other value leaves the alignment as it was. |
-| `GS P x y` | motion units | Rendered | Only the vertical unit is tracked, it is what `ESC 3` and `ESC J` are counted in. `GS P 0 0` returns to the profile default, two units per dot on Epson and one on Star. Any other `y` is read as one unit per dot, because the renderer does not know the resolution of the printer it emulates, and setting the unit to that resolution is the only thing the encoder ever does with this command. |
-| `ESC SP n` | right side character spacing | Reported | [Section 12](#not-supported-yet). |
-| `ESC $ nL nH` | absolute print position | Reported | [Section 12](#not-supported-yet). |
-| `ESC \ nL nH` | relative print position | Reported | [Section 12](#not-supported-yet). |
-| `ESC D n1..nk NUL` | horizontal tab positions | Reported | Consumed up to the `NUL`. [Section 12](#not-supported-yet). |
-| `GS L nL nH` | left margin | Reported | [Section 12](#not-supported-yet). |
-| `GS W nL nH` | print area width | Reported | [Section 12](#not-supported-yet). |
+| `GS P x y` | motion units | Rendered | The vertical unit is what `ESC 3` and `ESC J` are counted in, and it is tracked as the number of units in one dot: `GS P 0 0` returns to the profile default, two units per dot on Epson and one on Star, and any other `y` is read as one unit per dot, because the renderer does not know the resolution of the printer it emulates and setting the unit to that resolution is the only thing the encoder ever does with this command. The horizontal unit is what `ESC SP`, `ESC $`, `ESC \\`, `GS L` and `GS W` are counted in, and it is the other way round, the number of dots in one unit: one dot until the command sets it, and `dpi / x` dots afterwards, with the `dpi` of the profile, 203 for both built in profiles. `GS P 0 0` returns to one dot per unit. **One dot per unit is a simplification: an Epson starts at 1/180 inch horizontally, which is 1.13 dots.** |
+| `ESC SP n` | right side character spacing | Rendered | `n` horizontal motion units of white behind every character, scaled with the width multiplier, as the printer scales it. The space is not part of the width the alignment centres, so a centred line is centred on its characters, and it is part of the width of a character for the tab stops of `ESC D` and for the default stops. |
+| `ESC $ nL nH` | absolute print position | Rendered | `nL + nH * 256` horizontal motion units from the left margin. A position beyond the print area is ignored. Cells that were already placed stay where they are, so moving back and printing again overprints, the way a printer overprints. |
+| `ESC \ nL nH` | relative print position | Rendered | The same, relative to the cursor and signed: a value above 32767 is the negative distance below it, which moves back towards the left margin. A distance that lands outside the print area is ignored. |
+| `HT` | horizontal tab | Rendered | Moves the cursor to the first tab stop beyond it. A tab with no stop behind it does nothing, and neither does one when every stop was cancelled. A stop that lies outside the print area puts the cursor one dot beyond the area instead, so that the character behind the tab wraps to a new line, which is what the reference of this command describes. |
+| `ESC D n1..nk NUL` | horizontal tab positions | Rendered | Up to 32 stops, each `n` times the width of a character of the font that is current when the command arrives, so a stop is a number of dots from then on. A character is as wide as its cell plus the right side spacing of `ESC SP`, which is the unit of the reference. The stops have to ascend, one that does not ends the list. `ESC D NUL` cancels every stop, after which `HT` does nothing at all; `ESC @` puts the default back, a stop every eight characters of font A. |
+| `GS L nL nH` | left margin | Rendered | `nL + nH * 256` horizontal motion units from the left edge of the paper. The command is only effective at the beginning of a line, as the reference says: a line that already holds characters, or whose cursor was moved, makes the printer drop the command, and this renderer drops it too. |
+| `GS W nL nH` | print area width | Rendered | The width of the print area in horizontal motion units, only effective at the beginning of a line like `GS L`. A width that does not fit next to the left margin is clamped to the paper. Wrapping, the alignment and the tab stops all work inside the print area, so a centred line is centred between the margins. |
 | `GS T n` | print position at the top of the line | Reported | |
 | `GS A m n` | print position adjustment | Reported | |
 | `ESC L` | select page mode | Reported | Page mode is not modelled, see [Not supported yet](#not-supported-yet). |
@@ -128,19 +132,20 @@ Runs of blank rows of at least `feedThreshold` dots become `feed` items and spli
 | Command | Name | Status | Notes |
 |---|---|---|---|
 | `ESC t n` | select codepage | Rendered | `n` is looked up in the `codepageMapping` the renderer was built with, which has to be the mapping the encoder used. An unknown number falls back to cp437, and so does a codepage the codepage encoder does not implement, `cp885` of the Bixolon mapping for one: a printer without that codepage prints the bytes with the one it has, and a receipt is never lost over one character. The printer starts in cp437 and `ESC @` returns to it. |
-| `ESC R n` | international character set | Reported | Replaces twelve code points per set. [Section 12](#not-supported-yet). |
+| `ESC R n` | international character set | Rendered | Sets 0 to 17: USA, France, Germany, United Kingdom, Denmark I, Sweden, Italy, Spain I, Japan, Norway, Denmark II, Spain II, Latin America, Korea, Slovenia and Croatia, China, Vietnam and Arabia. The set replaces the twelve code points `0x23`, `0x24`, `0x40`, `0x5B`, `0x5C`, `0x5D`, `0x5E`, `0x60`, `0x7B`, `0x7C`, `0x7D` and `0x7E`, after the codepage decoding and only for those twelve bytes, so the rest of the codepage is untouched. A number the command does not define leaves the set as it was, and `ESC @` goes back to the USA set, which replaces nothing. **Sets 16 and 17 are in the table of the reference but their replacements are not in any specification text that was available here, so both print the characters of set 0.** The won sign of the Korean set has no glyph in the built in font and prints as the fallback box. |
 | `ESC % n` | select user defined character set | Reported | |
 | `ESC ? n` | cancel user defined character | Reported | |
-| `FS &` | select Kanji mode | Reported | The whole `FS` Kanji group is consumed with the lengths of the specification and reported. [Section 12](#not-supported-yet). |
-| `FS C n` | Kanji code system | Reported | |
-| `FS ! n` | multi byte print mode | Reported | |
-| `FS - n` | multi byte underline | Reported | |
-| `FS S n1 n2` | Kanji character spacing | Reported | |
-| `FS W n` | quadruple size Kanji | Reported | |
+| `FS &` | select Kanji mode | Rendered | The bytes that follow are read as multibyte characters: a lead byte and the byte behind it are one character, which is drawn as two cells of the fallback glyph. There is no CJK font here, so the placeholder is what keeps the layout right; **two fallback cells is a choice of this renderer, a printer draws the glyph in the same 24 dots.** A lead byte at the very end of the stream is not a pair and prints as a character of its own. |
+| `FS C n` | Kanji code system | Rendered | `0` or `48` JIS, where every pair of bytes from `0x21` to `0x7E` is one character, `1` or `49` Shift JIS, where a lead byte is `0x81` to `0x9F` or `0xE0` to `0xFC`. A value the command does not define leaves the code system as it was. **The printer starts in Shift JIS here, and the initial value differs per model in the reference, so a stream that relies on the model's default and sends no `FS C` may be read in the other system.** |
+| `FS ! n` | multi byte print mode | Parsed | The size and the underline of the multibyte characters. This renderer draws them as placeholder cells in the style of the single byte text, so the command changes nothing on paper. |
+| `FS - n` | multi byte underline | Parsed | The same. |
+| `FS S n1 n2` | Kanji character spacing | Parsed | The left and the right space of a multibyte character, in horizontal motion units. |
+| `FS W n` | quadruple size Kanji | Parsed | |
+| `FS ( C pL pH fn ..` | character encode system | Reported | The group that selects UTF-8 on the models that have it. Consumed with the length it carries, so the stream stays in sync. **Its layout is not settled by a specification text that was available here, so nothing is rendered for it and a stream in UTF-8 prints the bytes through the current codepage.** |
 | `FS 2 c1 c2 d1..dk` | define user defined Kanji | Reported | The number of data bytes depends on the Kanji font of the printer, which the stream does not say, so the table assumes the 32 bytes of the 16 by 16 font. The encoder never sends this command. |
 | `FS ? c1 c2` | cancel user defined Kanji | Reported | |
 
-`FS .`, the command that leaves Kanji mode, is the one command of this group that is parsed rather than reported, see [Text and control](#text-and-control).
+`FS .` leaves Kanji mode again, see [Text and control](#text-and-control).
 
 <br>
 
@@ -240,8 +245,8 @@ A symbol never holds fewer than three data codewords: one codeword of data and t
 |---|---|---|---|
 | `GS V n` | cut | Rendered | `1`, `49`, `66` and `104` are a partial cut, every other value a full one. `65`, `66`, `103` and `104` carry a second argument, the paper to feed before cutting, which is consumed and ignored: the blank lines the encoder feeds before a cut are already on the image. Emits a `cut` item, and the lines that are finished become an image item in front of it. |
 | `ESC p m t1 t2` | pulse | Rendered | Drawer `m & 1`, `t1 * 2` milliseconds on and `t2 * 2` off. Emits a `pulse` item, which flushes the same way a cut does. The encoder writes its default of 100 and 500 ms as `ESC p 0 50 250`. |
-| `ESC i` | full cut, legacy | Reported | [Section 12](#not-supported-yet). |
-| `ESC m` | partial cut, legacy | Reported | [Section 12](#not-supported-yet). |
+| `ESC i` | full cut, legacy | Rendered | The legacy command without arguments. Emits a `cut` item with the value `full`. |
+| `ESC m` | partial cut, legacy | Rendered | The same, with the value `partial`. |
 
 A half composed line stays in the painter and continues behind the command, which is what a printer does when it fires the drawer before the pending line prints. The encoder always finishes the line first, so in practice the line is empty.
 
@@ -270,26 +275,15 @@ These commands change nothing about the paper of the receipt that is being rende
 | `GS :` | start or end macro definition | Reported | |
 | `FS g 1 m a1..a4 nL nH d..` | write to the user memory | Reported | Consumed with the data length it carries. |
 | `FS g 2 m a1..a4 nL nH` | read from the user memory | Reported | |
+| `DLE EOT n` | transmit real time status | Reported | One argument byte, and two for `DLE EOT 7 n` and `DLE EOT 8 n`. |
+| `DLE ENQ n` | real time request | Reported | |
+| `DLE DC4 fn ..` | real time request | Reported | `fn 1 m t` generates a pulse, `fn 2 a b` runs the power off sequence, `fn 8` carries the seven fixed bytes of the clear buffer request, and `fn 3` and `fn 7` one parameter byte each. Anything else is read as the function byte alone. **The lengths of `fn 3` and `fn 7` are the common ones, they are not settled by a specification text that was available here.** The pulse of `fn 1` is reported rather than rendered: it is a real time command the printer performs at once, next to the receipt rather than in it. |
 
 <br>
 
 ### Not supported yet
 
 These are the common ESC/POS commands the renderer parses but does not render, and what is planned for them. The sections are the ones of the [implementation plan](implementation-plan.md).
-
-**Section 12, text layout.**
-
-- `ESC ! n` print mode: font, bold, double height, double width and underline in one byte, setting the same state as the individual commands.
-- `ESC G n` double strike, which will render as bold.
-- `ESC R n` international character set: twelve code points replaced per set, applied after the codepage decoding.
-- `ESC { n` upside down printing: every committed line, blocks included, rotated by 180 degrees.
-- `ESC SP n` right side character spacing, in horizontal motion units, scaled with the width multiplier.
-- `HT` and `ESC D n1..nk NUL` tab stops, in character widths of the current font, by default every eight characters.
-- `ESC $ nL nH` absolute and `ESC \ nL nH` relative print position, in horizontal motion units.
-- `GS L nL nH` left margin and `GS W nL nH` print area width, applied at the start of the next line.
-- `ESC i` and `ESC m`, the legacy full and partial cuts.
-- The `FS` Kanji group, `FS &`, `FS .`, `FS C`, `FS !`, `FS -`, `FS S` and `FS W`: a lead byte and its trail byte consumed as one character and drawn as a double width placeholder cell, so that the layout stays right without a CJK font, and UTF-8 decoded properly where `FS C` selects it.
-- `DLE EOT n`, `DLE ENQ n` and `DLE DC4 fn ..`, the real time commands, to be consumed with their exact lengths instead of byte by byte.
 
 **Section 13, images.**
 
@@ -302,8 +296,8 @@ These are the common ESC/POS commands the renderer parses but does not render, a
 **Not planned.**
 
 - Page mode, `ESC L`, `ESC S`, `ESC T`, `ESC W`, `GS $` and `GS \`: the printer composes a page in memory and prints it in one go, which is a second layout engine next to the line one.
-- CJK fonts. The Kanji group gets placeholder cells, not glyphs; a receipt that needs real CJK text needs a printer with the font.
+- CJK fonts. The Kanji group draws placeholder cells, not glyphs; a receipt that needs real CJK text needs a printer with the font. UTF-8 through `FS ( C` is not decoded either, for the same reason and because the layout of that group is not settled here.
 - User defined characters, `ESC %`, `ESC ?`, `FS 2` and `FS ?`: glyphs downloaded into the printer.
 - NV logos: images stored in the printer, which the renderer has never seen and cannot draw.
-- Status and settings commands, `GS I`, `GS r`, `GS a`, `ESC u`, `ESC v`, `GS j`, `GS z`, `FS g` and the rest of [Printer state and status](#printer-state-and-status): there is no channel back to the host, and the settings do not change the paper.
+- Status and settings commands, `GS I`, `GS r`, `GS a`, `ESC u`, `ESC v`, `GS j`, `GS z`, `FS g`, the `DLE` real time commands and the rest of [Printer state and status](#printer-state-and-status): there is no channel back to the host, and the settings do not change the paper.
 - Maxicode and the composite symbologies, the other selectors of the `GS ( k` group.

@@ -1,0 +1,16 @@
+[
+  {
+    "type": "feed",
+    "height": 24
+  },
+  {
+    "type": "cut",
+    "value": "partial"
+  },
+  {
+    "type": "pulse",
+    "device": 0,
+    "on": 100,
+    "off": 500
+  }
+]

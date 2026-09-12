@@ -1,6 +1,7 @@
 import EscPosRenderer from '../src/renderers/esc-pos.js';
 import Painter from '../src/painter.js';
 import Bitmap from '../src/bitmap.js';
+import Font from '../src/font.js';
 import {stitch} from '../src/formats/stitch.js';
 import {commands} from './helpers/items.js';
 import {names, fixture} from './helpers/fixtures.js';
@@ -79,6 +80,44 @@ function ink(bitmap, top, bottom) {
   }
 
   return result;
+}
+
+/**
+ * The runs of columns that carry ink in a range of rows, so that a test can
+ * check where the characters of a line landed
+ *
+ * @param  {object}   bitmap   The bitmap
+ * @param  {number}   top      First row
+ * @param  {number}   bottom   Row after the last one
+ * @return {object[]}          The runs, {start, end}
+ */
+function columnsOf(bitmap, top, bottom) {
+  const runs = [];
+
+  let start = -1;
+
+  for (let x = 0; x < bitmap.width; x++) {
+    let inked = false;
+
+    for (let y = top; y < bottom && !inked; y++) {
+      inked = Bitmap.getPixel(bitmap, x, y) === 1;
+    }
+
+    if (inked && start < 0) {
+      start = x;
+    }
+
+    if (!inked && start >= 0) {
+      runs.push({start, end: x - 1});
+      start = -1;
+    }
+  }
+
+  if (start >= 0) {
+    runs.push({start, end: bitmap.width - 1});
+  }
+
+  return runs;
 }
 
 const ESC = 0x1b;
@@ -1108,6 +1147,600 @@ describe('EscPosRenderer', function() {
         assert.isTrue(split.every((item) => item.type !== 'image' || item.height <= 41));
         assert.isAtLeast(split.length, whole.length);
         assert.equal(dots(stitch(split, {width: WIDTH})), dots(stitch(whole, {width: WIDTH})));
+      });
+    }
+  });
+
+  describe('hand assembled fixtures', function() {
+    for (const name of names('esc-pos/raw')) {
+      describe(name, function() {
+        it('should render the paper of the fixture', function() {
+          const expected = fixture('esc-pos/raw', name);
+          const paper = stitch(render(expected.bytes, {commands: COMMANDS}), {width: WIDTH});
+
+          if (dots(paper) !== dots(expected.paper)) {
+            assert.fail(`${name} does not match its fixture\n${diff(paper, expected.paper)}`);
+          }
+        });
+
+        it('should emit the commands of the fixture', function() {
+          const expected = fixture('esc-pos/raw', name);
+
+          assert.deepEqual(commands(render(expected.bytes, {commands: COMMANDS})), expected.commands);
+        });
+      });
+    }
+  });
+
+  describe('ESC ! n, print mode', function() {
+    it('should set the same state as the individual commands', function() {
+      const mode = render(stream(ESC, '@', ESC, '!', 0x39, 'Print mode', LF));
+      const single = render(stream(
+          ESC, '@', ESC, 'M', 1, ESC, 'E', 1, GS, '!', 0x11, 'Print mode', LF,
+      ));
+
+      assert.equal(dots(stitch(mode, {width: WIDTH})), dots(stitch(single, {width: WIDTH})));
+    });
+
+    it('should underline with bit 7', function() {
+      const mode = render(stream(ESC, '@', ESC, '!', 0x80, 'Underlined', LF));
+      const single = render(stream(ESC, '@', ESC, '-', 1, 'Underlined', LF));
+
+      assert.equal(dots(stitch(mode, {width: WIDTH})), dots(stitch(single, {width: WIDTH})));
+    });
+
+    it('should clear what it does not set', function() {
+      const plain = render(stream(ESC, '@', 'Plain', LF));
+      const cleared = render(stream(
+          ESC, '@', ESC, 'E', 1, ESC, '-', 2, ESC, 'M', 1, ESC, '!', 0x00, 'Plain', LF,
+      ));
+
+      assert.equal(dots(stitch(cleared, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+
+    it('should be overridden by a later GS !', function() {
+      const plain = render(stream(ESC, '@', 'Size', LF));
+      const overridden = render(stream(ESC, '@', ESC, '!', 0x30, GS, '!', 0x00, 'Size', LF));
+
+      assert.equal(dots(stitch(overridden, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+  });
+
+  describe('ESC G n, double strike', function() {
+    it('should render as bold', function() {
+      const strike = render(stream(ESC, '@', ESC, 'G', 1, 'Heavy', LF));
+      const bold = render(stream(ESC, '@', ESC, 'E', 1, 'Heavy', LF));
+
+      assert.equal(dots(stitch(strike, {width: WIDTH})), dots(stitch(bold, {width: WIDTH})));
+    });
+
+    it('should switch off with bit 0 clear', function() {
+      const off = render(stream(ESC, '@', ESC, 'G', 1, ESC, 'G', 0, 'Light', LF));
+      const plain = render(stream(ESC, '@', 'Light', LF));
+
+      assert.equal(dots(stitch(off, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+
+    it('should keep the emphasis of ESC E when ESC G is switched off', function() {
+      const both = render(stream(ESC, '@', ESC, 'E', 1, ESC, 'G', 0, 'Heavy', LF));
+      const bold = render(stream(ESC, '@', ESC, 'E', 1, 'Heavy', LF));
+
+      assert.equal(dots(stitch(both, {width: WIDTH})), dots(stitch(bold, {width: WIDTH})));
+    });
+
+    it('should keep the double strike when the emphasis of ESC ! is switched off', function() {
+      const both = render(stream(ESC, '@', ESC, 'G', 1, ESC, '!', 0x00, 'Heavy', LF));
+      const bold = render(stream(ESC, '@', ESC, 'E', 1, 'Heavy', LF));
+
+      assert.equal(dots(stitch(both, {width: WIDTH})), dots(stitch(bold, {width: WIDTH})));
+    });
+
+    it('should print plain text only when both are off', function() {
+      const off = render(stream(ESC, '@', ESC, 'E', 1, ESC, 'G', 1, ESC, 'E', 0, ESC, 'G', 0, 'Light', LF));
+      const plain = render(stream(ESC, '@', 'Light', LF));
+
+      assert.equal(dots(stitch(off, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+  });
+
+  describe('ESC R n, international character set', function() {
+    /* cp437 has the characters the sets below replace with, so the same line
+       can be printed with the set and with the codepage */
+
+    it('should replace the twelve code points of the German set', function() {
+      const german = render(stream(ESC, '@', ESC, 'R', 2, '[\\]{|}~', LF));
+      const cp437 = render(stream(ESC, '@', [0x8e, 0x99, 0x9a, 0x84, 0x94, 0x81, 0xe1], LF));
+
+      assert.equal(dots(stitch(german, {width: WIDTH})), dots(stitch(cp437, {width: WIDTH})));
+    });
+
+    it('should replace only the code points the set changes', function() {
+      const uk = render(stream(ESC, '@', ESC, 'R', 3, 'A#B$C', LF));
+      const cp437 = render(stream(ESC, '@', 'A', [0x9c], 'B$C', LF));
+
+      assert.equal(dots(stitch(uk, {width: WIDTH})), dots(stitch(cp437, {width: WIDTH})));
+    });
+
+    it('should go back to the USA set with ESC R 0', function() {
+      const back = render(stream(ESC, '@', ESC, 'R', 3, ESC, 'R', 0, '#', LF));
+      const plain = render(stream(ESC, '@', '#', LF));
+
+      assert.equal(dots(stitch(back, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+
+    it('should leave the set alone for a number it does not define', function() {
+      const ignored = render(stream(ESC, '@', ESC, 'R', 3, ESC, 'R', 99, '#', LF));
+      const uk = render(stream(ESC, '@', ESC, 'R', 3, '#', LF));
+
+      assert.equal(dots(stitch(ignored, {width: WIDTH})), dots(stitch(uk, {width: WIDTH})));
+    });
+
+    it('should be reset by ESC @', function() {
+      const reset = render(stream(ESC, '@', ESC, 'R', 3, ESC, '@', '#', LF));
+      const plain = render(stream(ESC, '@', '#', LF));
+
+      assert.equal(dots(stitch(reset, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+  });
+
+  describe('ESC { n, upside down printing', function() {
+    it('should rotate every line it prints by 180 degrees', function() {
+      const lines = ['Upside down one', 'Upside down two'];
+
+      const upright = stitch(render(stream(
+          ESC, '@', lines[0], LF, lines[1], LF,
+      )), {width: WIDTH});
+
+      const rotated = stitch(render(stream(
+          ESC, '@', ESC, '{', 1, lines[0], LF, lines[1], LF,
+      )), {width: WIDTH});
+
+      assert.equal(rotated.height, upright.height);
+
+      /* Line by line: the feed order does not change, only the dots of each
+         line box are turned around */
+
+      for (let line = 0; line < lines.length; line++) {
+        const box = Bitmap.extractRows(upright, line * 30, 30);
+        const expected = Bitmap.rotate180(box);
+
+        assert.equal(
+            dots(Bitmap.extractRows(rotated, line * 30, 30)),
+            dots(expected),
+            `line ${line} is not the upright line rotated`,
+        );
+      }
+    });
+
+    it('should rotate a block as well', function() {
+      const image = [GS, 0x76, 0x30, 0, 2, 0, 4, 0, 0xf0, 0x00, 0x90, 0x00, 0x90, 0x00, 0xf0, 0x00];
+
+      const upright = stitch(render(stream(ESC, '@', image)), {width: WIDTH});
+      const rotated = stitch(render(stream(ESC, '@', ESC, '{', 1, image)), {width: WIDTH});
+
+      assert.equal(dots(rotated), dots(Bitmap.rotate180(upright)));
+    });
+
+    it('should stop rotating with ESC { 0', function() {
+      const back = render(stream(ESC, '@', ESC, '{', 1, ESC, '{', 0, 'Upright', LF));
+      const plain = render(stream(ESC, '@', 'Upright', LF));
+
+      assert.equal(dots(stitch(back, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+  });
+
+  describe('ESC SP n, right side character spacing', function() {
+    it('should leave the space behind every character', function() {
+      const paper = stitch(render(stream(ESC, '@', ESC, ' ', 4, 'AAA', LF)), {width: WIDTH});
+      const starts = columnsOf(paper, 0, 24).map((run) => run.start);
+
+      assert.equal(starts.length, 3);
+      assert.equal(starts[1] - starts[0], 16);
+      assert.equal(starts[2] - starts[1], 16);
+    });
+
+    it('should scale the space with the width multiplier', function() {
+      const paper = stitch(render(stream(
+          ESC, '@', ESC, ' ', 4, GS, '!', 0x10, 'AAA', LF,
+      )), {width: WIDTH});
+
+      /* The cell and the space behind it both grow with the multiplier */
+
+      const starts = columnsOf(paper, 0, 48).map((run) => run.start);
+
+      assert.equal(starts.length, 3);
+      assert.equal(starts[1] - starts[0], 32);
+      assert.equal(starts[2] - starts[1], 32);
+    });
+
+    it('should go back to no spacing with ESC SP 0', function() {
+      const back = render(stream(ESC, '@', ESC, ' ', 4, ESC, ' ', 0, 'AAA', LF));
+      const plain = render(stream(ESC, '@', 'AAA', LF));
+
+      assert.equal(dots(stitch(back, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+  });
+
+  describe('HT and ESC D, tab stops', function() {
+    it('should move to the next default stop, every eight characters', function() {
+      const paper = stitch(render(stream(ESC, '@', 'A', 0x09, 'A', 0x09, 'A', LF)), {width: WIDTH});
+      const starts = columnsOf(paper, 0, 24).map((run) => run.start);
+
+      assert.equal(starts.length, 3);
+      assert.equal(starts[1] - starts[0], 96);
+      assert.equal(starts[2] - starts[1], 96);
+    });
+
+    it('should move to the stops of ESC D', function() {
+      const paper = stitch(render(stream(
+          ESC, '@', ESC, 'D', 10, 20, 0x00, 'A', 0x09, 'A', 0x09, 'A', LF,
+      )), {width: WIDTH});
+
+      const starts = columnsOf(paper, 0, 24).map((run) => run.start);
+
+      assert.equal(starts.length, 3);
+      assert.equal(starts[1] - starts[0], 120);
+      assert.equal(starts[2] - starts[1], 120);
+    });
+
+    it('should do nothing when there is no stop behind the cursor', function() {
+      const tabbed = render(stream(ESC, '@', ESC, 'D', 4, 0x00, 'ABCDE', 0x09, 'F', LF));
+      const plain = render(stream(ESC, '@', 'ABCDEF', LF));
+
+      assert.equal(dots(stitch(tabbed, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+
+    it('should wrap to a new line when the stop is outside the print area', function() {
+      const paper = stitch(render(stream(ESC, '@', ESC, 'D', 48, 0x00, 'A', 0x09, 'B', LF)), {width: WIDTH});
+
+      /* The cursor lands one dot beyond the print area, so the character
+         behind the tab starts a line of its own */
+
+      assert.equal(paper.height, 60);
+      assert.equal(ink(paper, 0, 30).min, ink(paper, 30, 60).min);
+    });
+
+    it('should stop reading the stops at one that does not ascend', function() {
+      const mixed = render(stream(ESC, '@', ESC, 'D', 10, 5, 20, 0x00, 'A', 0x09, 'B', 0x09, 'C', LF));
+      const single = render(stream(ESC, '@', ESC, 'D', 10, 0x00, 'A', 0x09, 'B', 0x09, 'C', LF));
+
+      assert.equal(dots(stitch(mixed, {width: WIDTH})), dots(stitch(single, {width: WIDTH})));
+    });
+
+    it('should cancel every stop with ESC D NUL', function() {
+      const cleared = render(stream(ESC, '@', ESC, 'D', 10, 0x00, ESC, 'D', 0x00, 'A', 0x09, 'B', LF));
+      const plain = render(stream(ESC, '@', 'AB', LF));
+
+      assert.equal(dots(stitch(cleared, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+
+    it('should go back to the default stops with ESC @', function() {
+      const reset = render(stream(ESC, '@', ESC, 'D', 0x00, ESC, '@', 'A', 0x09, 'A', LF));
+      const plain = render(stream(ESC, '@', 'A', 0x09, 'A', LF));
+
+      assert.equal(dots(stitch(reset, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+      assert.equal(columnsOf(stitch(plain, {width: WIDTH}), 0, 24).length, 2);
+    });
+
+    it('should count the character spacing in the width of a character', function() {
+      const paper = stitch(render(stream(
+          ESC, '@', ESC, ' ', 4, ESC, 'D', 2, 0x00, 'A', 0x09, 'A', LF,
+      )), {width: WIDTH});
+
+      /* Two characters of twelve dots plus the four dots of ESC SP behind each
+         of them, which is the unit the reference of ESC D counts in */
+
+      const starts = columnsOf(paper, 0, 24).map((run) => run.start);
+
+      assert.equal(starts.length, 2);
+      assert.equal(starts[1] - starts[0], 32);
+    });
+  });
+
+  describe('ESC $ and ESC \\, print position', function() {
+    it('should put the text at the absolute position', function() {
+      const paper = stitch(render(stream(ESC, '@', 'A', ESC, '$', 240, 0, 'A', LF)), {width: WIDTH});
+      const starts = columnsOf(paper, 0, 24).map((run) => run.start);
+
+      assert.equal(starts.length, 2);
+      assert.equal(starts[1] - starts[0], 240);
+    });
+
+    it('should move the cursor by the relative distance', function() {
+      const paper = stitch(render(stream(ESC, '@', 'A', ESC, '\\', 60, 0, 'A', LF)), {width: WIDTH});
+      const starts = columnsOf(paper, 0, 24).map((run) => run.start);
+
+      assert.equal(starts.length, 2);
+      assert.equal(starts[1] - starts[0], 72);
+    });
+
+    it('should move back with a negative distance', function() {
+      const paper = stitch(render(stream(
+          ESC, '@', 'A', ESC, '\\', 60, 0, 'A', ESC, '\\', 0xd0, 0xff, 'A', LF,
+      )), {width: WIDTH});
+
+      /* Three cells at 0, 72 and 36 dots: the last one is 48 dots back from
+         the cursor the second one left behind */
+
+      const starts = columnsOf(paper, 0, 24).map((run) => run.start);
+
+      assert.equal(starts.length, 3);
+      assert.equal(starts[1] - starts[0], 36);
+      assert.equal(starts[2] - starts[1], 36);
+    });
+
+    it('should ignore a position beyond the print width', function() {
+      const beyond = render(stream(ESC, '@', 'A', ESC, '$', 0x40, 0x03, 'B', LF));
+      const plain = render(stream(ESC, '@', 'AB', LF));
+
+      assert.equal(dots(stitch(beyond, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+
+    it('should count the position in the horizontal motion unit of GS P', function() {
+      const paper = stitch(render(stream(
+          ESC, '@', GS, 'P', 180, 180, 'A', ESC, '$', 200, 0, 'A', LF,
+      )), {width: WIDTH});
+
+      /* 200 units of 1/180 inch on a 203 dpi printer is 226 dots */
+
+      const starts = columnsOf(paper, 0, 24).map((run) => run.start);
+
+      assert.equal(starts.length, 2);
+      assert.equal(starts[1] - starts[0], 226);
+    });
+
+    it('should go back to one dot per unit with GS P 0 0', function() {
+      const back = render(stream(
+          ESC, '@', GS, 'P', 180, 180, GS, 'P', 0, 0, 'A', ESC, '$', 240, 0, 'B', LF,
+      ));
+      const plain = render(stream(ESC, '@', 'A', ESC, '$', 240, 0, 'B', LF));
+
+      assert.equal(dots(stitch(back, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+  });
+
+  describe('GS L and GS W, the print area', function() {
+    it('should start the line at the left margin', function() {
+      const margin = stitch(render(stream(ESC, '@', GS, 'L', 24, 0, 'A', LF)), {width: WIDTH});
+      const plain = stitch(render(stream(ESC, '@', 'A', LF)), {width: WIDTH});
+
+      assert.equal(ink(margin, 0, 24).min, ink(plain, 0, 24).min + 24);
+    });
+
+    it('should centre inside the print area', function() {
+      const centred = stitch(render(stream(
+          ESC, '@', GS, 'L', 24, 0, GS, 'W', 0xc8, 1, ESC, 'a', 1, 'AB', LF,
+      )), {width: WIDTH});
+      const plain = stitch(render(stream(ESC, '@', 'AB', LF)), {width: WIDTH});
+
+      assert.equal(ink(centred, 0, 24).min, ink(plain, 0, 24).min + 24 + ((456 - 24) >> 1));
+    });
+
+    it('should right align inside the print area', function() {
+      const right = stitch(render(stream(
+          ESC, '@', GS, 'L', 24, 0, GS, 'W', 0xc8, 1, ESC, 'a', 2, 'A', LF,
+      )), {width: WIDTH});
+      const plain = stitch(render(stream(ESC, '@', 'A', LF)), {width: WIDTH});
+
+      assert.equal(ink(right, 0, 24).max, ink(plain, 0, 24).max + 24 + 456 - 12);
+    });
+
+    it('should wrap at the print area instead of the paper', function() {
+      const items = render(stream(ESC, '@', GS, 'W', 0xc8, 1, 'A'.repeat(39), LF));
+
+      assert.equal(items[0].height, 60);
+    });
+
+    it('should clamp a print area that does not fit on the paper', function() {
+      const clamped = render(stream(ESC, '@', GS, 'W', 0x00, 0x04, ESC, 'a', 2, 'A', LF));
+      const full = render(stream(ESC, '@', ESC, 'a', 2, 'A', LF));
+
+      assert.equal(dots(stitch(clamped, {width: WIDTH})), dots(stitch(full, {width: WIDTH})));
+    });
+
+    it('should be ignored while a line is being composed', function() {
+      const halfway = render(stream(ESC, '@', 'A', GS, 'L', 24, 0, 'A', LF, 'A', LF));
+      const plain = render(stream(ESC, '@', 'AA', LF, 'A', LF));
+
+      assert.equal(dots(stitch(halfway, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+
+    it('should be ignored when the cursor was moved on an empty line', function() {
+      const moved = render(stream(ESC, '@', ESC, '$', 24, 0, GS, 'L', 24, 0, 'A', LF));
+      const plain = render(stream(ESC, '@', ESC, '$', 24, 0, 'A', LF));
+
+      assert.equal(dots(stitch(moved, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+  });
+
+  describe('the Kanji group', function() {
+    it('should draw a Shift JIS character as two placeholder cells', function() {
+      const paper = stitch(render(stream(
+          ESC, '@', FS, '&', FS, 'C', 1, 'A', [0x93, 0xfa], 'A', LF,
+      )), {width: WIDTH});
+
+      /* The two bytes are one character of two cells, so the A behind them
+         starts three cells from the left */
+
+      const starts = columnsOf(paper, 0, 24).map((run) => run.start);
+
+      assert.equal(starts.length, 4);
+      assert.equal(starts[3] - starts[0], 36);
+    });
+
+    it('should draw the placeholder of the fallback glyph', function() {
+      const kanji = stitch(render(stream(ESC, '@', FS, '&', FS, 'C', 1, [0x93, 0xfa], LF)), {width: WIDTH});
+      const fallback = Font.get('12x24').renderGlyph(Font.get('12x24').lookup(0xfffd), {
+        cellWidth: 12, cellHeight: 24,
+      });
+
+      for (let cell = 0; cell < 2; cell++) {
+        for (let y = 0; y < 24; y++) {
+          for (let x = 0; x < 12; x++) {
+            assert.equal(
+                Bitmap.getPixel(kanji, cell * 12 + x, y),
+                Bitmap.getPixel(fallback, x, y),
+                `dot ${x},${y} of cell ${cell}`,
+            );
+          }
+        }
+      }
+    });
+
+    it('should read a pair of printable bytes as one character in the JIS code system', function() {
+      const paper = stitch(render(stream(
+          ESC, '@', FS, '&', FS, 'C', 0, [0x30, 0x21, 0x30, 0x22], LF,
+      )), {width: WIDTH});
+
+      /* Two characters of two cells each, and nothing of the four bytes is
+         printed as a character of its own */
+
+      const runs = columnsOf(paper, 0, 24);
+
+      assert.equal(runs.length, 4);
+      assert.equal(runs[3].end - runs[0].start + 1, 48 - 2);
+    });
+
+    it('should print single byte characters again after FS .', function() {
+      const off = render(stream(ESC, '@', FS, '&', FS, '.', 'AB', LF));
+      const plain = render(stream(ESC, '@', 'AB', LF));
+
+      assert.equal(dots(stitch(off, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+
+    it('should leave a byte below the lead byte range alone', function() {
+      const kanji = render(stream(ESC, '@', FS, '&', FS, 'C', 1, 'AB', LF));
+      const plain = render(stream(ESC, '@', 'AB', LF));
+
+      assert.equal(dots(stitch(kanji, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+
+    it('should print a lead byte at the end of the stream as a character', function() {
+      assert.doesNotThrow(() => render(stream(ESC, '@', FS, '&', FS, 'C', 1, [0x93])));
+    });
+
+    it('should be switched off by ESC @', function() {
+      const reset = render(stream(ESC, '@', FS, '&', FS, 'C', 0, ESC, '@', 'AB', LF));
+      const plain = render(stream(ESC, '@', 'AB', LF));
+
+      assert.equal(dots(stitch(reset, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+  });
+
+  describe('ESC i and ESC m, the legacy cuts', function() {
+    it('should cut fully with ESC i', function() {
+      const items = render(stream(ESC, '@', 'Hi', LF, ESC, 'i'), {commands: COMMANDS});
+
+      assert.deepEqual(commands(items), [{type: 'cut', value: 'full'}]);
+    });
+
+    it('should cut partially with ESC m', function() {
+      const items = render(stream(ESC, '@', 'Hi', LF, ESC, 'm'), {commands: COMMANDS});
+
+      assert.deepEqual(commands(items), [{type: 'cut', value: 'partial'}]);
+    });
+  });
+
+  describe('the real time commands', function() {
+    const realTime = [
+      ['DLE EOT n', [0x10, 0x04, 1]],
+      ['DLE EOT 7 n', [0x10, 0x04, 7, 1]],
+      ['DLE EOT 8 n', [0x10, 0x04, 8, 3]],
+      ['DLE ENQ n', [0x10, 0x05, 1]],
+      ['DLE DC4 1 m t', [0x10, 0x14, 1, 0, 1]],
+      ['DLE DC4 2 a b', [0x10, 0x14, 2, 1, 8]],
+      ['DLE DC4 3 a', [0x10, 0x14, 3, 1]],
+      ['DLE DC4 7 n', [0x10, 0x14, 7, 1]],
+      ['DLE DC4 8 d1..d7', [0x10, 0x14, 8, 1, 3, 20, 1, 6, 2, 8]],
+    ];
+
+    for (const [name, bytes] of realTime) {
+      it(`should consume ${name} with its own length`, function() {
+        const items = render(stream(ESC, '@', bytes, 'Hi', LF), {commands: ['unknown']});
+        const unknown = items.filter((item) => item.type === 'unknown');
+
+        assert.equal(unknown.length, 1);
+        assert.deepEqual(Array.from(unknown[0].data), bytes);
+
+        assert.equal(
+            dots(stitch(items.filter((item) => item.type === 'image'), {width: WIDTH})),
+            dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+        );
+      });
+    }
+  });
+
+  describe('the lengths of the text layout commands', function() {
+    /* Every command with arguments that do not change the paper, so that the
+       text behind it has to land where it lands without the command */
+
+    const lengths = [
+      ['ESC SP n', [ESC, 0x20, 0]],
+      ['ESC ! n', [ESC, 0x21, 0]],
+      ['ESC $ nL nH', [ESC, 0x24, 0, 0]],
+      ['ESC D n1..nk NUL', [ESC, 0x44, 10, 20, 0x00]],
+      ['ESC D NUL', [ESC, 0x44, 0x00]],
+      ['ESC G n', [ESC, 0x47, 0]],
+      ['ESC R n', [ESC, 0x52, 0]],
+      ['ESC \\ nL nH', [ESC, 0x5c, 0, 0]],
+      ['ESC { n', [ESC, 0x7b, 0]],
+      ['GS L nL nH', [GS, 0x4c, 0, 0]],
+      ['GS W nL nH', [GS, 0x57, 0x40, 0x02]],
+      ['FS & and FS .', [FS, 0x26, FS, 0x2e]],
+      ['FS C n', [FS, 0x43, 1]],
+      ['FS ! n', [FS, 0x21, 0]],
+      ['FS - n', [FS, 0x2d, 0]],
+      ['FS S n1 n2', [FS, 0x53, 0, 0]],
+      ['FS W n', [FS, 0x57, 0]],
+      ['FS ( C pL pH fn m', [FS, 0x28, 0x43, 2, 0, 48, 1]],
+    ];
+
+    for (const [name, bytes] of lengths) {
+      it(`should consume the arguments of ${name}`, function() {
+        assert.equal(
+            dots(stitch(render(stream(ESC, '@', bytes, 'Hi', LF)), {width: WIDTH})),
+            dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+        );
+      });
+    }
+
+    const truncated = [
+      ['ESC SP', [ESC, 0x20]],
+      ['ESC !', [ESC, 0x21]],
+      ['ESC $', [ESC, 0x24, 10]],
+      ['ESC D without its NUL', [ESC, 0x44, 10, 20]],
+      ['ESC G', [ESC, 0x47]],
+      ['ESC R', [ESC, 0x52]],
+      ['ESC \\', [ESC, 0x5c, 10]],
+      ['ESC {', [ESC, 0x7b]],
+      ['GS L', [GS, 0x4c, 10]],
+      ['GS W', [GS, 0x57, 10]],
+      ['FS C', [FS, 0x43]],
+      ['FS !', [FS, 0x21]],
+      ['FS -', [FS, 0x2d]],
+      ['FS S', [FS, 0x53, 1]],
+      ['FS W', [FS, 0x57]],
+      ['FS ( C', [FS, 0x28, 0x43, 4, 0, 48]],
+      ['DLE EOT', [0x10, 0x04]],
+      ['DLE EOT 7', [0x10, 0x04, 7]],
+      ['DLE ENQ', [0x10, 0x05]],
+      ['DLE DC4', [0x10, 0x14]],
+      ['DLE DC4 1', [0x10, 0x14, 1, 0]],
+      ['DLE DC4 8', [0x10, 0x14, 8, 1, 3]],
+    ];
+
+    for (const [name, bytes] of truncated) {
+      it(`should stop cleanly on a truncated ${name}`, function() {
+        let items;
+
+        assert.doesNotThrow(() => {
+          items = render(stream(ESC, '@', 'Hi', LF, bytes), {commands: COMMANDS});
+        });
+
+        assert.equal(
+            dots(stitch(items, {width: WIDTH})),
+            dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+        );
       });
     }
   });

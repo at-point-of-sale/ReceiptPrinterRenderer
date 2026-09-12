@@ -104,7 +104,7 @@ These are the options:
 | `commands` | `[]` | Command types that may appear in the output: `cut`, `pulse`, `feed` and `unknown`. Everything else falls back, see [Commands the printer supports](#commands-the-printer-supports). |
 | `maxHeight` | none | Maximum height of an image item in dots. Taller segments are split. |
 | `lineSpacing` | from the profile | Default line spacing in dots, 30 for the Epson profile and 32 for the Star profile. |
-| `profile` | `epson` for ESC/POS, `star` for StarPRNT | Printer family defaults: line spacing, font B cell size and vertical motion unit. A name, or a profile of your own. |
+| `profile` | `epson` for ESC/POS, `star` for StarPRNT | Printer family defaults: line spacing, font B cell size, vertical motion unit and resolution. A name, or a profile of your own. |
 | `feedThreshold` | `24` | Minimum run of blank dot rows that becomes a feed item. |
 | `font` | built in | Font data, for applications that want a different look. The same packed format as the generated font. |
 

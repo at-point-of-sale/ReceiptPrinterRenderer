@@ -307,4 +307,32 @@ describe('Bitmap', function() {
       assert.deepEqual(Array.from(Bitmap.trimRow(Bitmap.create(0, 4), 0)), [0x00]);
     });
   });
+
+  describe('rotate180()', function() {
+    const bitmap = fromAscii([
+      '#..#',
+      '.##.',
+      '#...',
+    ]);
+
+    it('should turn a bitmap upside down', function() {
+      assert.deepEqual(toAscii(Bitmap.rotate180(bitmap)), [
+        '...#',
+        '.##.',
+        '#..#',
+      ]);
+    });
+
+    it('should return the same bitmap when it is done twice', function() {
+      assert.deepEqual(toAscii(Bitmap.rotate180(Bitmap.rotate180(bitmap))), toAscii(bitmap));
+    });
+
+    it('should rotate a bitmap that is not a whole number of bytes wide', function() {
+      assert.deepEqual(toAscii(Bitmap.rotate180(fromAscii(['#....#..#..']))), ['..#..#....#']);
+    });
+
+    it('should leave an empty bitmap empty', function() {
+      assert.deepEqual(Bitmap.rotate180(Bitmap.create(0, 0)), Bitmap.create(0, 0));
+    });
+  });
 });

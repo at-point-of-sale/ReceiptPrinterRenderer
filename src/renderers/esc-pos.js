@@ -1,6 +1,7 @@
 import CodepageEncoder from '@point-of-sale/codepage-encoder';
 import Bitmap from '../bitmap.js';
 import Painter from '../painter.js';
+import {internationalCharacterSet, noCharacterSet} from '../charsets.js';
 import codepageMappings from '../../generated/mapping.js';
 import printerProfiles from '../../generated/profiles.js';
 
@@ -14,8 +15,20 @@ import printerProfiles from '../../generated/profiles.js';
 const ESC = 0x1b;
 const FS = 0x1c;
 const GS = 0x1d;
+const DLE = 0x10;
+const HT = 0x09;
 const LF = 0x0a;
 const CR = 0x0d;
+
+/* The resolution of a printer that has no dpi in its profile, which is what
+   every receipt printer of this class prints at */
+
+const DEFAULT_DPI = 203;
+
+/* The code system FS C selects, which decides which bytes are the lead byte of
+   a multibyte character in Kanji mode */
+
+const CODE_SYSTEMS = Object.assign(Object.create(null), {0: 'jis', 1: 'shift-jis', 48: 'jis', 49: 'shift-jis'});
 
 /* The codepage every printer starts in, and the one an unknown codepage number
    falls back to */
@@ -319,6 +332,50 @@ function downloadedBitmapArguments(bytes, index) {
   return 2 + bytes[index] * bytes[index + 1] * 8;
 }
 
+/**
+ * Arguments of DLE EOT n, the real time status request. Two of its functions
+ * carry a second parameter byte, every other one is a single byte.
+ *
+ * @param  {Uint8Array}   bytes   The whole stream
+ * @param  {number}       index   Position of the first argument
+ * @return {number}               Number of argument bytes, or -1 when the stream is too short
+ */
+function realTimeStatusArguments(bytes, index) {
+  if (index + 1 > bytes.length) {
+    return -1;
+  }
+
+  return bytes[index] === 7 || bytes[index] === 8 ? 2 : 1;
+}
+
+/*
+    The number of bytes of DLE DC4, including its function byte. Function 1
+    generates a pulse, m and t behind it, function 2 runs the power off
+    sequence with its two byte fixed data, function 8 clears the buffers with
+    its seven byte fixed data. Functions 3 and 7 are transmit requests of one
+    parameter byte. Every other function is read as the function byte alone.
+
+    The lengths of functions 3 and 7 are the common ones, they are not settled
+    by a specification text that was available here.
+*/
+
+const REAL_TIME_REQUESTS = Object.assign(Object.create(null), {1: 3, 2: 3, 3: 2, 7: 2, 8: 8});
+
+/**
+ * Arguments of DLE DC4 fn .., the real time request
+ *
+ * @param  {Uint8Array}   bytes   The whole stream
+ * @param  {number}       index   Position of the first argument
+ * @return {number}               Number of argument bytes, or -1 when the stream is too short
+ */
+function realTimeRequestArguments(bytes, index) {
+  if (index + 1 > bytes.length) {
+    return -1;
+  }
+
+  return REAL_TIME_REQUESTS[bytes[index]] || 1;
+}
+
 /*
     Argument lengths of the commands the renderer does not implement, from the
     ESC/POS specification. They are only used to stay in sync with the stream,
@@ -332,34 +389,30 @@ function downloadedBitmapArguments(bytes, index) {
    the table assumes its 32 data bytes */
 
 const UNKNOWN_ARGUMENTS = {
+  [DLE]: {
+    0x04: realTimeStatusArguments, /* DLE EOT n, transmit real time status */
+    0x05: 1, /* DLE ENQ n, real time request to the printer */
+    0x14: realTimeRequestArguments, /* DLE DC4 fn .., real time request */
+  },
+
   [ESC]: {
-    0x20: 1, /* right side character spacing */
-    0x21: 1, /* print mode */
-    0x24: 2, /* absolute print position */
     0x25: 1, /* select user defined character set */
     0x2f: 1, /* print downloaded bitmap */
     0x3d: 1, /* select peripheral device */
     0x3f: 1, /* cancel user defined character */
     0x43: 1, /* page length in lines */
-    0x44: nulTerminated, /* horizontal tab positions */
-    0x47: 1, /* double strike */
     0x4b: 1, /* print and reverse feed n dots */
     0x4c: 0, /* page mode */
-    0x52: 1, /* international character set */
     0x53: 0, /* standard mode */
     0x54: 1, /* print direction in page mode */
     0x55: 1, /* unidirectional printing */
     0x56: 1, /* rotate 90 degrees */
     0x57: 8, /* print area in page mode */
-    0x5c: 2, /* relative print position */
     0x63: 2, /* paper sensor and panel button settings */
     0x65: 1, /* print and reverse feed n lines */
-    0x69: 0, /* full cut, legacy */
-    0x6d: 0, /* partial cut, legacy */
     0x72: 1, /* print colour */
     0x75: 1, /* transmit peripheral device status */
     0x76: 0, /* transmit paper sensor status */
-    0x7b: 1, /* upside down printing */
   },
 
   [GS]: {
@@ -370,9 +423,7 @@ const UNKNOWN_ARGUMENTS = {
     0x41: 2, /* print position adjustment */
     0x45: 1, /* print control method */
     0x49: 1, /* transmit printer id */
-    0x4c: 2, /* left margin */
     0x54: 1, /* print position at the top of the line */
-    0x57: 2, /* print area width */
     0x5c: 2, /* relative vertical position in page mode */
     0x61: 1, /* automatic status back */
     0x62: 1, /* smoothing */
@@ -384,14 +435,9 @@ const UNKNOWN_ARGUMENTS = {
   },
 
   [FS]: {
-    0x21: 1, /* multi byte print mode */
-    0x26: 0, /* select Kanji mode */
-    0x2d: 1, /* multi byte underline */
+    0x28: parenthesisArguments, /* FS ( C and the other selectors of the group, see the notes */
     0x32: 34, /* define user defined Kanji, c1 c2 and the glyph, see below */
     0x3f: 2, /* cancel user defined Kanji, c1 c2 */
-    0x43: 1, /* Kanji code system */
-    0x53: 2, /* Kanji character spacing */
-    0x57: 1, /* quadruple size Kanji */
     0x67: userMemoryArguments, /* write and read the user memory */
     0x70: 2, /* print NV bit image */
     0x71: nvBitImageArguments, /* define NV bit image, n images with their sizes */
@@ -416,7 +462,14 @@ class EscPosRenderer {
   #codepage;
   #codepoints;
   #codepointCache;
+  #characterSet;
+  #emphasis;
+  #doubleStrike;
   #verticalUnits;
+  #horizontalUnits;
+  #kanji;
+  #codeSystem;
+  #dpi;
   #text;
   #barcode;
   #qrcode;
@@ -516,6 +569,13 @@ class EscPosRenderer {
   #initialize() {
     this.#painter.reset();
     this.#verticalUnits = this.#painter.profile.motionUnit;
+    this.#horizontalUnits = 1;
+    this.#dpi = this.#painter.profile.dpi || DEFAULT_DPI;
+    this.#characterSet = noCharacterSet();
+    this.#emphasis = false;
+    this.#doubleStrike = false;
+    this.#kanji = false;
+    this.#codeSystem = 'shift-jis';
     this.#text = [];
     this.#barcode = Object.assign({}, BARCODE_DEFAULTS);
     this.#qrcode = Object.assign({data: new Uint8Array(0)}, QRCODE_DEFAULTS);
@@ -536,6 +596,20 @@ class EscPosRenderer {
     while (index < bytes.length) {
       const byte = bytes[index];
 
+      /* In Kanji mode a lead byte and the byte behind it are one character.
+         There is no CJK font here, so the pair becomes two cells of the
+         fallback glyph, which is exactly the width a printer gives a Kanji
+         character. A lead byte at the very end of the stream is not a pair and
+         is printed as a character of its own */
+
+      if (this.#kanji && this.#isLeadByte(byte) && index + 1 < bytes.length) {
+        this.#flushText();
+        this.#painter.placeholder(2);
+
+        index += 2;
+        continue;
+      }
+
       /* Printable bytes are gathered, so that a run of characters becomes one
          call on the painter, in one codepage */
 
@@ -546,6 +620,12 @@ class EscPosRenderer {
       }
 
       this.#flushText();
+
+      if (byte === HT) {
+        this.#painter.tab();
+        index++;
+        continue;
+      }
 
       if (byte === LF) {
         this.#painter.lineFeed();
@@ -563,7 +643,7 @@ class EscPosRenderer {
 
       /* Other control characters are not commands, a printer ignores them */
 
-      if (byte !== ESC && byte !== GS && byte !== FS) {
+      if (byte !== ESC && byte !== GS && byte !== FS && byte !== DLE) {
         index++;
         continue;
       }
@@ -645,20 +725,32 @@ class EscPosRenderer {
      */
   #tables() {
     return {
+      [DLE]: {},
+
       [ESC]: {
+        0x20: {args: 1, run: (a) => this.#painter.spacing(this.#horizontal(a[0]))},
+        0x21: {args: 1, run: (a) => this.#printMode(a[0])},
+        0x24: {args: 2, run: (a) => this.#painter.position(this.#horizontal(a[0] + a[1] * 256))},
         0x2a: {args: columnImageArguments, run: (a) => this.#columnImage(a)},
         0x2d: {args: 1, run: (a) => this.#underline(a[0])},
         0x32: {args: 0, run: () => this.#painter.lineSpacing(null)},
         0x33: {args: 1, run: (a) => this.#painter.lineSpacing(Math.round(a[0] / this.#verticalUnits))},
         0x34: {args: 1, run: null}, /* italic, parsed and ignored, as the hardware does */
         0x40: {args: 0, run: () => this.#initialize()},
-        0x45: {args: 1, run: (a) => this.#painter.style({bold: (a[0] & 1) !== 0})},
+        0x44: {args: nulTerminated, run: (a) => this.#painter.tabs(Array.from(a.subarray(0, a.length - 1)))},
+        0x45: {args: 1, run: (a) => this.#bold({emphasis: (a[0] & 1) !== 0})},
+        0x47: {args: 1, run: (a) => this.#bold({doubleStrike: (a[0] & 1) !== 0})},
         0x4a: {args: 1, run: (a) => this.#painter.feed(Math.round(a[0] / this.#verticalUnits))},
         0x4d: {args: 1, run: (a) => this.#font(a[0])},
+        0x52: {args: 1, run: (a) => this.#international(a[0])},
+        0x5c: {args: 2, run: (a) => this.#relative(a)},
         0x61: {args: 1, run: (a) => this.#align(a[0])},
         0x64: {args: 1, run: (a) => this.#painter.lineFeed(a[0])},
+        0x69: {args: 0, run: () => this.#emitCut('full')}, /* legacy full cut */
+        0x6d: {args: 0, run: () => this.#emitCut('partial')}, /* legacy partial cut */
         0x70: {args: 3, run: (a) => this.#pulse(a)},
         0x74: {args: 1, run: (a) => this.#selectCodepage(a[0])},
+        0x7b: {args: 1, run: (a) => this.#painter.style({upsideDown: (a[0] & 1) !== 0})},
       },
 
       [GS]: {
@@ -667,8 +759,10 @@ class EscPosRenderer {
         0x38: {args: largeParenthesisArguments, run: (a, consumed) => this.#unknown(consumed)},
         0x42: {args: 1, run: (a) => this.#painter.style({invert: (a[0] & 1) !== 0})},
         0x48: {args: 1, run: (a) => this.#hriPosition(a[0])},
-        0x50: {args: 2, run: (a) => this.#motionUnits(a[1])},
+        0x4c: {args: 2, run: (a) => this.#painter.margins({left: this.#horizontal(a[0] + a[1] * 256)})},
+        0x50: {args: 2, run: (a) => this.#motionUnits(a[0], a[1])},
         0x56: {args: cutArguments, run: (a) => this.#cut(a[0])},
+        0x57: {args: 2, run: (a) => this.#painter.margins({width: this.#horizontal(a[0] + a[1] * 256)})},
         0x66: {args: 1, run: (a) => this.#hriFont(a[0])},
         0x68: {args: 1, run: (a) => this.#barcodeHeight(a[0])},
         0x6b: {args: barcodeArguments, run: (a, consumed) => this.#drawBarcode(a, consumed)},
@@ -677,7 +771,13 @@ class EscPosRenderer {
       },
 
       [FS]: {
-        0x2e: {args: 0, run: null}, /* cancel Kanji mode, no effect on rendering */
+        0x21: {args: 1, run: null}, /* multibyte print mode, parsed, see the notes */
+        0x26: {args: 0, run: () => this.#kanjiMode(true)},
+        0x2d: {args: 1, run: null}, /* multibyte underline, parsed */
+        0x2e: {args: 0, run: () => this.#kanjiMode(false)},
+        0x43: {args: 1, run: (a) => this.#kanjiCodeSystem(a[0])},
+        0x53: {args: 2, run: null}, /* multibyte character spacing, parsed */
+        0x57: {args: 1, run: null}, /* quadruple size multibyte, parsed */
       },
     };
   }
@@ -1075,10 +1175,141 @@ class EscPosRenderer {
      * unit per dot as well, because the renderer does not know the resolution
      * of the printer it emulates.
      *
-     * @param  {number}   vertical   The vertical motion unit of the command
+     * The horizontal unit is what ESC SP, ESC $, ESC \, GS L and GS W are
+     * counted in, and it is tracked the other way round, as the number of dots
+     * in one unit: one dot by default, and the dots of one `x`th of an inch
+     * once the command sets it, which is the resolution of the profile divided
+     * by `x`.
+     *
+     * @param  {number}   horizontal   The horizontal motion unit of the command
+     * @param  {number}   vertical     The vertical motion unit of the command
      */
-  #motionUnits(vertical) {
+  #motionUnits(horizontal, vertical) {
     this.#verticalUnits = vertical === 0 ? this.#painter.profile.motionUnit : 1;
+    this.#horizontalUnits = horizontal === 0 ? 1 : this.#dpi / horizontal;
+  }
+
+  /**
+     * A distance in horizontal motion units, in dots
+     *
+     * @param  {number}   units   The distance of the command
+     * @return {number}           The distance in dots
+     */
+  #horizontal(units) {
+    return Math.round(units * this.#horizontalUnits);
+  }
+
+  /**
+     * ESC \ nL nH, the relative print position. The distance is signed, a
+     * negative one moves the cursor back towards the left margin.
+     *
+     * @param  {Uint8Array}   args   The arguments of the command
+     */
+  #relative(args) {
+    const value = args[0] + args[1] * 256;
+    const distance = value > 32767 ? value - 65536 : value;
+
+    this.#painter.position(this.#painter.cursor + this.#horizontal(distance));
+  }
+
+  /**
+     * ESC ! n, the print mode: font, bold, double height, double width and
+     * underline in one byte. It sets the same state the individual commands
+     * set, so a GS ! behind it still decides the size.
+     *
+     * @param  {number}   value   The argument of the command
+     */
+  #printMode(value) {
+    this.#painter.font((value & 0x01) ? 'B' : 'A');
+
+    this.#painter.style({
+      height: (value & 0x10) ? 2 : 1,
+      width: (value & 0x20) ? 2 : 1,
+      underline: (value & 0x80) ? 1 : 0,
+    });
+
+    this.#bold({emphasis: (value & 0x08) !== 0});
+  }
+
+  /**
+     * Emphasis and double strike are two settings of the printer, ESC E and
+     * ESC G, and bit 3 of ESC ! is the emphasis one. Both are printed darker
+     * and this renderer has one bold, so the cells are bold while either of
+     * them is on: switching one off does not undo the other.
+     *
+     * @param  {object}   changes   The setting to change, `emphasis` or `doubleStrike`
+     */
+  #bold(changes) {
+    if (typeof changes.emphasis !== 'undefined') {
+      this.#emphasis = changes.emphasis;
+    }
+
+    if (typeof changes.doubleStrike !== 'undefined') {
+      this.#doubleStrike = changes.doubleStrike;
+    }
+
+    this.#painter.style({bold: this.#emphasis || this.#doubleStrike});
+  }
+
+  /**
+     * ESC R n, the international character set. A number the command does not
+     * define leaves the set as it was.
+     *
+     * @param  {number}   value   The argument of the command
+     */
+  #international(value) {
+    const table = internationalCharacterSet(value);
+
+    if (table) {
+      this.#characterSet = table;
+    }
+  }
+
+  /**
+     * FS & and FS ., which switch Kanji mode on and off
+     *
+     * @param  {boolean}   value   True for on
+     */
+  #kanjiMode(value) {
+    this.#kanji = value;
+  }
+
+  /**
+     * FS C n, the code system of the multibyte characters, which says which
+     * bytes are a lead byte. A value the command does not define leaves it as
+     * it was.
+     *
+     * @param  {number}   value   The argument of the command
+     */
+  #kanjiCodeSystem(value) {
+    if (CODE_SYSTEMS[value]) {
+      this.#codeSystem = CODE_SYSTEMS[value];
+    }
+  }
+
+  /**
+     * Whether a byte starts a multibyte character in the current code system.
+     * Shift JIS has two ranges of lead bytes, JIS is a pair of bytes of the
+     * printable ASCII range for every character.
+     *
+     * @param  {number}   byte   The byte
+     * @return {boolean}         True when a trail byte follows it
+     */
+  #isLeadByte(byte) {
+    if (this.#codeSystem === 'jis') {
+      return byte >= 0x21 && byte <= 0x7e;
+    }
+
+    return (byte >= 0x81 && byte <= 0x9f) || (byte >= 0xe0 && byte <= 0xfc);
+  }
+
+  /**
+     * Cut the paper, for the commands that carry no argument
+     *
+     * @param  {string}   value   'full' or 'partial'
+     */
+  #emitCut(value) {
+    this.#painter.command({type: 'cut', value});
   }
 
   /**
@@ -1136,7 +1367,9 @@ class EscPosRenderer {
   }
 
   /**
-     * Decode bytes with the current codepage
+     * Decode bytes with the current codepage, and with the international
+     * character set over it: that set replaces twelve code points of the
+     * codepage and nothing else, which is what the printer does with it.
      *
      * @param  {number[]}   bytes   The bytes to decode
      * @return {string}             The text
@@ -1145,7 +1378,7 @@ class EscPosRenderer {
     let result = '';
 
     for (const byte of bytes) {
-      result += String.fromCodePoint(this.#codepoints[byte] || 0xfffd);
+      result += String.fromCodePoint(this.#characterSet[byte] || this.#codepoints[byte] || 0xfffd);
     }
 
     return result;

@@ -1,6 +1,7 @@
 import CodepageEncoder from '@point-of-sale/codepage-encoder';
 import Bitmap from '../bitmap.js';
 import Painter from '../painter.js';
+import {internationalCharacterSet, noCharacterSet} from '../charsets.js';
 import codepageMappings from '../../generated/mapping.js';
 import printerProfiles from '../../generated/profiles.js';
 
@@ -12,8 +13,11 @@ import printerProfiles from '../../generated/profiles.js';
  */
 
 const BEL = 0x07;
+const HT = 0x09;
 const LF = 0x0a;
 const CR = 0x0d;
+const EOT = 0x04;
+const NUL = 0x00;
 const EM = 0x19;
 const SUB = 0x1a;
 const CAN = 0x18;
@@ -21,6 +25,42 @@ const ESC = 0x1b;
 const FS = 0x1c;
 const GS = 0x1d;
 const RS = 0x1e;
+
+/* The highest international character set the Star table shares with the Epson
+   one, see the notes in documentation/commands-star-prnt.md */
+
+const LAST_CHARACTER_SET = 13;
+
+/* The raster data commands, one row of dots each. `b` feeds one dot row behind
+   the data, `k` leaves the position where it was */
+
+const RASTER_FEED = 0x62;
+const RASTER_HOLD = 0x6b;
+
+/* The EOT and FF modes of raster mode that cut the paper, by the value of
+   ESC * r E n NUL and ESC * r F n NUL. The modes that only print or feed are
+   not in the table. A tear bar model has no cutter, mode 3 feeds the paper to
+   the bar instead, which is the closest to a partial cut the item stream has */
+
+const RASTER_CUTS = Object.assign(Object.create(null), {
+  3: 'partial', 8: 'full', 9: 'full', 12: 'partial', 13: 'partial',
+});
+
+/* The mode a raster job that does not set one is in, which is the initial
+   value of a model with a cutter */
+
+const DEFAULT_RASTER_MODE = 13;
+
+/* The furthest ESC * r Y n NUL moves, in dots. The command takes a decimal
+   number of any length, and a job that asks for more than a sixteen bit dot
+   count is not asking for paper that exists */
+
+const MAX_RASTER_MOVE = 65535;
+
+/* The drive circuits of ESC * r D n NUL, and the device of the pulse item each
+   of them opens */
+
+const RASTER_DRAWERS = Object.assign(Object.create(null), {1: [0], 2: [1], 3: [0, 1]});
 
 /* A Star command is ESC and a command byte, or ESC GS or ESC RS and a command
    byte. The three groups have their own table, keyed by the byte that follows
@@ -344,23 +384,18 @@ function rasterArguments(bytes, index) {
 
 const UNKNOWN_ARGUMENTS = {
   [GROUP_ESC]: {
-    0x0c: 1, /* ESC FF n, print the buffer in the mode n, which is NUL, EOT, EM or LF */
+    0x20: 1, /* right side character spacing, see the notes: the length is a best effort */
     0x28: 1, /* select character expansion */
     0x29: 1, /* cancel character expansion */
-    0x2a: rasterArguments, /* raster mode group */
     0x31: 0, /* select 1/8 inch line spacing, legacy */
-    0x44: nulTerminated, /* horizontal tab positions */
-    0x51: 1, /* right margin */
-    0x52: 1, /* international character set */
-    0x57: 1, /* character expansion */
     0x63: 1, /* select character set */
-    0x68: 1, /* character height */
     0x6b: bitImageArguments, /* bit image, quadruple density */
-    0x6c: 1, /* left margin */
   },
 
   [GROUP_GS]: {
     0x03: 3, /* ESC GS ETX s n1 n2, automatic status */
+    0x07: 3, /* ESC GS BEL m n1 n2, buzzer */
+    0x19: 4, /* ESC GS EM DC1 m n1 n2 and ESC GS EM DC2 m n1 n2, buzzer */
     0x23: 1, /* print density */
     0x5c: 2, /* vertical position */
     0x62: 1, /* blackmark and sensor settings */
@@ -399,10 +434,14 @@ class StarPrntRenderer {
   #codepage;
   #codepoints;
   #codepointCache;
+  #characterSet;
   #pulse;
   #text;
   #qrcode;
   #pdf417;
+  #leftColumn;
+  #rightColumn;
+  #raster;
 
   /**
      * Create a renderer
@@ -493,6 +532,11 @@ class StarPrntRenderer {
       this.#initialize();
       this.#parse(data);
 
+      /* Rows that are still in the raster image buffer when the stream ends are
+         printed, so that a job that forgot its execute command is not lost */
+
+      this.#rasterFlush();
+
       return this.#painter.end();
     } finally {
       this.#painter.discard();
@@ -508,8 +552,12 @@ class StarPrntRenderer {
   #initialize() {
     this.#painter.reset();
     this.#text = [];
+    this.#characterSet = noCharacterSet();
+    this.#leftColumn = 0;
+    this.#rightColumn = 0;
     this.#qrcode = Object.assign({data: new Uint8Array(0)}, QRCODE_DEFAULTS);
     this.#pdf417 = Object.assign({data: new Uint8Array(0)}, PDF417_DEFAULTS);
+    this.#rasterInitialize(false);
     this.#selectCodepage(null);
   }
 
@@ -526,6 +574,32 @@ class StarPrntRenderer {
     while (index < bytes.length) {
       const byte = bytes[index];
 
+      /* In raster mode `b` and `k` are the commands that carry a row of dots,
+         everywhere else they are the letters b and k. Both carry the number of
+         data bytes in front of the data */
+
+      if (this.#raster.active && (byte === RASTER_FEED || byte === RASTER_HOLD)) {
+        this.#flushText();
+
+        /* A row that runs past the end of the stream stops the parse, the way
+           a truncated command does, and everything in front of it is kept */
+
+        if (index + 3 > bytes.length) {
+          return;
+        }
+
+        const length = bytes[index + 1] + bytes[index + 2] * 256;
+
+        if (index + 3 + length > bytes.length) {
+          return;
+        }
+
+        this.#rasterRow(bytes.subarray(index + 3, index + 3 + length), byte === RASTER_FEED);
+
+        index += 3 + length;
+        continue;
+      }
+
       /* Printable bytes are gathered, so that a run of characters becomes one
          call on the painter, in one codepage */
 
@@ -536,6 +610,12 @@ class StarPrntRenderer {
       }
 
       this.#flushText();
+
+      if (byte === HT) {
+        this.#painter.tab();
+        index++;
+        continue;
+      }
 
       if (byte === LF) {
         this.#painter.lineFeed();
@@ -671,22 +751,31 @@ class StarPrntRenderer {
     return {
       [GROUP_ESC]: {
         0x07: {args: 2, run: (a) => this.#pulseWidth(a)},
+        0x0c: {args: 1, run: (a, consumed) => this.#formFeed(a[0], consumed)},
+        0x2a: {args: rasterArguments, run: (a, consumed) => this.#rasterCommand(a, consumed)},
         0x2d: {args: 1, run: (a) => this.#underline(a[0])},
         0x30: {args: 0, run: () => this.#painter.lineSpacing(LINE_SPACING_ESC_0)},
         0x34: {args: 0, run: () => this.#painter.style({invert: true})},
         0x35: {args: 0, run: () => this.#painter.style({invert: false})},
         0x40: {args: 0, run: () => this.#initialize()},
+        0x44: {args: nulTerminated, run: (a) => this.#painter.tabs(Array.from(a.subarray(0, a.length - 1)))},
         0x45: {args: 0, run: () => this.#painter.style({bold: true})},
         0x46: {args: 0, run: () => this.#painter.style({bold: false})},
         0x49: {args: 1, run: (a) => this.#painter.feed(a[0])}, /* feed n eighths of a millimetre, one dot each */
         0x4a: {args: 1, run: (a) => this.#painter.feed(a[0] * 2)}, /* feed n quarters of a millimetre, two dots each */
         0x4b: {args: bitImageArguments, run: (a) => this.#bitImage(a, 2)}, /* bit image, normal density */
         0x4c: {args: bitImageArguments, run: (a) => this.#bitImage(a, 1)}, /* bit image, fine density */
+        0x51: {args: 1, run: (a) => this.#rightMargin(a[0])},
+        0x52: {args: 1, run: (a) => this.#international(a[0])},
+        0x57: {args: 1, run: (a) => this.#doubleWidth(a[0])},
         0x58: {args: columnImageArguments, run: (a) => this.#columnImage(a)},
+        0x5f: {args: 1, run: (a) => this.#upperline(a[0])},
         0x61: {args: 1, run: (a) => this.#painter.lineFeed(a[0])},
         0x62: {args: barcodeArguments, run: (a, consumed) => this.#drawBarcode(a, consumed)},
         0x64: {args: 1, run: (a) => this.#cut(a[0])},
+        0x68: {args: 1, run: (a) => this.#height(a[0])},
         0x69: {args: 2, run: (a) => this.#size(a[0], a[1])},
+        0x6c: {args: 1, run: (a) => this.#leftMargin(a[0])},
         0x7a: {args: 1, run: (a) => this.#lineSpacing(a[0])},
       },
 
@@ -932,6 +1021,101 @@ class StarPrntRenderer {
   }
 
   /**
+     * ESC _ n, the upperline, which a Star printer draws along the top of the
+     * cell the way the underline is drawn along the bottom. It has one
+     * thickness, like the underline, and a value the command does not define
+     * leaves it as it was.
+     *
+     * @param  {number}   value   The argument of the command
+     */
+  #upperline(value) {
+    if (typeof UNDERLINE[value] === 'number') {
+      this.#painter.style({upperline: UNDERLINE[value]});
+    }
+  }
+
+  /**
+     * ESC W n, the character width expansion: 1 is double width and 0 is back
+     * to normal. A value the command does not define leaves the width as it
+     * was.
+     *
+     * @param  {number}   value   The argument of the command
+     */
+  #doubleWidth(value) {
+    if (value === 0 || value === 48) {
+      this.#painter.style({width: 1});
+    }
+
+    if (value === 1 || value === 49) {
+      this.#painter.style({width: 2});
+    }
+  }
+
+  /**
+     * ESC h n, the character height expansion, the multiplier one less than the
+     * value, the way ESC i counts it, so 1 is double height. A value outside
+     * that range leaves the height as it was.
+     *
+     * @param  {number}   value   The argument of the command
+     */
+  #height(value) {
+    if (typeof SIZE[value] === 'number') {
+      this.#painter.style({height: SIZE[value]});
+    }
+  }
+
+  /**
+     * ESC R n, the international character set, which replaces twelve code
+     * points of the character table. Star shares the numbers of the sets it has
+     * in common with Epson; a number above those is left alone, see the notes
+     * of this command in documentation/commands-star-prnt.md.
+     *
+     * @param  {number}   value   The argument of the command
+     */
+  #international(value) {
+    const table = internationalCharacterSet(value, LAST_CHARACTER_SET);
+
+    if (table) {
+      this.#characterSet = table;
+    }
+  }
+
+  /**
+     * ESC l n, the left margin, in characters of the current font
+     *
+     * @param  {number}   value   The argument of the command
+     */
+  #leftMargin(value) {
+    this.#leftColumn = value;
+    this.#applyMargins();
+  }
+
+  /**
+     * ESC Q n, the right margin, which is the column the print area ends at,
+     * counted from the left edge of the paper. A right margin that is not
+     * beyond the left one leaves the print area at the full width of the paper.
+     *
+     * @param  {number}   value   The argument of the command
+     */
+  #rightMargin(value) {
+    this.#rightColumn = value;
+    this.#applyMargins();
+  }
+
+  /**
+     * Hand the two margins to the painter, in dots
+     */
+  #applyMargins() {
+    const character = this.#painter.characterWidth;
+    const columns = this.#rightColumn - this.#leftColumn;
+
+    this.#painter.margins({
+      left: this.#leftColumn * character,
+      width: columns > 0 ? columns * character : null,
+    });
+  }
+
+  /**
      * ESC RS F n, the font. Font C of the command is a font this renderer does
      * not have, so it leaves the font as it was.
      *
@@ -1042,6 +1226,362 @@ class StarPrntRenderer {
   }
 
   /**
+     * ESC * r .., the raster mode group, and ESC * m for anything that is not
+     * the raster group.
+     *
+     * Raster mode is a second way to print: rows of dots go into an image
+     * buffer, and an execute command prints the buffer and, depending on the
+     * mode that was stored before the rows were sent, cuts the paper. It is
+     * what the TSP100 family prints from, which is why this renderer reads it:
+     * the job a driver builds with StarGraphicsPrinterEncoder renders back to
+     * the paper it was made from.
+     *
+     * @param  {Uint8Array}   args       The arguments of the command
+     * @param  {Uint8Array}   consumed   The whole command, for the unknown item
+     */
+  #rasterCommand(args, consumed) {
+    if (args[0] !== 0x72) {
+      this.#unknown(consumed);
+      return;
+    }
+
+    const command = args[1];
+
+    /* The margins carry a second letter, l or r, the other commands that have
+       a parameter carry it as ASCII digits up to a NUL byte */
+
+    const value = this.#rasterValue(args.subarray(command === 0x6d ? 3 : 2));
+
+    switch (command) {
+      /* R initializes raster mode, A enters it and initializes it as well, B
+         leaves it after printing what is left in the buffer */
+
+      case 0x52:
+        this.#rasterInitialize(this.#raster.active);
+        break;
+
+      case 0x41:
+        this.#rasterInitialize(true);
+        break;
+
+      case 0x42:
+        this.#rasterExecute(this.#raster.eot);
+        this.#raster.active = false;
+        break;
+
+        /* C throws the image buffer away without printing it */
+
+      case 0x43:
+        this.#rasterClear();
+        break;
+
+        /* D drives a drawer, E and F store the modes of the two execute
+         commands, e stores the one of ESC FF EM */
+
+      case 0x44:
+        this.#rasterDrawer(value);
+        break;
+
+      case 0x45:
+        this.#raster.eot = value;
+        break;
+
+      case 0x46:
+        this.#raster.ff = value;
+        break;
+
+      case 0x65:
+        this.#raster.em = value;
+        break;
+
+        /* Y moves the position down, which leaves blank rows behind */
+
+      case 0x59:
+        this.#rasterMove(value);
+        break;
+
+        /* The margins are in bytes of eight dots, l for the left one and r for
+         the right one */
+
+      case 0x6d:
+        if (args[2] === 0x6c) {
+          this.#raster.left = value * 8;
+        }
+
+        if (args[2] === 0x72) {
+          this.#raster.right = value * 8;
+        }
+
+        break;
+
+        /* P, Q, t and K are settings that do not change the dots, a and b are
+         the block delimiters of the command emulator mode */
+
+      default:
+        break;
+    }
+  }
+
+  /**
+     * The parameter of a raster command, which is a decimal number written as
+     * ASCII digits and closed with a NUL byte
+     *
+     * @param  {Uint8Array}   bytes   The argument bytes, the NUL included
+     * @return {number}               The value, 0 when there are no digits
+     */
+  #rasterValue(bytes) {
+    let value = 0;
+
+    for (const byte of bytes) {
+      if (byte < 0x30 || byte > 0x39) {
+        break;
+      }
+
+      value = value * 10 + (byte - 0x30);
+    }
+
+    return value;
+  }
+
+  /**
+     * Reset the settings of raster mode and throw the image buffer away, which
+     * is what ESC * r R and ESC * r A both do
+     *
+     * @param  {boolean}   active   Whether raster mode is on afterwards
+     */
+  #rasterInitialize(active) {
+    this.#raster = {
+      active,
+      left: 0,
+      right: 0,
+      ff: DEFAULT_RASTER_MODE,
+      eot: DEFAULT_RASTER_MODE,
+      em: DEFAULT_RASTER_MODE,
+      rows: [],
+      height: 0,
+      current: null,
+      pending: false,
+    };
+  }
+
+  /**
+     * Throw away the rows that are in the image buffer
+     */
+  #rasterClear() {
+    this.#raster.rows = [];
+    this.#raster.height = 0;
+    this.#raster.current = null;
+    this.#raster.pending = false;
+  }
+
+  /**
+     * One row of raster data. The row is as wide as the print head, so it is
+     * placed at the left margin of the raster and the bytes that are missing at
+     * the right are white. Data is written into the buffer with an OR, the way
+     * the specification describes it, so a `k` command and the `b` behind it
+     * build one row together.
+     *
+     * @param  {Uint8Array}   data   The bytes of the row, eight dots per byte
+     * @param  {boolean}      feed   True for `b`, which ends the row
+     */
+  #rasterRow(data, feed) {
+    const rowBytes = Bitmap.rowBytes(this.#painter.width);
+
+    if (!this.#raster.current) {
+      this.#raster.current = new Uint8Array(rowBytes);
+    }
+
+    /* The left margin of raster mode is a whole number of bytes, so the data
+       lands on a byte boundary */
+
+    const offset = this.#raster.left >> 3;
+
+    for (let byte = 0; byte < data.length && offset + byte < rowBytes; byte++) {
+      this.#raster.current[offset + byte] |= data[byte];
+    }
+
+    this.#raster.pending = true;
+
+    if (feed) {
+      this.#rasterLine();
+    }
+  }
+
+  /**
+     * Close the row that is being built and start the next one
+     */
+  #rasterLine() {
+    if (this.#raster.current) {
+      this.#raster.rows.push({data: this.#raster.current, count: 1});
+    } else {
+      this.#rasterBlank(1);
+    }
+
+    this.#raster.height++;
+    this.#raster.current = null;
+    this.#raster.pending = false;
+  }
+
+  /**
+     * Add a run of blank rows to the image buffer. A run is a count and not a
+     * row per row, so that a move of tens of thousands of dots costs nothing
+     * until the buffer is drawn.
+     *
+     * @param  {number}   count   Number of blank rows
+     */
+  #rasterBlank(count) {
+    const last = this.#raster.rows[this.#raster.rows.length - 1];
+
+    if (last && !last.data) {
+      last.count += count;
+      return;
+    }
+
+    this.#raster.rows.push({data: null, count});
+  }
+
+  /**
+     * ESC * r Y n NUL, move the position down by n dots, which leaves n blank
+     * rows in the buffer. A row that was being built is closed first, it is the
+     * row the position is on.
+     *
+     * @param  {number}   dots   Number of dot rows to move
+     */
+  #rasterMove(dots) {
+    let rows = Math.min(Math.max(0, dots), MAX_RASTER_MOVE);
+
+    if (rows <= 0) {
+      return;
+    }
+
+    /* The row that is being built is the row the position is on, so closing it
+       is the first of the dots the command moves */
+
+    if (this.#raster.pending) {
+      this.#rasterLine();
+      rows--;
+    }
+
+    if (rows > 0) {
+      this.#rasterBlank(rows);
+      this.#raster.height += rows;
+    }
+  }
+
+  /**
+     * Print the image buffer: the rows become one block as wide as the paper,
+     * placed on the paper itself, so that neither the alignment nor the
+     * margins of the line mode move them.
+     *
+     * @return {boolean}   True when there was something to print
+     */
+  #rasterFlush() {
+    if (this.#raster.pending) {
+      this.#rasterLine();
+    }
+
+    const rows = this.#raster.rows;
+    const height = this.#raster.height;
+
+    if (height === 0) {
+      return false;
+    }
+
+    const width = this.#painter.width;
+    const rowBytes = Bitmap.rowBytes(width);
+    const bitmap = Bitmap.create(width, height);
+
+    let y = 0;
+
+    for (const run of rows) {
+      if (run.data) {
+        bitmap.data.set(run.data, y * rowBytes);
+      }
+
+      y += run.count;
+    }
+
+    this.#rasterClear();
+
+    /* The rows carry their own position, the left margin of the raster, so
+       they are placed on the paper and not inside the print area of the line
+       mode: an ESC l or an ESC Q must not shift or clip them */
+
+    this.#painter.block(bitmap, {margins: false});
+
+    return true;
+  }
+
+  /**
+     * Print the image buffer and perform the mode that was stored for this
+     * execute command. An execute command on an empty buffer does nothing at
+     * all, which is what the specification says.
+     *
+     * @param  {number}   mode   The stored EOT, FF or EM mode
+     */
+  #rasterExecute(mode) {
+    if (!this.#rasterFlush()) {
+      return;
+    }
+
+    if (RASTER_CUTS[mode]) {
+      this.#painter.command({type: 'cut', value: RASTER_CUTS[mode]});
+    }
+  }
+
+  /**
+     * ESC * r D n NUL, drive a drawer from raster mode. The pulse is the one
+     * the line mode commands set, so ESC BEL still decides how long the first
+     * drawer is opened.
+     *
+     * @param  {number}   value   The drive circuit, 1, 2 or 3 for both
+     */
+  #rasterDrawer(value) {
+    const devices = RASTER_DRAWERS[value];
+
+    if (!devices) {
+      return;
+    }
+
+    /* The specification has the printer ignore this command while data is in
+       the image buffer. The renderer prints that data instead, so that the
+       paper is right whatever a stream does */
+
+    this.#rasterFlush();
+
+    for (const device of devices) {
+      this.#drawer(device);
+    }
+  }
+
+  /**
+     * ESC FF n, execute a mode: NUL is the FF mode, EOT the EOT mode and EM the
+     * EM mode of the block commands. Any other byte is not a command of this
+     * renderer and is reported with the mode byte it carries.
+     *
+     * @param  {number}       value      The mode byte of the command
+     * @param  {Uint8Array}   consumed   The whole command, for the unknown item
+     */
+  #formFeed(value, consumed) {
+    if (value === NUL) {
+      this.#rasterExecute(this.#raster.ff);
+      return;
+    }
+
+    if (value === EOT) {
+      this.#rasterExecute(this.#raster.eot);
+      return;
+    }
+
+    if (value === EM) {
+      this.#rasterExecute(this.#raster.em);
+      return;
+    }
+
+    this.#unknown(consumed);
+  }
+
+  /**
      * ESC GS t n, select the codepage the following bytes are decoded with. A
      * number the mapping does not have falls back to the codepage the printer
      * starts in, and so does the initial state.
@@ -1081,7 +1621,7 @@ class StarPrntRenderer {
     let result = '';
 
     for (const byte of bytes) {
-      result += String.fromCodePoint(this.#codepoints[byte] || 0xfffd);
+      result += String.fromCodePoint(this.#characterSet[byte] || this.#codepoints[byte] || 0xfffd);
     }
 
     return result;

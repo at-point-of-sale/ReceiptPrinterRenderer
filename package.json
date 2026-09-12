@@ -56,6 +56,7 @@
     "homepage": "https://github.com/NielsLeenheer/ReceiptPrinterRenderer#readme",
     "devDependencies": {
         "@point-of-sale/receipt-printer-encoder": "^3.0.0",
+        "@point-of-sale/star-graphics-printer-encoder": "^1.0.0",
         "@rollup/plugin-commonjs": "^24.1.0",
         "@rollup/plugin-node-resolve": "^15.0.2",
         "@rollup/plugin-terser": "^0.4.1",

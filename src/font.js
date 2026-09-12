@@ -26,6 +26,7 @@ import fonts from '../generated/fonts.js';
  * @property {boolean} [bold]              Overstrike the glyph with a one dot horizontal offset
  * @property {boolean} [stretch]           Extend the ink at the edges of the glyph to the edges of the cell
  * @property {number} [underline]          Underline thickness in dots, 0, 1 or 2
+ * @property {number} [upperline]          Upperline thickness in dots, 0, 1 or 2
  * @property {boolean} [invert]            Draw the cell white on black
  */
 
@@ -211,6 +212,7 @@ class Font {
       bold: false,
       stretch: false,
       underline: 0,
+      upperline: 0,
       invert: false,
       ...options,
     };
@@ -253,6 +255,15 @@ class Font {
       const first = Math.max(0, cell.height - settings.underline);
 
       cell.data.fill(0xff, first * rowBytes, cell.height * rowBytes);
+    }
+
+    /* The upperline of ESC _ n on a Star printer is the same line along the top
+       of the cell, under the same rules */
+
+    if (settings.upperline > 0 && !settings.invert) {
+      const rowBytes = Bitmap.rowBytes(cell.width);
+
+      cell.data.fill(0xff, 0, Math.min(settings.upperline, cell.height) * rowBytes);
     }
 
     if (settings.invert) {

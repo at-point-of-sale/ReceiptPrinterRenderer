@@ -267,7 +267,7 @@ The painter interface gains, in Section 12:
 painter.position(dots)                     // absolute position from the left margin, for HT, ESC $ and ESC \
 painter.margins({ left, width })           // left margin and print area width in dots, applied at the next line start
 painter.spacing(dots)                      // extra dots after every cell, scaled with the width multiplier
-painter.tabs([columns])                    // tab stops in character widths of the current font, [] restores every 8
+painter.tabs([columns])                    // tab stops in character widths of the current font, [] cancels them, null restores every 8
 painter.style({ upperline, upsideDown })   // upperline is 0, 1 or 2 like underline; upsideDown rotates committed lines by 180 degrees
 painter.placeholder(cells)                 // a fallback glyph cell repeated, for multibyte text without a font
 ```
@@ -1626,6 +1626,258 @@ Acceptance:
 
 - `npm test` 1047 passing, `npm run build` clean, `npm run test:types` and
   `npm run test:umd` pass. Version 0.3.0, nothing published, nothing committed.
+
+### Section 12
+
+Implemented on 2026-09-12. Files: `src/charsets.js` (new), `src/painter.js`,
+`src/bitmap.js`, `src/font.js`, `src/renderers/esc-pos.js`,
+`src/renderers/star-prnt.js`, `data/profiles/*.json`, `generated/profiles.js`,
+`test/painter.js`, `test/bitmap.js`, `test/esc-pos.js`, `test/star-prnt.js`,
+`test/parity.js`, `test/star-raster.js` (new), `test/tools/make-fixtures.js`,
+the nine hand assembled fixtures in `test/fixtures/<language>/raw`,
+`documentation/design.md`, `documentation/commands-esc-pos.md`,
+`documentation/commands-star-prnt.md`, `package.json`.
+
+The painter:
+
+- **The additions are the ones of the plan**, plus two the plan's block needed
+  to work: `tab()`, because the tab stops live in the painter and the parser
+  cannot compute the next one without the font, and the `cursor` getter, which
+  is what `ESC \` counts its relative distance from. `characterWidth` is a third
+  one, for the Star margins, which are counted in characters by the command and
+  in dots by the painter.
+- **A line has a cursor and an extent.** The cursor is where the next cell
+  goes, the extent is the right edge of the rightmost cell, and the alignment
+  centres the extent. They only differ once a line moves its cursor: the space
+  of `ESC SP` behind the last character does not shift a centred line, and a
+  position that moves back does not shrink it.
+- **Margins are only effective at the beginning of a line**, which is what the
+  ESC/POS reference of `GS L` and `GS W` says and what Star says of `ESC l` and
+  `ESC Q`. A command that arrives while a line holds characters, or while its
+  cursor has been moved, is dropped whole, the way the printer drops it; it is
+  not deferred to the next line. Blocks are laid out inside the print area, and
+  `block(bitmap, {margins: false})` puts a block on the paper instead, which is
+  what the rows of the Star raster mode need.
+- **Tab stops are dots, not columns.** `tabs()` multiplies by the character
+  width of the font that is current when the command arrives, which is what the
+  Epson reference describes, so a font change afterwards does not move the
+  stops. A character is the cell plus the right side spacing of `ESC SP`, which
+  is the unit the reference defines, so a stream that sets a spacing moves its
+  stops with it. The default stops, every eight characters of font A, are
+  computed at the tab itself.
+- **`ESC D NUL` cancels every stop**, as the reference says, and `HT` does
+  nothing at all afterwards; `ESC @` puts the default back. The painter says
+  the same: `tabs([])` cancels, `tabs(null)` and `reset()` restore the default
+  every eight characters. The plan's painter block was corrected to match.
+- **A tab to a stop outside the print area moves the cursor one dot beyond the
+  area**, so the character behind the tab wraps to a new line, which is what the
+  reference of `HT` describes. A tab past the last stop still does nothing.
+- **Upside down rotates the line box over the width of the paper**, so a left
+  aligned line comes out at the right edge, mirrored. The feed order is
+  unchanged, as the plan asks: a printer holds the whole page and prints it
+  bottom up, which would need the page mode this renderer does not have. The
+  line by line rotation is what a test can check against the upright receipt,
+  and that test is in `test/esc-pos.js`.
+- **The placeholder is two cells of the fallback glyph** per multibyte
+  character, which is exactly the 24 dots a printer gives a Kanji character in
+  font A. A hollow box of 24 dots would have been the other option; two cells
+  keep the cell cache, the styles and the wrapping working without a second
+  kind of cell.
+- **`Bitmap.rotate180`** is dot by dot, which is fast enough: it runs once per
+  committed line and only while upside down printing is on.
+
+ESC/POS:
+
+- **The horizontal motion unit is tracked as dots per unit**, the other way
+  round from the vertical one, which is units per dot. `GS P x y` sets it to
+  `dpi / x` with the `dpi` the profiles gained in this section, 203 for both,
+  and it is one dot per unit until the command sets it. An Epson starts at
+  1/180 inch, which is 1.13 dots, so the default is a simplification in favour
+  of the streams that never send `GS P`; it is in the deviation list of the
+  reference page.
+- **`ESC !` sets and clears.** Bits it does not carry are cleared, so `ESC ! 0`
+  is plain font A text, and a `GS !` behind it still decides the size. That is
+  the reference, and the test that renders `ESC ! 0x39` against `ESC M 1`,
+  `ESC E 1` and `GS ! 0x11` holds it.
+- **`ESC G` renders as bold, next to `ESC E`.** A double strike is a second
+  pass of the print head, which a thermal printer cannot do at all; the
+  overstrike of bold is what its firmware prints. Emphasis and double strike
+  are two settings on the printer, so the parser keeps two flags, bit 3 of
+  `ESC !` sets the emphasis one, and the painter's bold is their OR: an
+  `ESC G 0` behind an `ESC E 1` leaves the text bold.
+- **The international character sets are a table of twelve characters per set**
+  in `src/charsets.js`, shared by both parsers, and only the positions that
+  differ from ASCII end up in the lookup, so set 0 replaces nothing and costs
+  nothing in the decode loop. Sets 0 to 15 are the Epson table. **Sets 16 and
+  17, Vietnam and Arabia, are listed in the reference but their replacements
+  were not in any specification text available here, so both hold the
+  characters of set 0 and replace nothing.** The won sign of the Korean set is
+  not in any codepage of the codepage encoder, so the font has no glyph for it
+  and it prints as the fallback box.
+- **Kanji mode reads the lead byte from the code system.** Shift JIS is
+  `0x81`..`0x9F` and `0xE0`..`0xFC`, JIS is every pair of bytes from `0x21` to
+  `0x7E`, which means that ASCII text in JIS Kanji mode becomes placeholders,
+  as it does on a printer. `FS C` accepts 0 and 1 and their ASCII digits. **The
+  initial code system is Shift JIS; the reference gives a different initial
+  value per model.** A lead byte at the end of the stream has no trail byte and
+  prints as a character of its own.
+- **`FS !`, `FS -`, `FS S` and `FS W` are parsed and do nothing**, which is what
+  the plan asks for. The renderer has one style for single and multibyte text
+  and draws the multibyte characters as placeholder boxes, so applying the size
+  or the underline of these commands would change the ASCII text around them
+  and show nothing of its own.
+- **`FS ( C` is reported.** It is the group that selects UTF-8 on the models
+  that have it, but its layout was not settled by anything available here, so
+  it is consumed with the length it carries and nothing is rendered. UTF-8 text
+  therefore prints through the current codepage, which is what a printer
+  without the option does.
+- **The real time commands are reported, not skipped.** The plan says skipped;
+  reporting them costs nothing, a driver that does not ask for `unknown` items
+  sees exactly the same paper, and a driver that does can see that a stream
+  asked for a real time pulse. `DLE EOT 7 n` and `DLE EOT 8 n` carry two bytes
+  and every other `DLE EOT` one; `DLE DC4` is `fn 1 m t`, `fn 2 a b`, `fn 8`
+  with its seven fixed bytes, and one parameter byte for `fn 3` and `fn 7`.
+  **The lengths of `fn 3` and `fn 7` are the common ones and are not settled by
+  a specification text available here.**
+
+StarPRNT:
+
+- **`ESC W n` is a switch and `ESC h n` a multiplier.** `ESC W 1` is double
+  width and `ESC W 0` normal, which is how the Star Line Mode documentation
+  describes it; `ESC h n` takes the value plus one, the way `ESC i` counts, so
+  `ESC h 1` is double height and `ESC h 0` normal. The two readings agree on
+  the only values a receipt uses.
+- **`ESC Q n` is a column, not a width.** The print area runs from `ESC l n`
+  characters to `ESC Q n` characters, so it is `Q - l` characters wide and a
+  right margin that is not beyond the left one leaves the paper at its full
+  width. That is the reading that makes `ESC l 2` and `ESC Q 40` print exactly
+  what `GS L 24` and `GS W 456` print on ESC/POS, which is what the parity
+  fixture needs; no hardware check settled it.
+- **`ESC SP n` is reported with one argument byte.** The Star Line Mode
+  specification text available here does not define a character spacing command
+  at all, so nothing is rendered for it and the length is a best effort that
+  only keeps the stream in sync. The plan asked for exactly this answer to be
+  written down.
+- **`ESC R n` uses the Epson table for sets 0 to 13**, which Star numbers the
+  same way. Star defines sets above that, Irish and Legal among them, and their
+  tables were not available here, so a higher number leaves the set as it was,
+  the way every other out of range parameter of these parsers does.
+- **The buzzer commands are reported**: `ESC GS BEL m n1 n2` with three
+  argument bytes and `ESC GS EM DC1 m n1 n2` and `ESC GS EM DC2 m n1 n2` with
+  four, the `DC1` or `DC2` counted. The item stream carries paper, cuts and
+  drawers, and no sound.
+
+Star raster mode:
+
+- **`b` and `k` are commands only in raster mode.** They are the letters b and
+  k everywhere else, so the parser reads them as a row of dots only while
+  `ESC * r A` has been seen and `ESC * r B` has not. Both carry the number of
+  data bytes in two bytes, and a row that runs past the end of the stream stops
+  the parse without an error, like every other command.
+- **A row is the width of the print head.** The data is placed at the left
+  margin of the raster, `ESC * r m l n NUL` in bytes of eight dots, and the
+  rest of the row is white, so the 72 byte rows of a TSP100 and the trimmed
+  rows StarGraphicsPrinterEncoder writes both land in the right place. Data is
+  written with an OR, so a `k` row and the `b` row behind it build one row of
+  dots together. A row that is wider than the paper is cut off.
+- **The buffer is flushed as one block on the paper.** The rows are collected
+  until an execute command, a drawer command, `ESC * r B` or the end of the
+  stream, and then drawn as one block of the full paper width with
+  `{margins: false}`: the rows carry their own position, `ESC * r m l`, so an
+  `ESC l` or an `ESC Q` of the line mode must neither shift nor clip them.
+- **A move is a blank run, not a list of rows.** `ESC * r Y n NUL` closes the
+  row that is being built, which is the first of the `n` dots, and adds the
+  rest as one run with a count, so a move of tens of thousands of dots costs
+  nothing until the buffer is drawn. `n` is clamped to 65535, a dot count no
+  paper reaches, because the parameter is decimal ASCII of any length and a
+  job asking for nine digits would otherwise ask for gigabytes of rows.
+- **A truncated row keeps the text in front of it.** The text that was gathered
+  is handed to the painter before the length of a `b` or `k` row is checked, so
+  a stream that ends inside a row behaves like every other truncated command.
+- **The mode table decides the cut.** 8 and 9 are a full cut, 12 and 13 a
+  partial one, and 3, the tear bar mode of a model without a cutter, is read as
+  a partial cut as well, because the item stream has nothing closer to "feed to
+  the bar and tear". 0, 1 and 2 print without cutting, and so does every mode
+  the table does not define. A job that sets no mode is read at 13, the initial
+  value of a model with a cutter.
+- **An execute command on an empty buffer does nothing**, which is the
+  specification, and the reason StarGraphicsPrinterEncoder sends a blank row
+  before a cut that has no rows of its own.
+- **A drawer command flushes first.** The specification has the printer ignore
+  `ESC * r D` while data is in the buffer; the renderer prints that data and
+  then opens the drawer, so the paper is right whatever a stream does. The
+  encoder empties the buffer itself, so the difference is not reachable from a
+  job it builds.
+- **`ESC FF n` is a command with its mode byte**, as it already was, and now
+  `NUL`, `EOT` and `EM` execute the stored FF, EOT and EM mode. Any other mode
+  byte is reported with the command, so `LF` still does not feed a line.
+
+Fixtures and tests:
+
+- **The hand assembled fixtures live in `test/fixtures/<language>/raw`**, a
+  directory next to the encoder fixtures. The fixture helpers take the
+  directory as the language, so `names('esc-pos/raw')` is the group, and the
+  existing loops over `names('esc-pos')` do not see them: they filter on `.bin`
+  files and a directory is not one. That keeps the encoder fixtures and the
+  hand written ones apart without a second helper.
+- **The tabs fixture shows all three rules**: the first line tabs over the
+  default stops every eight characters, the middle lines over the stops of
+  `ESC D 10 20 30`, and the last line has no stops at all, because `ESC D NUL`
+  cancelled them.
+- **Nine fixtures**, in the languages that have the commands: `print-mode`,
+  `international`, `tabs` and `margins` in both, `upside-down`, `spacing`,
+  `positions` and `multibyte` in ESC/POS only, and `star-raster` in StarPRNT
+  only. The four that exist in both print the same paper, and `test/parity.js`
+  checks that, with the same profile for both languages as it does for the
+  encoder fixtures.
+- **Reviewed as ASCII art before they were frozen**: the tab columns land on
+  the stops of `ESC D`, on the default stop every eight characters and, behind
+  `ESC D NUL`, nowhere at all, the
+  upside down lines are the upright ones turned around at the right edge of the
+  paper, the print mode lines are double height, double width, both and
+  underlined in the right order, the international sets print the twelve
+  characters of the German, French, Swedish and Spanish tables, the margins put
+  the text between 24 and 480 dots and centre and right align it there, the
+  multibyte lines show two fallback boxes per Kanji character, and the raster
+  job is a block of dots at the left margin, 24 blank rows, the merged `k` and
+  `b` row, and a second block.
+- **The round trip of the raster mode** is `test/star-raster.js`: every fixture
+  receipt is rendered, encoded to a raster job with StarGraphicsPrinterEncoder
+  and rendered again, and both the paper and the items have to come back the
+  same. They do for `receipt`, `pulse`, `text`, `table` and `image-column`. A
+  job that ends with a feed and nothing behind it, `cut` and `feed`, comes back
+  one blank row longer, because the printer ignores an execute command on an
+  empty buffer and the encoder gives that last segment one blank row to print;
+  the test holds exactly that difference.
+- **StarGraphicsPrinterEncoder is a devDependency at `^1.0.0`** and is not
+  published yet, so it resolves through `npm link
+  @point-of-sale/star-graphics-printer-encoder` from the local checkout until
+  it is. A fresh `npm install` without that link fails on it, the way the
+  encoder devDependency did before version 4 was published.
+- **Argument lengths and truncated streams** are table tests in both language
+  test files: every new command is rendered with arguments that change nothing
+  and the text behind it has to land where it lands without the command, and
+  every new command is then cut off halfway and the stream has to stop cleanly
+  with the paper of everything in front of it.
+
+Review:
+
+The first round of this section was returned with nine points, all of them
+applied here: the truncated raster row now flushes its text first, `ESC * r Y`
+is clamped and holds its blank rows as a count, the raster block is drawn on
+the paper instead of inside the line mode margins, `ESC E` and `ESC G` became
+two flags whose OR is the bold, `ESC D NUL` cancels instead of restoring and
+the character spacing counts in the stop unit, a tab to a stop outside the
+print area wraps instead of doing nothing, `GS L` and `GS W` are dropped
+instead of deferred while a line is being composed, `ESC * r B` keeps executing
+the EOT mode and says in the reference page that this is the specification, and
+the deviation lists of both reference pages were made exhaustive. Only the
+`tabs` fixture changed with it, in both languages, and it was reviewed again.
+
+Acceptance:
+
+- `npm test` 1302 passing, `npm run build` clean, `npm run test:types` and
+  `npm run test:umd` pass. Version stays 0.3.0, nothing committed.
 
 ### Fixtures regenerated with encoder 4.0.0, 2026-09-12
 

@@ -82,6 +82,44 @@ function ink(bitmap, top, bottom) {
 }
 
 const BEL = 0x07;
+/**
+ * The runs of columns that carry ink in a range of rows, so that a test can
+ * check where the characters of a line landed
+ *
+ * @param  {object}   bitmap   The bitmap
+ * @param  {number}   top      First row
+ * @param  {number}   bottom   Row after the last one
+ * @return {object[]}          The runs, {start, end}
+ */
+function columnsOf(bitmap, top, bottom) {
+  const runs = [];
+
+  let start = -1;
+
+  for (let x = 0; x < bitmap.width; x++) {
+    let inked = false;
+
+    for (let y = top; y < bottom && !inked; y++) {
+      inked = Bitmap.getPixel(bitmap, x, y) === 1;
+    }
+
+    if (inked && start < 0) {
+      start = x;
+    }
+
+    if (!inked && start >= 0) {
+      runs.push({start, end: x - 1});
+      start = -1;
+    }
+  }
+
+  if (start >= 0) {
+    runs.push({start, end: bitmap.width - 1});
+  }
+
+  return runs;
+}
+
 const LF = 0x0a;
 const CR = 0x0d;
 const EM = 0x19;
@@ -512,21 +550,21 @@ describe('StarPrntRenderer', function() {
   describe('unknown commands', function() {
     it('should render the text after a command it does not know', function() {
       const known = render(stream(ESC, '@', 'AB', LF));
-      const unknown = render(stream(ESC, '@', 'A', ESC, 'W', 1, 'B', LF));
+      const unknown = render(stream(ESC, '@', 'A', ESC, 'c', 1, 'B', LF));
 
       assert.equal(dots(stitch(unknown, {width: WIDTH})), dots(stitch(known, {width: WIDTH})));
     });
 
     it('should report the bytes of the command when unknown is supported', function() {
-      const items = render(stream(ESC, '@', 'A', ESC, 'W', 1, 'B', LF), {commands: ['unknown']});
+      const items = render(stream(ESC, '@', 'A', ESC, 'c', 1, 'B', LF), {commands: ['unknown']});
       const unknown = items.filter((item) => item.type === 'unknown');
 
       assert.equal(unknown.length, 1);
-      assert.deepEqual(Array.from(unknown[0].data), [ESC, 0x57, 1]);
+      assert.deepEqual(Array.from(unknown[0].data), [ESC, 0x63, 1]);
     });
 
     it('should drop the command when unknown is not supported', function() {
-      const items = render(stream(ESC, '@', 'A', ESC, 'W', 1, 'B', LF));
+      const items = render(stream(ESC, '@', 'A', ESC, 'c', 1, 'B', LF));
 
       assert.isTrue(items.every((item) => item.type === 'image'));
     });
@@ -1099,6 +1137,468 @@ describe('StarPrntRenderer', function() {
         assert.isTrue(split.every((item) => item.type !== 'image' || item.height <= 41));
         assert.isAtLeast(split.length, whole.length);
         assert.equal(dots(stitch(split, {width: WIDTH})), dots(stitch(whole, {width: WIDTH})));
+      });
+    }
+  });
+
+  describe('hand assembled fixtures', function() {
+    for (const name of names('star-prnt/raw')) {
+      describe(name, function() {
+        it('should render the paper of the fixture', function() {
+          const expected = fixture('star-prnt/raw', name);
+          const paper = stitch(render(expected.bytes, {commands: COMMANDS}), {width: WIDTH});
+
+          if (dots(paper) !== dots(expected.paper)) {
+            assert.fail(`${name} does not match its fixture\n${diff(paper, expected.paper)}`);
+          }
+        });
+
+        it('should emit the commands of the fixture', function() {
+          const expected = fixture('star-prnt/raw', name);
+
+          assert.deepEqual(commands(render(expected.bytes, {commands: COMMANDS})), expected.commands);
+        });
+      });
+    }
+  });
+
+  describe('ESC W n and ESC h n, the size', function() {
+    it('should print double width with ESC W 1', function() {
+      const expanded = render(stream(ESC, '@', ESC, 'W', 1, 'Wide', LF));
+      const size = render(stream(ESC, '@', ESC, 'i', 0, 1, 'Wide', LF));
+
+      assert.equal(dots(stitch(expanded, {width: WIDTH})), dots(stitch(size, {width: WIDTH})));
+    });
+
+    it('should print double height with ESC h 1', function() {
+      const expanded = render(stream(ESC, '@', ESC, 'h', 1, 'Tall', LF));
+      const size = render(stream(ESC, '@', ESC, 'i', 1, 0, 'Tall', LF));
+
+      assert.equal(dots(stitch(expanded, {width: WIDTH})), dots(stitch(size, {width: WIDTH})));
+    });
+
+    it('should go back to the normal size with 0', function() {
+      const back = render(stream(ESC, '@', ESC, 'W', 1, ESC, 'h', 1, ESC, 'W', 0, ESC, 'h', 0, 'Plain', LF));
+      const plain = render(stream(ESC, '@', 'Plain', LF));
+
+      assert.equal(dots(stitch(back, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+
+    it('should leave the size alone for a value it does not define', function() {
+      const ignored = render(stream(ESC, '@', ESC, 'W', 9, ESC, 'h', 9, 'Plain', LF));
+      const plain = render(stream(ESC, '@', 'Plain', LF));
+
+      assert.equal(dots(stitch(ignored, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+  });
+
+  describe('ESC _ n, the upperline', function() {
+    it('should draw a line along the top of the cell', function() {
+      const upper = stitch(render(stream(ESC, '@', ESC, '_', 1, 'Over', LF)), {width: WIDTH});
+      const under = stitch(render(stream(ESC, '@', ESC, '-', 1, 'Over', LF)), {width: WIDTH});
+
+      /* The upperline is the underline of the same cell turned upside down,
+         so the two lines are the rows the other one leaves white */
+
+      assert.equal(ink(upper, 0, 1).min, 0);
+      assert.equal(ink(upper, 23, 24).min, -1);
+      assert.equal(ink(under, 23, 24).min, 0);
+    });
+
+    it('should switch off with ESC _ 0', function() {
+      const off = render(stream(ESC, '@', ESC, '_', 1, ESC, '_', 0, 'Plain', LF));
+      const plain = render(stream(ESC, '@', 'Plain', LF));
+
+      assert.equal(dots(stitch(off, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+  });
+
+  describe('ESC R n, international character set', function() {
+    it('should replace the code points of the set', function() {
+      const german = render(stream(ESC, '@', ESC, GS, 't', 1, ESC, 'R', 2, '[\\]{|}~', LF));
+      const cp437 = render(stream(ESC, '@', ESC, GS, 't', 1, [0x8e, 0x99, 0x9a, 0x84, 0x94, 0x81, 0xe1], LF));
+
+      assert.equal(dots(stitch(german, {width: WIDTH})), dots(stitch(cp437, {width: WIDTH})));
+    });
+
+    it('should leave the set alone for a number Star does not share with Epson', function() {
+      const ignored = render(stream(ESC, '@', ESC, 'R', 3, ESC, 'R', 14, '#', LF));
+      const uk = render(stream(ESC, '@', ESC, 'R', 3, '#', LF));
+
+      assert.equal(dots(stitch(ignored, {width: WIDTH})), dots(stitch(uk, {width: WIDTH})));
+    });
+  });
+
+  describe('ESC l n and ESC Q n, the margins', function() {
+    it('should start the line at the left margin, in characters', function() {
+      const margin = stitch(render(stream(ESC, '@', ESC, 'l', 2, 'A', LF)), {width: WIDTH});
+      const plain = stitch(render(stream(ESC, '@', 'A', LF)), {width: WIDTH});
+
+      assert.equal(ink(margin, 0, 24).min, ink(plain, 0, 24).min + 24);
+    });
+
+    it('should right align inside the area of the two margins', function() {
+      const inside = stitch(render(stream(
+          ESC, '@', ESC, 'l', 2, ESC, 'Q', 40, ESC, GS, 'a', 2, 'A', LF,
+      )), {width: WIDTH});
+      const plain = stitch(render(stream(ESC, '@', 'A', LF)), {width: WIDTH});
+
+      assert.equal(ink(inside, 0, 24).max, ink(plain, 0, 24).max + 24 + 456 - 12);
+    });
+
+    it('should print over the whole paper when the right margin is not beyond the left one', function() {
+      const cleared = render(stream(ESC, '@', ESC, 'Q', 40, ESC, 'Q', 0, ESC, GS, 'a', 2, 'A', LF));
+      const plain = render(stream(ESC, '@', ESC, GS, 'a', 2, 'A', LF));
+
+      assert.equal(dots(stitch(cleared, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+
+    it('should be reset by ESC @', function() {
+      const reset = render(stream(ESC, '@', ESC, 'l', 4, ESC, '@', 'A', LF));
+      const plain = render(stream(ESC, '@', 'A', LF));
+
+      assert.equal(dots(stitch(reset, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+  });
+
+  describe('HT and ESC D, tab stops', function() {
+    it('should move to the next default stop, every eight characters', function() {
+      const paper = stitch(render(stream(ESC, '@', 'A', 0x09, 'A', LF)), {width: WIDTH});
+      const starts = columnsOf(paper, 0, 24).map((run) => run.start);
+
+      assert.equal(starts.length, 2);
+      assert.equal(starts[1] - starts[0], 96);
+    });
+
+    it('should move to the stops of ESC D', function() {
+      const paper = stitch(render(stream(
+          ESC, '@', ESC, 'D', 10, 20, 0x00, 'A', 0x09, 'A', 0x09, 'A', LF,
+      )), {width: WIDTH});
+      const starts = columnsOf(paper, 0, 24).map((run) => run.start);
+
+      assert.equal(starts.length, 3);
+      assert.equal(starts[1] - starts[0], 120);
+      assert.equal(starts[2] - starts[1], 120);
+    });
+  });
+
+  describe('the buzzer commands', function() {
+    const buzzers = [
+      ['ESC GS BEL m n1 n2', [ESC, GS, 0x07, 1, 2, 2]],
+      ['ESC GS EM DC1 m n1 n2', [ESC, GS, 0x19, 0x11, 1, 2, 2]],
+      ['ESC GS EM DC2 m n1 n2', [ESC, GS, 0x19, 0x12, 1, 2, 2]],
+    ];
+
+    for (const [name, bytes] of buzzers) {
+      it(`should report ${name} and keep the text behind it`, function() {
+        const items = render(stream(ESC, '@', bytes, 'Hi', LF), {commands: ['unknown']});
+        const unknown = items.filter((item) => item.type === 'unknown');
+
+        assert.equal(unknown.length, 1);
+        assert.deepEqual(Array.from(unknown[0].data), bytes);
+
+        assert.equal(
+            dots(stitch(items.filter((item) => item.type === 'image'), {width: WIDTH})),
+            dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+        );
+      });
+    }
+  });
+
+  describe('raster mode', function() {
+    /**
+     * A raster setting command, its value as ASCII digits closed with a NUL
+     *
+     * @param  {string}   command   The letter of the command
+     * @param  {number}   value     The value of the setting
+     * @return {number[]}           The bytes
+     */
+    function raster(command, value) {
+      return [ESC, 0x2a, 0x72, ...Array.from(command, (c) => c.charCodeAt(0)),
+        ...Array.from(String(value), (c) => c.charCodeAt(0)), 0x00];
+    }
+
+    /**
+     * A row of raster data
+     *
+     * @param  {number[]}   bytes    The bytes of the row
+     * @param  {boolean}    [feed]   False for k, which holds the position
+     * @return {number[]}            The bytes
+     */
+    function row(bytes, feed = true) {
+      return [feed ? 0x62 : 0x6b, bytes.length & 0xff, bytes.length >> 8, ...bytes];
+    }
+
+    const enter = [ESC, 0x2a, 0x72, 0x52, ESC, 0x2a, 0x72, 0x41];
+    const quit = [ESC, 0x2a, 0x72, 0x42];
+    const executeFF = [ESC, 0x0c, 0x00];
+    const executeEOT = [ESC, 0x0c, 0x04];
+
+    it('should print one row of dots per raster data command', function() {
+      const items = render(stream(ESC, '@', enter, row([0xff]), row([0x0f]), executeEOT, quit));
+      const paper = stitch(items, {width: WIDTH});
+
+      assert.equal(paper.height, 2);
+      assert.equal(dots(Bitmap.extractRows(paper, 0, 1)).endsWith(':255' + ',0'.repeat(71)), true);
+      assert.equal(ink(paper, 1, 2).min, 4);
+    });
+
+    it('should pad a row that is narrower than the paper', function() {
+      const paper = stitch(render(stream(ESC, '@', enter, row([0xff]), executeEOT, quit)), {width: WIDTH});
+
+      assert.equal(paper.width, WIDTH);
+      assert.deepEqual(ink(paper, 0, 1), {min: 0, max: 7});
+    });
+
+    it('should not feed a row for the k command, so that the b behind it joins it', function() {
+      const paper = stitch(render(stream(
+          ESC, '@', enter, row([0xf0], false), row([0x00, 0x0f]), executeEOT, quit,
+      )), {width: WIDTH});
+
+      assert.equal(paper.height, 1);
+      assert.deepEqual(ink(paper, 0, 1), {min: 0, max: 15});
+    });
+
+    it('should leave blank rows behind for ESC * r Y', function() {
+      const paper = stitch(render(stream(
+          ESC, '@', enter, row([0xff]), raster('Y', 8), row([0xff]), executeEOT, quit,
+      )), {width: WIDTH});
+
+      /* The b command has already moved to the next row, so the eight dots of
+         the move are eight blank rows between the two rows of dots */
+
+      assert.equal(paper.height, 10);
+      assert.equal(ink(paper, 1, 9).min, -1);
+      assert.equal(ink(paper, 9, 10).min, 0);
+    });
+
+    it('should place the rows at the left margin', function() {
+      const paper = stitch(render(stream(
+          ESC, '@', enter, raster('ml', 2), row([0xff]), executeEOT, quit,
+      )), {width: WIDTH});
+
+      assert.deepEqual(ink(paper, 0, 1), {min: 16, max: 23});
+    });
+
+    it('should read b and k as text outside raster mode', function() {
+      const text = render(stream(ESC, '@', 'bk', LF));
+      const plain = render(stream(ESC, '@', 'bk', LF));
+
+      assert.equal(dots(stitch(text, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+      assert.equal(stitch(text, {width: WIDTH}).height, 32);
+    });
+
+    it('should read b as text again after ESC * r B', function() {
+      const paper = stitch(render(stream(ESC, '@', enter, quit, 'b', LF)), {width: WIDTH});
+
+      assert.equal(paper.height, 32);
+    });
+
+    const cuts = [
+      [1, null],
+      [3, 'partial'],
+      [8, 'full'],
+      [9, 'full'],
+      [12, 'partial'],
+      [13, 'partial'],
+      [32, null],
+    ];
+
+    for (const [mode, value] of cuts) {
+      it(`should ${value ? `cut ${value}` : 'print without cutting'} in FF mode ${mode}`, function() {
+        const items = render(stream(
+            ESC, '@', enter, raster('F', mode), row([0xff]), executeFF, quit,
+        ), {commands: COMMANDS});
+
+        assert.deepEqual(
+            commands(items),
+            value ? [{type: 'cut', value}] : [],
+        );
+      });
+    }
+
+    it('should cut in the EOT mode for ESC FF EOT', function() {
+      const items = render(stream(
+          ESC, '@', enter, raster('E', 9), raster('F', 1), row([0xff]), executeEOT, quit,
+      ), {commands: COMMANDS});
+
+      assert.deepEqual(commands(items), [{type: 'cut', value: 'full'}]);
+    });
+
+    it('should cut a model with a cutter by default', function() {
+      const items = render(stream(ESC, '@', enter, row([0xff]), executeFF, quit), {commands: COMMANDS});
+
+      assert.deepEqual(commands(items), [{type: 'cut', value: 'partial'}]);
+    });
+
+    it('should do nothing when the image buffer is empty', function() {
+      const items = render(stream(ESC, '@', enter, raster('F', 9), executeFF, quit), {commands: COMMANDS});
+
+      assert.deepEqual(items, []);
+    });
+
+    it('should throw the buffer away with ESC * r C', function() {
+      const items = render(stream(
+          ESC, '@', enter, row([0xff]), [ESC, 0x2a, 0x72, 0x43], executeEOT, quit,
+      ), {commands: COMMANDS});
+
+      assert.deepEqual(items, []);
+    });
+
+    it('should open a drawer with ESC * r D', function() {
+      const items = render(stream(
+          ESC, '@', ESC, 0x07, 10, 50, enter, raster('D', 1), quit,
+      ), {commands: COMMANDS});
+
+      assert.deepEqual(commands(items), [{type: 'pulse', device: 0, on: 100, off: 500}]);
+    });
+
+    it('should open the second drawer with ESC * r D 2', function() {
+      const items = render(stream(ESC, '@', enter, raster('D', 2), quit), {commands: COMMANDS});
+
+      assert.deepEqual(commands(items), [{type: 'pulse', device: 1, on: 200, off: 200}]);
+    });
+
+    it('should open both drawers with ESC * r D 3', function() {
+      const items = render(stream(ESC, '@', enter, raster('D', 3), quit), {commands: COMMANDS});
+
+      assert.deepEqual(commands(items).map((item) => item.device), [0, 1]);
+    });
+
+    it('should print the rows in front of a drawer command', function() {
+      const items = render(stream(
+          ESC, '@', enter, row([0xff]), raster('D', 1), executeEOT, quit,
+      ), {commands: COMMANDS});
+
+      assert.deepEqual(items.map((item) => item.type), ['image', 'pulse']);
+    });
+
+    it('should print what is left in the buffer when the stream ends', function() {
+      const paper = stitch(render(stream(ESC, '@', enter, row([0xff]))), {width: WIDTH});
+
+      assert.equal(paper.height, 1);
+    });
+
+    it('should print what is left in the buffer when raster mode is left', function() {
+      const items = render(stream(
+          ESC, '@', enter, raster('E', 9), row([0xff]), quit,
+      ), {commands: COMMANDS});
+
+      assert.deepEqual(items.map((item) => item.type), ['image', 'cut']);
+    });
+
+    it('should stop cleanly on a truncated row command', function() {
+      let items;
+
+      assert.doesNotThrow(() => {
+        items = render(stream(ESC, '@', enter, [0x62, 4, 0, 0xff]));
+      });
+
+      assert.deepEqual(items, []);
+    });
+
+    it('should keep the text in front of a truncated row command', function() {
+      const items = render(stream(ESC, '@', 'Hi', LF, 'Ho', enter, [0x62, 4, 0, 0xff]));
+
+      assert.equal(
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'Hi', LF, 'Ho', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should clamp a move that is larger than the paper can be', function() {
+      let items;
+
+      assert.doesNotThrow(() => {
+        items = render(stream(
+            ESC, '@', enter, row([0xff]), raster('Y', 900000000), executeEOT, quit,
+        ), {commands: COMMANDS});
+      });
+
+      /* The row itself, and the move clamped to a sixteen bit dot count. The
+         EOT mode of a model with a cutter is the partial cut it starts at */
+
+      assert.deepEqual(commands(items), [
+        {type: 'feed', height: 65535},
+        {type: 'cut', value: 'partial'},
+      ]);
+
+      assert.equal(stitch(items, {width: WIDTH}).height, 65536);
+    });
+
+    it('should place the rows on the paper, not inside the margins of the line mode', function() {
+      const paper = stitch(render(stream(
+          ESC, '@', ESC, 'l', 4, ESC, 'Q', 20, enter, row(new Array(72).fill(0xff)), executeEOT, quit,
+      )), {width: WIDTH});
+
+      assert.deepEqual(ink(paper, 0, 1), {min: 0, max: WIDTH - 1});
+    });
+
+    it('should cut in the default EOT mode when raster mode is left', function() {
+      const items = render(stream(ESC, '@', enter, row([0xff]), quit), {commands: COMMANDS});
+
+      /* The specification ends raster mode by executing the EOT mode when data
+         is left, and a model with a cutter starts at the partial cut */
+
+      assert.deepEqual(commands(items), [{type: 'cut', value: 'partial'}]);
+    });
+
+    it('should stop cleanly on a row command without its length', function() {
+      assert.doesNotThrow(() => render(stream(ESC, '@', enter, [0x62, 4])));
+    });
+
+    const truncated = [
+      ['ESC * r', [ESC, 0x2a, 0x72]],
+      ['ESC * r F', [ESC, 0x2a, 0x72, 0x46, 0x31]],
+      ['ESC * r m l', [ESC, 0x2a, 0x72, 0x6d, 0x6c, 0x31]],
+      ['ESC FF', [ESC, 0x0c]],
+      ['ESC W', [ESC, 0x57]],
+      ['ESC h', [ESC, 0x68]],
+      ['ESC _', [ESC, 0x5f]],
+      ['ESC l', [ESC, 0x6c]],
+      ['ESC Q', [ESC, 0x51]],
+      ['ESC R', [ESC, 0x52]],
+      ['ESC D', [ESC, 0x44, 10]],
+      ['ESC GS BEL', [ESC, GS, 0x07, 1, 2]],
+      ['ESC GS EM', [ESC, GS, 0x19, 0x11, 1, 2]],
+    ];
+
+    for (const [name, bytes] of truncated) {
+      it(`should stop cleanly on a truncated ${name}`, function() {
+        let items;
+
+        assert.doesNotThrow(() => {
+          items = render(stream(ESC, '@', 'Hi', LF, bytes), {commands: COMMANDS});
+        });
+
+        assert.equal(
+            dots(stitch(items, {width: WIDTH})),
+            dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+        );
+      });
+    }
+
+    const lengths = [
+      ['ESC W n', [ESC, 0x57, 0]],
+      ['ESC h n', [ESC, 0x68, 0]],
+      ['ESC _ n', [ESC, 0x5f, 0]],
+      ['ESC l n', [ESC, 0x6c, 0]],
+      ['ESC Q n', [ESC, 0x51, 0]],
+      ['ESC R n', [ESC, 0x52, 0]],
+      ['ESC D n1..nk NUL', [ESC, 0x44, 10, 20, 0x00]],
+      ['ESC SP n', [ESC, 0x20, 0]],
+      ['ESC * r R', [ESC, 0x2a, 0x72, 0x52]],
+      ['ESC * r P n NUL', [ESC, 0x2a, 0x72, 0x50, 0x30, 0x00]],
+      ['ESC * r m r n NUL', [ESC, 0x2a, 0x72, 0x6d, 0x72, 0x30, 0x00]],
+      ['ESC FF NUL', [ESC, 0x0c, 0x00]],
+    ];
+
+    for (const [name, bytes] of lengths) {
+      it(`should consume the arguments of ${name}`, function() {
+        assert.equal(
+            dots(stitch(render(stream(ESC, '@', bytes, 'Hi', LF)), {width: WIDTH})),
+            dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+        );
       });
     }
   });

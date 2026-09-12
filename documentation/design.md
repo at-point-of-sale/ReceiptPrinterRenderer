@@ -245,7 +245,7 @@ The two renderers of one language keep their static `language` property, `esc-po
 
 ## Supported ESC/POS commands
 
-This is the complete set of commands ReceiptPrinterEncoder version 3 emits for the `esc-pos` language. Version 1 of the renderer supports exactly this set. The parser is a table driven state machine, so that more commands can be added later, and unknown commands are skipped according to the argument lengths in the ESC/POS specification, so that one unknown command does not derail the rest of the stream.
+This is the complete set of commands ReceiptPrinterEncoder version 3 emits for the `esc-pos` language, plus the text layout commands of [section 12 of the implementation plan](implementation-plan.md#section-12-text-layout-commands), which other producers use. The parser is a table driven state machine, so that more commands can be added later, and unknown commands are skipped according to the argument lengths in the ESC/POS specification, so that one unknown command does not derail the rest of the stream. [commands-esc-pos.md](commands-esc-pos.md) is the reference page with every command, its status and its exact values.
 
 ### Text and control
 
@@ -272,6 +272,30 @@ This is the complete set of commands ReceiptPrinterEncoder version 3 emits for t
 | `ESC 3 n` | line spacing | Line spacing in vertical motion units. |
 | `ESC 2` | default line spacing | Back to `lineSpacing`. |
 | `GS P x y` | motion units | The encoder sets both to the dpi around column mode images, so that one unit is one dot, and resets them with `0 0`. The renderer tracks the vertical unit only, to compute `ESC 3`. |
+
+### Text layout
+
+The commands of section 12, which the encoder does not emit.
+
+| Bytes | Command | Rendering |
+|---|---|---|
+| `ESC ! n` | print mode | Bit 0 font B, bit 3 emphasis, bit 4 double height, bit 5 double width, bit 7 underline, and the bits it does not set are cleared. The same state as the individual commands, `ESC G` excepted, which has a setting of its own; a later `GS !` decides the size. |
+| `ESC G n` | double strike | Bit 0, rendered as bold. Emphasis and double strike are two settings, so a cell is bold while either of them is on. |
+| `ESC R n` | international character set | Sets 0 to 17 of the Epson table, which replace twelve code points after the codepage decoding. Sets 16 and 17 are not settled and replace nothing. |
+| `ESC { n` | upside down | Bit 0. Every committed line box, blocks included, is rotated by 180 degrees over the width of the paper. The feed order of the lines does not change. |
+| `ESC SP n` | character spacing | `n` horizontal motion units behind every cell, scaled with the width multiplier, and not counted in the alignment. It is part of the width of a character, so it moves the tab stops. |
+| `HT` | horizontal tab | To the first tab stop beyond the cursor. Nothing happens past the last stop; a stop outside the print area puts the cursor one dot beyond the area, so the next character wraps to a new line. |
+| `ESC D n1..nk NUL` | tab stops | Up to 32 stops, `n` characters of the current font each, the character spacing included, ascending. `ESC D NUL` cancels every stop, after which a tab does nothing, and `ESC @` returns to a stop every eight characters of font A. |
+| `ESC $ nL nH` | absolute position | From the left margin, in horizontal motion units. A position beyond the print area is ignored. |
+| `ESC \ nL nH` | relative position | The same, signed, from the cursor. |
+| `GS L nL nH`, `GS W nL nH` | left margin, print area | In horizontal motion units, and only effective at the beginning of a line: a command that arrives while a line is being composed does nothing. Wrapping and alignment work inside the area, and a width that does not fit is clamped to the paper. |
+| `GS P x y` | motion units | The vertical unit as before, the horizontal one `dpi / x` dots per unit, and one dot per unit until the command sets it. |
+| `ESC i`, `ESC m` | legacy cuts | A full and a partial `cut` item. |
+| `FS &`, `FS .` | Kanji mode | A lead byte and its trail byte are one character, drawn as two cells of the fallback glyph, so the layout is right without a CJK font. |
+| `FS C n` | Kanji code system | 0 JIS, 1 Shift JIS, which decides what a lead byte is. |
+| `FS ! n`, `FS - n`, `FS S n1 n2`, `FS W n` | multibyte styles | Parsed, and nothing on paper: the multibyte characters are placeholder cells. |
+| `FS ( C pL pH ..` | character encode system | Reported, its layout is not settled here. |
+| `DLE EOT n`, `DLE ENQ n`, `DLE DC4 fn ..` | real time commands | Consumed with their lengths and reported. |
 
 ### Blocks
 
@@ -330,7 +354,7 @@ The human readable text is one line of cells of the HRI font, centred over the b
 
 ## Supported StarPRNT commands
 
-The complete set of commands ReceiptPrinterEncoder version 3 emits for the `star-prnt` and `star-line` languages. The two languages share this set, `star-line` differs only in the encoder's line buffering. The parser has the same structure as the ESC/POS one and feeds the same painter.
+The complete set of commands ReceiptPrinterEncoder version 3 emits for the `star-prnt` and `star-line` languages, plus the text layout commands and the raster mode of section 12. The two languages share this set, `star-line` differs only in the encoder's line buffering. The parser has the same structure as the ESC/POS one and feeds the same painter. [commands-star-prnt.md](commands-star-prnt.md) is the reference page with every command, its status and its exact values.
 
 ### Text and control
 
@@ -358,6 +382,29 @@ The complete set of commands ReceiptPrinterEncoder version 3 emits for the `star
 | `ESC z 1` | line spacing 4 mm | Back to the default line spacing, 32 dots in the Star profile. |
 
 The encoder emits nothing for italic on StarPRNT, so there is nothing to ignore.
+
+### Text layout and raster mode
+
+The commands of section 12, which the encoder does not emit.
+
+| Bytes | Command | Rendering |
+|---|---|---|
+| `ESC W n` | double width | 1 on, 0 off, the width multiplier of `ESC i`. |
+| `ESC h n` | character height | The multiplier is the value plus one, so 1 is double height. |
+| `ESC _ n` | upperline | Along the top of the cell, the way the underline runs along the bottom. |
+| `ESC R n` | international character set | Sets 0 to 13, the ones Star numbers the way Epson does. A higher number is left alone. |
+| `ESC l n`, `ESC Q n` | left and right margin | In characters of the current font, the right one the column the print area ends at. Only effective at the beginning of a line, like `GS L` and `GS W`. |
+| `HT`, `ESC D n1..nk NUL` | tab stops | The same as ESC/POS. |
+| `ESC SP n` | character spacing | Consumed with one argument byte and reported: the command is not in the specification text that was available. |
+| `ESC GS BEL`, `ESC GS EM DC1`, `ESC GS EM DC2` | buzzer | Consumed with their lengths and reported. |
+| `ESC * r R`, `ESC * r A`, `ESC * r B`, `ESC * r C` | raster mode | Initialize, enter, quit and clear. In raster mode `b` and `k` are the row commands instead of letters. |
+| `b n1 n2 d..`, `k n1 n2 d..` | raster data | One row of dots at the left margin of the raster, padded to the paper, written with an OR. `b` moves to the next row, `k` does not. The rows are drawn on the paper itself, the margins of the line mode do not move or clip them. |
+| `ESC * r Y n NUL` | move down | `n` dots down, clamped to 65535. The row that was being built is the first of them, the rest are blank rows, which become a `feed` item. |
+| `ESC * r E n NUL`, `ESC * r F n NUL`, `ESC * r e n NUL` | EOT, FF and EM mode | Stored for the execute commands. |
+| `ESC FF NUL`, `ESC FF EOT`, `ESC FF EM` | execute | Print the image buffer and, when the stored mode cuts, emit a `cut` item: 8 and 9 full, 12, 13 and the tear bar mode 3 partial. Nothing happens with an empty buffer. |
+| `ESC * r D n NUL` | drive drawer | A `pulse` item for drawer 1, 2 or both, with the times of the line mode commands. |
+| `ESC * r m l n NUL` | left margin of the raster | `n` bytes of eight dots, where the rows are placed. |
+| `ESC * r m r`, `P`, `Q`, `t`, `K`, `a`, `b` | raster settings | Parsed, they do not change the dots. |
 
 ### Blocks
 
@@ -392,6 +439,11 @@ The Star barcode symbology numbers the encoder emits and the GS1 DataBar variant
 - **Overflow.** Cells beyond the width wrap to the next line, as a printer wraps. The encoder never produces this, but the painter must not lose content.
 - **Blocks.** Barcodes, QR codes and raster images are committed as their own lines: the pending text line is committed first, the block is drawn aligned, and the paper advances by the block height. Column mode images are different, they are 24 row strips inside normal lines with the line spacing set to 24, so they go through the regular line mechanism.
 - **Flushing.** The painter accumulates committed rows in a growing bitmap and cuts image items from it on the rules in [Output contract](#output-contract). Blank row runs are tracked while committing, so that feed items and the `feedThreshold` need no second pass.
+- **Print area.** `margins({left, width})` moves the left edge of the line and narrows the area the line is composed in. The commands that set it are only effective at the beginning of a line, so a call while a line is being composed does nothing, the way a printer drops the command. Wrapping, the alignment and the tab stops all work inside the area. `block(bitmap, {margins: false})` puts a block on the paper instead, for content that carries its own position, such as the rows of the Star raster mode.
+- **Cursor.** `position(dots)` moves the cursor inside the line, `cursor` reads it, and `tab()` moves to the next stop of `tabs([columns])`, which counts in characters of the current font, the character spacing included. An empty list cancels every stop, `null` and a reset go back to a stop every eight characters of font A, and a stop outside the print area sends the cursor past it so that the next character wraps. Cells that were already placed stay where they are, so moving back and printing again overprints.
+- **Character spacing.** `spacing(dots)` leaves white behind every cell, scaled with the width multiplier and not counted in the width the alignment centres.
+- **Upside down.** `style({upsideDown})` rotates every line box that is committed from then on by 180 degrees, blocks included. The order of the lines does not change.
+- **Placeholders.** `placeholder(count)` draws cells of the fallback glyph, which is what a multibyte character becomes without a CJK font.
 - **Memory.** Rows are packed as they are committed. A receipt of a few thousand rows at 576 dots is a few hundred kilobytes.
 
 <br>
