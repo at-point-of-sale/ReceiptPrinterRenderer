@@ -359,6 +359,76 @@ Acceptance:
 
 <br>
 
+## Section 15: the wire formats become packages
+
+The two wrappers of sections 6, 7 and 8 moved out of the drivers into two
+standalone libraries, so that the drivers depend on them instead of carrying a
+copy each. Nothing in this package changes; the design document records the
+reversal in [Decisions](design.md#decisions).
+
+Why: the Star raster wrapper already lived in two repositories at once, as a
+file with a notice saying that the two copies must be kept identical, and
+CapacitorBluetoothReceiptPrinter carries the cat printer profile and would have
+become a third copy of the Meow wrapper. A wire format is not driver specific
+either. The naming follows the ecosystem: ReceiptPrinterEncoder encodes for
+generic thermal printers, these encode for one specific printer.
+
+Deliverables:
+
+- **MeowPrinterEncoder**, `@point-of-sale/meow-printer-encoder` 1.0.0, scaffolded
+  like this package: rollup with UMD, ESM, CJS and MJS builds plus bundled
+  declarations from JSDoc through tsc, eslint with the Google config, mocha and
+  chai, MIT. Source style of this package, 2 spaces and `#private`, because it
+  is a library and not a driver. API: `new MeowPrinterEncoder({width, energy,
+  speed, feed, compress})`, `encode(items)` returning one packet per element and
+  `encodeImage(bitmap)`, with the protocol itself as statics, `packet()`,
+  `crc8()`, `reverseBits()`, `runLengthEncode()`, `encodeRow()`, and the flow
+  control packets `PAUSE` and `RESUME` with `isPause()` and `isResume()`, which
+  accept the `DataView` the web Bluetooth API delivers. The README documents the
+  packet framing, the commands, the run length encoding, the flow control and
+  the models, citing Cat-Printer and catprinter as the design document does.
+- **StarGraphicsPrinterEncoder**, `@point-of-sale/star-graphics-printer-encoder`
+  1.0.0, the same scaffolding. API: `new StarGraphicsPrinterEncoder({tearBar,
+  quality, pageLength})`, `encode(items)` returning the whole job as one
+  `Uint8Array` and `encodeImage(bitmap)`. The README documents the raster mode
+  commands with the mode table, citing Star's specification.
+- **The drivers.** WebUSBReceiptPrinter and NetworkReceiptPrinter depend on the
+  Star encoder, WebBluetoothReceiptPrinter on the Meow one, all three as regular
+  dependencies rather than peer dependencies: they are a few kilobytes with no
+  dependencies of their own, and a driver that renders always needs the wire
+  format. `src/wrappers/` and its tests are gone from all three; the `Wrappers`
+  table now maps the name in the profile to the one line that constructs the
+  encoder from the graphics section and calls `encode()`. The Bluetooth driver
+  matches its notifications with `MeowPrinterEncoder.isPause()` and
+  `isResume()` and dropped its own `#matches()`; the batching and the pacing
+  stay in the driver. Each README points at the encoder package where it
+  describes the wire format.
+
+Testing:
+
+- The tests moved with the code, byte for byte: the 14 Star raster tests and the
+  Meow tests keep their expected bytes exactly as they were, adapted only where
+  `wrap(items, options)` became `new Encoder(options).encode(items)`. The width
+  check of the Meow wrapper moved from `encode()` to the constructor, so that
+  assertion moved with it.
+- The driver tests that compared against `wrap()` output import the encoder
+  package instead, so they still check the driver against an independent
+  implementation of the wire format rather than against a constant.
+
+Acceptance:
+
+- MeowPrinterEncoder `npm test` 55 passing, StarGraphicsPrinterEncoder 16
+  passing, `npm run build` clean with a `.d.ts` in both.
+- WebUSBReceiptPrinter 8, NetworkReceiptPrinter 14 and
+  WebBluetoothReceiptPrinter 34 passing, `npm run build` clean in all three, and
+  the encoder code is in the driver bundles: rollup resolves and bundles it the
+  way it does the rest of their imports, so nothing external appears in the
+  output.
+- The playground still builds. Its import map points at the driver bundles, so
+  it needs nothing of its own.
+
+<br>
+
 ## Notes per section
 
 Filled in during implementation.

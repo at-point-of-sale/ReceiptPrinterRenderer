@@ -64,6 +64,8 @@ These alternatives were considered and rejected, so that the reasoning is not lo
 
 **A separate WebBluetoothMeowPrinter driver for the cat printers.** Rejected. WebBluetoothReceiptPrinter already has the cat printer profile with its service and characteristics, a write queue and chunk pacing. A separate project would duplicate all of that. The existing driver gets the same renderer option as the USB driver, and the cat printer becomes one more profile that renders.
 
+**The driver keeping one small wrapper module per wire format.** Reversed on 2026-09-12. The two wrappers moved out of the drivers into packages of their own, [MeowPrinterEncoder](https://github.com/NielsLeenheer/MeowPrinterEncoder) and [StarGraphicsPrinterEncoder](https://github.com/NielsLeenheer/StarGraphicsPrinterEncoder), and the drivers depend on them. The Star raster wrapper was already living in two repositories at once, WebUSBReceiptPrinter and NetworkReceiptPrinter, as a file with a notice at the top saying that the two copies must be kept identical, and CapacitorBluetoothReceiptPrinter would have become a third copy of the Meow wrapper. A wire format is also not driver specific in the first place: it is the counterpart of ReceiptPrinterEncoder, which encodes for generic thermal printers, where these encode for one specific printer, so they belong next to it in the @point-of-sale ecosystem under the same naming. They are regular dependencies rather than peer dependencies, unlike the renderer: each is a few kilobytes with no dependencies of its own, an application that connects to such a printer always needs the wire format, and a driver without a renderer still lets an application build the packets itself with the same package. The `graphics` section of a profile keeps naming its wrapper, and a wrapper is now the one line that constructs the encoder from that section and calls `encode()`.
+
 <br>
 
 ## Scope of version 1
@@ -481,7 +483,7 @@ Rules for drivers:
 - **Without a renderer nothing fails.** When the device is a graphics printer and no renderer was passed, the driver reports the raw protocol name of the printer, `star-graphics` for the TSP100 family and `meow` for the cat printers, and `print(bytes)` passes the bytes through unchanged. Applications that speak those protocols themselves keep working exactly as they did, and an application that wants text simply passes a renderer. The renderer is an option, never a requirement for connecting.
 - The renderer package is declared as an optional peer dependency, so the version range is on record without forcing an install.
 - With a renderer, `print(bytes)` becomes: render to items, wrap each item in the printer's format, send.
-- The wrapper belongs to the profile, not to the driver. A profile that can render carries a `graphics` section with the language, the width, the supported commands and the name of the wrapper. The driver keeps one small wrapper module per wire format, Star raster for the TSP100 and the cat printer packet protocol for the Meow printers, and picks it from the profile. A driver can therefore serve several graphics formats without special cases in its connect and print code.
+- The wrapper belongs to the profile, not to the driver. A profile that can render carries a `graphics` section with the language, the width, the supported commands and the name of the wrapper. The wire formats themselves are packages, `@point-of-sale/star-graphics-printer-encoder` for the TSP100 family and `@point-of-sale/meow-printer-encoder` for the cat printers, and a wrapper is the one line that constructs the encoder of a format from the graphics section and calls `encode()`. The driver picks that line from the profile, so it can serve several graphics formats without special cases in its connect and print code. Unlike the renderer, these packages are regular dependencies: they are tiny, they have no dependencies of their own and the driver always needs the wire format of a printer it renders for.
 
 <br>
 
@@ -496,10 +498,12 @@ The device database already identifies the graphics models: the Star profile res
 1. **Constructor option** `renderer`, class or loader, and `rendererOptions`.
 2. **Profile.** The Star profile gains a `graphics` section that applies when the language resolves to `star-graphics`: language `esc-pos` for the proof of concept, width 576, commands `['cut', 'pulse', 'feed']`, wrapper `star-raster`.
 3. **Open.** When the resolved language is `star-graphics`, load the renderer, construct it from the graphics section with the language it names and the mapping that belongs to that language, and report the renderer's language, that mapping and 48 columns in the connected event. Without a renderer, report the language `star-graphics` and pass the bytes of `print()` through unchanged, which is what an application that builds Star raster itself already expects.
-4. **Print.** Render the job, then wrap it with the Star raster wrapper below.
+4. **Print.** Render the job, then wrap it with StarGraphicsPrinterEncoder, see the Star raster wrapper below.
 5. **Status.** The status bytes the TSP100 sends back are not part of this branch.
 
 ### Star raster wrapper
+
+The wrapper is the package [StarGraphicsPrinterEncoder](https://github.com/NielsLeenheer/StarGraphicsPrinterEncoder), `@point-of-sale/star-graphics-printer-encoder`, a regular dependency of the driver. `new StarGraphicsPrinterEncoder({tearBar, quality, pageLength}).encode(items)` returns the whole job as one `Uint8Array`, and the driver takes the options from the graphics section of the profile. What it does is described below, and in more detail in the README of that package.
 
 The commands below come from Star's STAR Graphic Mode Command Specifications, Rev. 2.32, a copy of which is in [star-graphics-mode.md](star-graphics-mode.md), cross-checked with what Star's CUPS driver `rastertostar` sends. The specification covers every TSP100 model: U, PU, IIU, GT, LAN, IIIW, IIILAN, IIIBI and IIIU. Digits are ASCII characters, `NUL` is `0x00`.
 
@@ -564,12 +568,14 @@ The MXW01 and newer models use a different protocol and are out of scope.
 1. **Constructor option** `renderer`, class or loader, and `rendererOptions`, the same contract as the USB driver.
 2. **Profile.** The cat printer profile gains a `graphics` section: language `esc-pos`, width 384, commands `['feed']`, wrapper `meow`, and a `maxHeight` that keeps a single render call from allocating large images, 256 rows is a reasonable start. The existing `messageSize` and `sleepAfterCommand` stay, they pace the packets.
 3. **Open.** When the profile has a `graphics` section and a renderer was passed, construct the renderer from it with the language it names and the mapping that belongs to that language, `epson` for the ESC/POS renderer planned for these printers, and report the renderer's language, that mapping and 32 columns in the connected event. Without a renderer, the profile keeps the behaviour it has today: it reports the language `meow` and passes the bytes of `print()` through unchanged, so applications that build the packets themselves keep working and the branch stays a minor version of the driver.
-4. **Print.** Render the job, then wrap it with the cat printer wrapper, one packet per queue entry.
+4. **Print.** Render the job, then wrap it with MeowPrinterEncoder, one packet per queue entry.
 5. **Notifications.** The notify characteristic is subscribed during open, so the wrapper can use status notifications for flow control.
 
 ### Protocol
 
-The protocol is not published by the manufacturers. The details below are taken from NaitLee's Cat-Printer project, whose `printer_lib/commander.py` is the reference implementation, and are to be confirmed on a GB and a GT model, which are available.
+The wrapper is the package [MeowPrinterEncoder](https://github.com/NielsLeenheer/MeowPrinterEncoder), `@point-of-sale/meow-printer-encoder`, a regular dependency of the driver. `new MeowPrinterEncoder({width, energy, speed, feed, compress}).encode(items)` returns the job as a list of packets, one per element, and the driver takes the options from the graphics section of the profile. The package also exports the flow control packets and the matchers `isPause()` and `isResume()` the driver uses on its notifications, and the pieces of the protocol on their own, `packet()`, `crc8()`, `reverseBits()` and `encodeRow()`. Batching the packets into writes and honouring the pause stays in the driver.
+
+The protocol is not published by the manufacturers. The details below are taken from NaitLee's Cat-Printer project, whose `printer_lib/commander.py` is the reference implementation, and from rbaron's catprinter for the run length encoded rows, and are to be confirmed on a GB and a GT model, which are available.
 
 Packet framing, one command per packet:
 
@@ -602,7 +608,7 @@ A print job is: get device state, set dpi, set speed, set energy, apply energy, 
 
 ### Flow control
 
-Bluetooth Low Energy writes are small and the printer buffer is small. The reference implementation writes at most 200 bytes per write and sleeps 20 ms between writes, the existing profile uses 200 bytes and 30 ms, which is a starting point. The printer sends flow control packets on the notify characteristic: `51 78 AE 01 01 00 10 70 FF` means pause and `51 78 AE 01 01 00 00 00 FF` means resume. The wrapper stops sending on pause and continues on resume, polling every 200 ms as the reference does. The driver's existing queue sends one packet per write. `feed` items are essential here, because sending white rows over this link is slow.
+Bluetooth Low Energy writes are small and the printer buffer is small. The reference implementation writes at most 200 bytes per write and sleeps 20 ms between writes, the existing profile uses 200 bytes and 30 ms, which is a starting point. The printer sends flow control packets on the notify characteristic: `51 78 AE 01 01 00 10 70 FF` means pause and `51 78 AE 01 01 00 00 00 FF` means resume, which are `MeowPrinterEncoder.PAUSE` and `MeowPrinterEncoder.RESUME` with `isPause()` and `isResume()` to recognise them. The wrapper stops sending on pause and continues on resume, polling every 200 ms as the reference does. The driver's existing queue sends one packet per write. `feed` items are essential here, because sending white rows over this link is slow.
 
 ### Fallbacks
 
@@ -612,7 +618,7 @@ The printer has no cutter and no drawer. `cut` is not in the supported commands,
 
 ## NetworkReceiptPrinter
 
-The TSP100LAN, TSP143IIILAN and TSP143IIIW speak the same raster protocol over a socket, with no driver in between. After the USB branch is verified, NetworkReceiptPrinter gets the same `renderer` option and the same wrapper. The socket carries no device identity, so the application passes the model, and the driver uses that to decide whether to render. No LAN or WLAN model is available for testing, so this follow-up waits until one is, or ships untested with a note.
+The TSP100LAN, TSP143IIILAN and TSP143IIIW speak the same raster protocol over a socket, with no driver in between. After the USB branch is verified, NetworkReceiptPrinter gets the same `renderer` option and the same wrapper, which since the extraction is literally the same code: both drivers depend on `@point-of-sale/star-graphics-printer-encoder` instead of keeping a copy of the wrapper each. The socket carries no device identity, so the application passes the model, and the driver uses that to decide whether to render. No LAN or WLAN model is available for testing, so this follow-up waits until one is, or ships untested with a note.
 
 <br>
 
@@ -656,6 +662,7 @@ Still open:
 - Star Micronics, [STAR Graphic Mode Command Specifications Rev. 2.32](https://starmicronics.com/support/Mannualfolder/star_graphic_cm_en.pdf), the raster mode command reference for the TSP100 family. A text conversion is in [star-graphics-mode.md](star-graphics-mode.md).
 - Star Micronics CUPS driver source, [rastertostar.c](https://github.com/drobban/starcupsdrv/blob/master/src/rastertostar.c), the byte sequences in the Star raster wrapper.
 - NaitLee, [Cat-Printer](https://github.com/NaitLee/Cat-Printer), `printer_lib/commander.py` and `printer.py`, the cat printer protocol, CRC, bit order and flow control.
+- rbaron, [catprinter](https://github.com/rbaron/catprinter), `catprinter/cmds.py`, the run length encoded rows of the cat printers.
 - Star Micronics, [How to change the emulation on Star TSP100 series printers](https://starmicronics.com/help-center/knowledge-base/how-to-change-the-emulation-on-star-tsp100-series-printers/), the virtual serial port emulation on Windows.
 - Renzhi Li, [Iosevka](https://github.com/be5invis/Iosevka), the outline font the bitmap fonts are rasterized from.
 - Frederik De Bleser and others, [opentype.js](https://github.com/opentypejs/opentype.js), which parses and writes the outline font at build time.
