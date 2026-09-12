@@ -91,6 +91,14 @@ const INITIAL_ROWS = 256;
 
 const PLAIN = {bold: false, underline: 0, invert: false, width: 1, height: 1};
 
+/* White dot rows between the bars of a barcode and its human readable text.
+   The cell of the font has no room of its own above a capital, so without a
+   gap the text touches the bars. Four dots is a legibility choice, it is not
+   taken from a specification, and it is still to be compared with what an
+   Epson puts on paper. */
+
+const HRI_GAP = 4;
+
 /**
  * The painter keeps the state of the printer, composes lines from cells,
  * accumulates the rows of the committed lines and cuts image items from them.
@@ -393,7 +401,8 @@ class Painter {
     const text = position === 'none' ? null : this.#textBitmap(code.text, (request.hri && request.hri.font) || 'A');
 
     /* The bars are one bitmap, the text one line of cells below them, above
-       them, or both, and the block is as wide as the wider of the two */
+       them, or both, with HRI_GAP dots of white in between, and the block is as
+       wide as the wider of the two */
 
     const bars = Bitmap.create(code.bars.reduce((total, width) => total + width, 0) * moduleWidth, height);
 
@@ -421,14 +430,16 @@ class Painter {
     const above = position === 'above' || position === 'both';
     const below = position === 'below' || position === 'both';
 
+    const margin = text.height + HRI_GAP;
+
     const width = Math.max(bars.width, text.width);
-    const block = Bitmap.create(width, bars.height + (above ? text.height : 0) + (below ? text.height : 0));
+    const block = Bitmap.create(width, bars.height + (above ? margin : 0) + (below ? margin : 0));
 
     if (above) {
       Bitmap.blit(text, block, (width - text.width) >> 1, 0);
     }
 
-    Bitmap.blit(bars, block, (width - bars.width) >> 1, above ? text.height : 0);
+    Bitmap.blit(bars, block, (width - bars.width) >> 1, above ? margin : 0);
 
     if (below) {
       Bitmap.blit(text, block, (width - text.width) >> 1, block.height - text.height);

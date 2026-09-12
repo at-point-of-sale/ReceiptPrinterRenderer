@@ -48,6 +48,8 @@ And there are four helpers to do something with the images:
 - `toImageData(bitmap)` returns an `ImageData`, for drawing on a canvas.
 - `stitch(items, options)` joins the items of a render into one bitmap, for previews.
 
+Text is drawn with a built in bitmap font, [Iosevka](https://github.com/be5invis/Iosevka) Medium rasterized into the 12 by 24 cell of font A and the 8 by 16 cell of font B, with the box drawing characters drawn on the dot grid so that boxes and rules close.
+
 The renderer is normally not used directly, but constructed by a printer driver such as [WebUSBReceiptPrinter](https://github.com/NielsLeenheer/WebUSBReceiptPrinter), which passes the images on to the printer in the format the printer expects. Applications keep using ReceiptPrinterEncoder exactly as they do for printers with native ESC/POS support.
 
 See [Usage and installation](documentation/usage.md) for the options, the item stream and a preview example, and the [design document](documentation/design.md) for the architecture, the output contract and the plan for driver support.

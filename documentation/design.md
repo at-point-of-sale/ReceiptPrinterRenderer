@@ -115,11 +115,14 @@ src/
   formats/
     image-data.js pbm.js png.js stitch.js
 data/
-  fonts/                        BDF sources and their licence
+  fonts/                        the outline font the bitmap fonts are rasterized from, and its licence
   mappings/                     codepage mappings per language, copied from ReceiptPrinterEncoder
   profiles/                     defaults per printer family
 generated/                      packed fonts, mappings and profiles, built by tools/generate.js
-tools/generate.js
+tools/generate.js               writes generated/, rasterizes the bitmap fonts
+tools/rasterize.js              outline font to the cells of a bitmap font
+tools/box-drawing.js            the synthetic box drawing and block glyphs
+tools/subset-font.js            cuts the outline font down to the code points that can be printed
 test/
   fixtures/                     byte streams from the encoder with expected PBM images
 documentation/
@@ -370,9 +373,13 @@ The Star barcode symbology numbers the encoder emits and the GS1 DataBar variant
 
 ### Bitmap font
 
-A fixed-cell bitmap font, stored as packed glyph arrays generated from BDF sources by `tools/generate.js`. The font is Spleen, a BSD licensed family with a native 12x24 size for font A and an 8x16 size that fits in the 9x17 cell of font B. Coverage is Latin, including the box drawing characters the encoder uses for boxes and rules. A glyph in the 12x24 font is 36 bytes, so full coverage of cp437 and the ISO 8859 and Windows Latin codepages costs a few tens of kilobytes.
+A fixed-cell bitmap font, stored as packed glyph arrays by `tools/generate.js`, which rasterizes them from an outline font at build time. The font is [Iosevka](https://github.com/be5invis/Iosevka) Medium 34.8.1, under the SIL Open Font License 1.1, a monospaced face drawn for a narrow fixed cell, subset by `tools/subset-font.js` to `data/fonts/iosevka-medium-subset.ttf`. Nothing of this reaches the published package: opentype.js is a dev dependency and only `generated/fonts.js` is bundled.
 
-Characters without a glyph are drawn as the fallback glyph, a hollow box. Codepages the font does not cover, such as Thai, Cyrillic and Greek, are a later addition. The packed format is documented in the generate tool so that other fonts can be converted.
+The fitting rule is the advance width of the face, see `tools/rasterize.js`. The advance of one character is exactly one cell, 12 dots for font A and 8 for font B; Iosevka's advance is half an em, so the em lands on 24 and 16 dots with no rounding and no vertical squeeze. The baseline is row 18 of the 24 row cell and row 12 of the 16 row one, the cap height comes out at 17.6 and 11.8 dots, and nothing is scaled horizontally, so every glyph keeps the side bearings the designer gave it and the rhythm of a line is even. A dot becomes ink when the outline covers 0.45 of it, measured on an 8 by 8 grid of samples with a nonzero winding fill: below a half on purpose, which is the dot gain of a thermal head.
+
+The box drawing and block characters, U+2500 to U+259F, are drawn on the dot grid by `tools/box-drawing.js` instead of taken from the face, because they have to leave a cell at exactly the dot the next cell expects. A light line is two dots, a heavy line four, a double line two single dot lines three dots apart, and junctions are drawn from their four arms.
+
+Coverage is 779 code points, everything the codepage tables of the encoder hold except Thai, Hebrew, Arabic, Khmer and the Japanese half width forms: Latin, Greek, Cyrillic and the symbol tail of cp437 are complete in both sizes. Characters without a glyph are drawn as the fallback glyph, U+FFFD of the face, a question mark in a diamond. A glyph in the 12x24 font is 48 bytes, so the two fonts together are 83 kB of source. The packed format is documented in the generate tool so that other fonts can be converted.
 
 ### Codepage mappings
 
@@ -594,7 +601,7 @@ Settled on 2026-09-11:
 
 - Font B uses Epson's 9x17 cell for ESC/POS and Star's 9x24 cell for StarPRNT, through the profiles.
 - Italic is ignored, as hardware does.
-- The built-in font is Spleen.
+- The built-in font is Iosevka Medium, rasterized from its outline font at build time.
 - A cat printer without a renderer throws, like the TSP100.
 - The 58 mm paper guide of the TSP100 is not supported.
 - Codepage mapping follows the renderer language, `epson` or `star`.
@@ -616,5 +623,6 @@ Still open:
 - Star Micronics CUPS driver source, [rastertostar.c](https://github.com/drobban/starcupsdrv/blob/master/src/rastertostar.c), the byte sequences in the Star raster wrapper.
 - NaitLee, [Cat-Printer](https://github.com/NaitLee/Cat-Printer), `printer_lib/commander.py` and `printer.py`, the cat printer protocol, CRC, bit order and flow control.
 - Star Micronics, [How to change the emulation on Star TSP100 series printers](https://starmicronics.com/help-center/knowledge-base/how-to-change-the-emulation-on-star-tsp100-series-printers/), the virtual serial port emulation on Windows.
-- Frederic Cambus, [Spleen](https://github.com/fcambus/spleen), the bitmap font.
+- Renzhi Li, [Iosevka](https://github.com/be5invis/Iosevka), the outline font the bitmap fonts are rasterized from.
+- Frederik De Bleser and others, [opentype.js](https://github.com/opentypejs/opentype.js), which parses and writes the outline font at build time.
 - David Evans, [lean-qr](https://github.com/davidje13/lean-qr), the QR code generator.

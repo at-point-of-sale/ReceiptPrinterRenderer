@@ -95,6 +95,8 @@ These are the options:
 | `feedThreshold` | `24` | Minimum run of blank dot rows that becomes a feed item. |
 | `font` | built in | Font data, for applications that want a different look. The same packed format as the generated font. |
 
+The built in font is [Iosevka](https://github.com/be5invis/Iosevka) Medium, under the SIL Open Font License 1.1, rasterized into a 12 by 24 cell for font A and an 8 by 16 cell for font B when the package is built. The box drawing and block characters are drawn on the dot grid, so that the lines of a box or a rule join across the cells. Every code point of cp437, of the ISO 8859 and Windows Latin codepages, and of the Greek and Cyrillic ones has a glyph; a character without one is printed as U+FFFD.
+
 The width and the number of columns you configure the encoder with must agree. Font A is 12 dots wide, so the columns are `width / 12`. 576 dots gives 48 columns, 384 dots gives 32, both exact. If they disagree, the encoder wraps text in the wrong place and the renderer cannot repair that. The renderer reports what it expects:
 
 ```js

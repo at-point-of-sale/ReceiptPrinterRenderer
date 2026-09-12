@@ -183,11 +183,32 @@ Acceptance:
 - Same option contract, plus a `model` or `language` option since the socket has no identity. The Star raster wrapper copied from section 6.
 - README section noting that this is untested on hardware.
 
+## Section 9: the built in font
+
+The font of sections 1 to 8 is Spleen, a bitmap family with a Latin coverage. This section replaces it with Iosevka Medium, rasterized from its outline font when the package is built, so that the renderer covers Greek and Cyrillic as well and font A fills its cell.
+
+Deliverables:
+
+- `tools/subset-font.js` cuts the `Iosevka-Medium.ttf` of the Iosevka release down to the code points the renderer can print and writes `data/fonts/iosevka-medium-subset.ttf`, with the licence next to it and the release version in `data/fonts/README.md`. The Spleen sources and their licence go away.
+- `tools/generate.js` rasterizes that subset into the two packed fonts instead of packing BDF glyphs, by the advance width of the face, with the box drawing characters drawn on the dot grid. The packed format does not change, so `src/font.js` does not change either.
+- `opentype.js` is a dev dependency: it is used at generate time only and the published package does not depend on it.
+- All golden PBM fixtures are regenerated in both languages and reviewed as ASCII art. The `.bin` files do not change.
+- The tests that hold the shape of a glyph are updated, and `documentation/design.md`, the README and `documentation/usage.md` say what the font is.
+
+Acceptance:
+
+- `npm test` passes, `npm run build` is clean, `npm run test:types` passes.
+- `npm run generate` is deterministic and `generated/fonts.js` stays under 200 kB.
+- Only `.pbm` fixtures change, apart from the feed heights that move with the depth of the ink.
+- The letter A, a box corner and the full receipt are reviewed by eye.
+
 ## Notes per section
 
 Filled in during implementation.
 
 ### Section 1
+
+The font of this section, Spleen, was replaced by Iosevka in [section 9](#section-9); the notes below are what section 1 decided at the time, and the packed format, the fallback rule and the `stretch` option are still in force.
 
 Choices made where the design was silent:
 
@@ -1002,3 +1023,53 @@ and the README says so in the limitations of the new section. What is verified i
 that the driver puts the same bytes on the socket that section 6 puts on the USB
 endpoint, so the open questions are the ones section 6 already listed, plus
 whether the printer's socket tolerates the 1024-byte chunking of a raster job.
+
+### Section 9
+
+Choices made where the design and this plan were silent.
+
+The font:
+
+- **Iosevka Medium 34.8.1** is the face, under the SIL Open Font License 1.1, from the release package `PkgTTF-Iosevka-34.8.1.zip` of [be5invis/Iosevka](https://github.com/be5invis/Iosevka/releases/tag/v34.8.1). It was the winner of a comparison of eleven monospaced and twelve proportional open faces rasterized into this cell: its advance is exactly half an em, so the em lands on 24 dots with no rounding and no vertical squeeze, its cap height is 17.6 of the 18 rows above the baseline against the 15 of Spleen, and it covers more of the codepage tables than anything else that was tried. Iosevka declares no Reserved Font Name, so the subset keeps the family and style names of the source.
+- **The subset is committed, not the family.** `Iosevka-Medium.ttf` is 10.8 MB; `tools/subset-font.js` keeps the 779 code points of `tools/codepoints.js` plus `.notdef` and writes 207 kB, 780 glyphs, with opentype.js. Everything but the outlines, the advance widths and a cmap is dropped. The output is not byte for byte reproducible, opentype.js stamps the head table with the time of the run, which is why it is a committed artefact and not a build step; the generate step that reads it is deterministic, three runs in a row give the same `generated/fonts.js`.
+- **`tools/codepoints.js`** is the one list of code points, shared by the subset tool and the generator, so that the font cannot hold glyphs the generator does not ask for or miss ones it does.
+- **The subset rasterizes to almost the same dots as the full family**, 42 of 779 glyphs in the 12x24 font and 24 in the 8x16 one differ, by a single dot on a curve each. opentype.js writes the implied on-curve points of a TrueType quadratic as half units and rounds them to integers, half a font unit at 1000 units per em, which flips a dot whose coverage sits exactly on the threshold. Verified by generating both ways and comparing glyph by glyph.
+
+The fitting rule, in `tools/rasterize.js`:
+
+- **The advance is the cell.** The advance width of `M` is scaled to exactly 12 dots for font A and 8 for font B, nothing is scaled horizontally, and a glyph keeps the side bearings the designer gave it inside its advance instead of being centred on its ink. That is what keeps the rhythm of a line even and holds `i`, `l`, `(` and `.` where the design puts them.
+- **The baseline is row 18 of the 24 row cell and row 12 of the 16 row one.** With Iosevka's half em advance that gives an em of 24 and 16 dots, a cap height of 17.64 and 11.76 dots, a descender of 5.35 and 3.57, and no vertical squeeze at all: `verticalCap` is 1 for both fonts. The squeeze is in the tool for a face that needs it, it caps the font so that the advance stays one cell wide, and a single glyph that is still too tall, an accented capital, is squeezed vertically by itself with its baseline where it is, to at most 70 percent of the size of the font.
+- **The ink threshold is 0.45**, a constant at the top of `tools/generate.js`, with an 8 by 8 grid of samples per dot and a nonzero winding fill. Under a half on purpose: that is dot gain, a stem that covers 45 percent of a dot still burns it, the way the heat of a thermal head bleeds into the dots around it. It is the value the prototype settled on for this weight; 0.55 thins Iosevka Medium until the light strokes break and 0.35 closes the counters of `a` and `e` at 12 dots.
+
+Box drawing, U+2500 to U+259F:
+
+- **Iosevka's own box drawing glyphs were tried first and are not used.** They do connect once they are drawn at the size of the face and clipped by the cell instead of squeezed per glyph, but they are drawn for a cell of 1.25 em, so at 24 dots per em the light line lands on rows 9 and 10 of the 24 row cell instead of the middle, the double line comes out as one line of two dots and one of one, and in the 8 by 16 cell of font B the two lines of a double merge into a solid bar of four dots. A `╔═╗` then reads as a heavy box with an uneven top. The box fixture, the rule fixture and the font B line of the fonts fixture were rendered both ways and compared as ASCII art before the switch.
+- **The synthetic set of `tools/box-drawing.js` is used instead**, ported from the prototype: a light line is two dots, a heavy line four, a double line two single dot lines three dots apart, centred in whatever cell it is drawn for, junctions drawn from their four arms, with the rule that a double line is interrupted where the perpendicular double line passes through it. Arcs, diagonals, the blocks and eighths and the three shades are drawn as well, so all 75 code points of the range are covered whatever the face has. A code point in the range the module does not draw would fall back to the glyph of the face, unsqueezed; there is none today.
+- The single rules land on the same rows as they did with Spleen, so a receipt that was set up around the old rule does not move.
+
+The human readable text of a barcode:
+
+- **Four white dot rows sit between the bars and the text**, `HRI_GAP` in `src/painter.js`, above the bars as well when the text is printed above them. Spleen left four blank rows above a capital inside its cell, Iosevka does not, its capitals start on the top row, so without a gap the text touched the bars. Four dots is a legibility choice, it is not in any specification, and it is still to be compared with what an Epson puts on paper. The block of a barcode with its text is that much taller, which is what the fixtures and the four tests that pin the height of such a block now expect.
+
+Fallback and coverage:
+
+- **The fallback glyph is U+FFFD of Iosevka**, a question mark in a diamond, since the face has it. The hollow box that the tool drew for Spleen is still there for a face without one.
+- **Coverage is 779 of the 1326 code points** of the codepage tables, against 527 with Spleen. Complete: cp437 with its Greek and symbol tail, the ISO 8859 and Windows Latin pages, Greek, Cyrillic, and the box drawing and block characters. Missing, and drawn as U+FFFD: Thai, Hebrew, Arabic and its presentation forms, Khmer, the Japanese half width katakana and a handful of CJK characters of the Japanese pages. Iosevka has no glyph for U+007F either, which is DEL and is never printed. A test asserts that every code point of cp437 from 0x20 to 0xFF has a glyph of its own, not the fallback, in both fonts.
+
+Sizes:
+
+- `generated/fonts.js` is 81 kB, against 54 kB with Spleen, for 779 glyphs of 48 and 16 bytes instead of 527 of 48 and 16. Well under the 200 kB the plan allows. The bundles grow with it: the UMD build is 159 kB, 47 kB gzipped, against 133 kB and 40 kB, and the unminified cjs and mjs builds are 242 kB. `data/fonts` is 207 kB of font and 4 kB of licence, against the 354 kB of the two BDF files it replaces.
+
+Fixtures and tests:
+
+- **All 52 golden PBM files changed and no `.bin` file did**, which is the point: the same bytes now draw other dots. Every fixture keeps its paper size to the row, so nothing moved on the page.
+- **36 `items.json` files changed, in the height of a feed item only.** The blank run below a line of text starts a row earlier than it did, because the deepest ink of Iosevka is on row 22 of the cell where Spleen's was on row 23, so a feed is a dot or two longer or shorter. The rows of paper add up to the same total.
+- **The fixtures were reviewed as ASCII art**: the single and double boxes closed on all four sides with the six dot gap of the 30 dot line spacing at each line boundary, the four rules straight over the full width and over twenty columns, the table columns aligned left, centre and right, the font B line with its box drawing characters connected in the 9 by 17 cell, the sizes up to three, the codepage lines decoding to `Café über Straße`, `Prijs: € 12,50` and `Привет мир` with real glyphs, the human readable text under every barcode readable as the value that was encoded, and the whole receipt fixture rendered to PNG.
+- **The parity exception grew by one line.** The `hri` fixture prints its last line of text in font B on ESC/POS and in font A on StarPRNT, and the two fonts do not put their deepest ink on the same row, so the blank run behind it differs by a dot and with it the height of the last feed item. The commands are otherwise identical, and the test compares them with the feed heights taken out for that one fixture. Every other fixture still has parity in paper and commands.
+- **The four tests that pin the height of a barcode block** were updated for the four dot gap, in the painter, both parsers and the font A against font B case of `GS f`.
+- **Tests that held the shape of a Spleen glyph were updated**: the ASCII art of the letter A, the ink columns of the A and the H in the alignment, size and style tests of the painter and the two parsers, the two feed tests that count the rows of an image, and the row of the 8x16 A in a 9x17 cell. The borrowed glyph test of section 1 is gone, there is nothing to borrow any more. The synthetic 4 by 4 font tests and the box drawing join tests are unchanged, and the join tests pass with the new glyphs without a single expectation being touched.
+- **The centring test of the human readable text compares centres** instead of the two margins around the ink. The text is centred cell by cell and the ink of a cell is not centred in it, so the side bearings of the first and the last character put the ink a dot or two off the middle of the bars.
+
+Documentation:
+
+- `documentation/design.md` names the font, the fitting rule, the threshold, the box drawing decision, the licence and the coverage in its Resources section, lists the new tools in the file tree, answers the open question with Iosevka, and credits Iosevka and opentype.js in its sources. The README and `documentation/usage.md` say what the built in font is. The keywords of `package.json` are about what the library does, not about which face it draws with, so they are unchanged.

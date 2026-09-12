@@ -345,9 +345,9 @@ describe('StarPrntRenderer', function() {
       const wide = stitch(render(stream(ESC, '@', ESC, 'i', 0, 1, 'H', LF)), {width: WIDTH});
       const normal = stitch(render(stream(ESC, '@', 'H', LF)), {width: WIDTH});
 
-      assert.equal(Bitmap.getPixel(wide, 2, 10), 1);
-      assert.equal(Bitmap.getPixel(wide, 3, 10), 1);
-      assert.equal(Bitmap.getPixel(normal, 3, 10), 0);
+      assert.equal(Bitmap.getPixel(wide, 6, 10), 1);
+      assert.equal(Bitmap.getPixel(wide, 7, 10), 1);
+      assert.equal(Bitmap.getPixel(normal, 6, 10), 0);
     });
 
     it('should go up to six times the size', function() {
@@ -688,10 +688,10 @@ describe('StarPrntRenderer', function() {
       const with_ = stitch(render(stream(ESC, '@', ESC, 'b', [3, 2, 2, 40], '4006381333931', [RS])), {width: WIDTH});
 
       /* The text is one line of font A cells, which are 24 dots tall in the
-         Star profile */
+         Star profile, with the four dot gap between the bars and the text */
 
       assert.equal(without.height, 40);
-      assert.equal(with_.height, 64);
+      assert.equal(with_.height, 68);
     });
 
     it('should print nothing for data that is not valid for the symbology', function() {
@@ -996,14 +996,15 @@ describe('StarPrntRenderer', function() {
     it('should turn the runs of blank rows into feed items', function() {
       const items = render(fixture('star-prnt', 'feed').bytes, {commands: ['feed']});
 
-      /* The eight dots below a line of text are blank as well, so they belong
-         to the run that follows them. The cut of this receipt is not supported
-         here, so it does not end a segment and the blank rows on both sides of
-         it are one run */
+      /* The nine dots below a line of text are blank as well, the eight of the
+         line spacing and the bottom row of the cell, so they belong to the run
+         that follows them. The cut of this receipt is not supported here, so it
+         does not end a segment and the blank rows on both sides of it are one
+         run */
 
       assert.deepEqual(
           items.map((item) => `${item.type}:${item.height}`),
-          ['image:24', 'feed:108', 'image:20', 'feed:232'],
+          ['image:23', 'feed:105', 'image:23', 'feed:233'],
       );
     });
 

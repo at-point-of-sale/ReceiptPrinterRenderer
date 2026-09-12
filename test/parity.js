@@ -145,9 +145,23 @@ describe('parity between the renderers', function() {
         }
       });
 
-      it('should emit the same commands in both languages', function() {
+      it(EXCEPTIONS[name] ?
+        'should emit the same commands in both languages, apart from the height of a feed' :
+        'should emit the same commands in both languages', function() {
         const left = new EscPosRenderer(OPTIONS).render(fixture('esc-pos', name).bytes);
         const right = new StarPrntRenderer(OPTIONS).render(fixture('star-prnt', name).bytes);
+
+        /* The exception prints its last line of text in another font, and the
+           two fonts do not put their deepest ink on the same row, so the blank
+           run that follows it, and with it the feed item, is a dot longer in
+           one language than in the other. The commands themselves are the same */
+
+        if (EXCEPTIONS[name]) {
+          const shape = (item) => item.type === 'feed' ? {type: item.type} : item;
+
+          assert.deepEqual(commands(right).map(shape), commands(left).map(shape));
+          return;
+        }
 
         assert.deepEqual(commands(right), commands(left));
       });

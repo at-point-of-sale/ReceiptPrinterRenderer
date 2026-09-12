@@ -245,9 +245,9 @@ describe('EscPosRenderer', function() {
       const normal = stitch(render(stream(ESC, '@', 'H', LF)), {width: WIDTH});
 
       assert.equal(wide.height, normal.height);
-      assert.equal(Bitmap.getPixel(wide, 2, 10), 1);
-      assert.equal(Bitmap.getPixel(wide, 3, 10), 1);
-      assert.equal(Bitmap.getPixel(normal, 3, 10), 0);
+      assert.equal(Bitmap.getPixel(wide, 6, 10), 1);
+      assert.equal(Bitmap.getPixel(wide, 7, 10), 1);
+      assert.equal(Bitmap.getPixel(normal, 6, 10), 0);
     });
 
     it('should draw an underline two dots thick with ESC - 2', function() {
@@ -563,19 +563,21 @@ describe('EscPosRenderer', function() {
         return items[0].height;
       };
 
-      /* One line of font A, 24 dots, above the bars, below them, or both */
+      /* One line of font A, 24 dots, plus the four dot gap, above the bars,
+         below them, or both */
 
-      assert.deepEqual([height(0), height(1), height(2), height(3)], [60, 84, 84, 108]);
+      assert.deepEqual([height(0), height(1), height(2), height(3)], [60, 88, 88, 116]);
     });
 
     it('should draw the human readable text in font A by default and in font B after GS f 1', function() {
       const fontA = render(barcode(GS, 'H', 2, GS, 'k', 2, '4006381333931', [0]))[0];
       const fontB = render(barcode(GS, 'H', 2, GS, 'f', 1, GS, 'k', 2, '4006381333931', [0]))[0];
 
-      /* Font A is 24 dots tall, font B is 17 in the Epson profile */
+      /* Font A is 24 dots tall and font B is 17 in the Epson profile, both
+         with the four dot gap between the bars and the text */
 
-      assert.equal(fontA.height, 84);
-      assert.equal(fontB.height, 77);
+      assert.equal(fontA.height, 88);
+      assert.equal(fontB.height, 81);
     });
 
     it('should centre the human readable text under the bars', function() {
@@ -586,7 +588,12 @@ describe('EscPosRenderer', function() {
 
       assert.isAbove(text.min, bars.min);
       assert.isBelow(text.max, bars.max);
-      assert.closeTo(text.min - bars.min, bars.max - text.max, 2);
+
+      /* The text is centred cell by cell, and the ink of a cell is not centred
+         in it: the side bearings of the first and the last character differ, so
+         the ink of the text sits a dot or two off the middle of the bars */
+
+      assert.closeTo((text.min + text.max) / 2, (bars.min + bars.max) / 2, 3);
     });
 
     it('should align a barcode the way the alignment says', function() {
@@ -958,14 +965,15 @@ describe('EscPosRenderer', function() {
     it('should turn the runs of blank rows into feed items', function() {
       const items = render(fixture('esc-pos', 'feed').bytes, {commands: ['feed']});
 
-      /* The six dots below a line of text are blank as well, so they belong to
-         the run that follows them. The cut of this receipt is not supported
-         here, so it does not end a segment and the blank rows on both sides of
-         it are one run */
+      /* The seven dots below a line of text are blank as well, the six of the
+         line spacing and the bottom row of the cell, so they belong to the run
+         that follows them. The cut of this receipt is not supported here, so it
+         does not end a segment and the blank rows on both sides of it are one
+         run */
 
       assert.deepEqual(
           items.map((item) => `${item.type}:${item.height}`),
-          ['image:24', 'feed:100', 'image:20', 'feed:216'],
+          ['image:23', 'feed:97', 'image:23', 'feed:217'],
       );
     });
 

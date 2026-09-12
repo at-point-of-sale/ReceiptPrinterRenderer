@@ -1,3 +1,5 @@
+import CodepageEncoder from '@point-of-sale/codepage-encoder';
+
 import Font from '../src/font.js';
 import Bitmap from '../src/bitmap.js';
 import {toAscii, fromAscii} from './helpers/ascii.js';
@@ -143,17 +145,37 @@ describe('Font', function() {
       }
     });
 
-    it('should have the characters of cp437 that only the small font has', function() {
+    it('should have the Greek and the symbols of the tail of cp437', function() {
       for (const codepoint of [0x3b1, 0x192, 0x2302, 0x20a7, 0x221e]) {
         assert.isTrue(font.has(codepoint), `missing glyph for ${codepoint}`);
       }
     });
 
-    it('should draw a borrowed character instead of the fallback box', function() {
+    it('should draw a glyph of its own for those, not the fallback', function() {
       assert.notDeepEqual(
           Array.from(font.lookup(0x3b1).data),
           Array.from(font.fallback.data),
       );
+    });
+
+    it('should have a glyph for every code point of cp437 in both fonts', function() {
+      const table = CodepageEncoder.getCodepoints('cp437', true);
+
+      for (const name of ['12x24', '8x16']) {
+        const size = Font.get(name);
+
+        for (let byte = 0x20; byte <= 0xff; byte++) {
+          const codepoint = table[byte];
+
+          assert.isTrue(size.has(codepoint), `${name} has no glyph for byte ${byte}, code point ${codepoint}`);
+
+          assert.notDeepEqual(
+              Array.from(size.lookup(codepoint).data),
+              Array.from(size.fallback.data),
+              `${name} draws the fallback for byte ${byte}, code point ${codepoint}`,
+          );
+        }
+      }
     });
 
     it('should return a glyph of the size of the cell', function() {
@@ -195,12 +217,14 @@ describe('Font', function() {
       );
     });
 
-    it('should draw the fallback glyph as a hollow box', function() {
+    it('should draw the fallback glyph as the replacement character of the font', function() {
       const art = toAscii(font.fallback);
 
-      assert.deepEqual(art[4], '.##########.');
-      assert.deepEqual(art[10], '.#........#.');
-      assert.deepEqual(art[17], '.##########.');
+      /* U+FFFD of Iosevka, a question mark in a diamond */
+
+      assert.deepEqual(art[2], '.....##.....');
+      assert.deepEqual(art[11], '..########..');
+      assert.deepEqual(art[17], '.....##.....');
     });
   });
 
@@ -210,25 +234,25 @@ describe('Font', function() {
 
     it('should look like an A', function() {
       assert.deepEqual(toAscii(cell), [
-        '............',
-        '............',
-        '............',
-        '............',
+        '.....##.....',
+        '....####....',
+        '....####....',
+        '....####....',
+        '....####....',
+        '....####....',
         '...######...',
+        '...##..##...',
+        '...##..##...',
+        '...##..##...',
+        '...##..##...',
+        '..###..###..',
+        '..########..',
+        '..########..',
         '..##....##..',
+        '.###....###.',
+        '.###....###.',
         '.##......##.',
-        '.##......##.',
-        '.##......##.',
-        '.##......##.',
-        '.##......##.',
-        '.##########.',
-        '.##......##.',
-        '.##......##.',
-        '.##......##.',
-        '.##......##.',
-        '.##......##.',
-        '.##......##.',
-        '.##......##.',
+        '............',
         '............',
         '............',
         '............',
@@ -248,7 +272,8 @@ describe('Font', function() {
       assert.equal(cell.width, 9);
       assert.equal(cell.height, 17);
 
-      assert.deepEqual(toAscii(cell)[2], '.#####...');
+      assert.deepEqual(toAscii(cell)[2], '...##....');
+      assert.deepEqual(toAscii(cell)[8], '.######..');
       assert.deepEqual(toAscii(cell)[16], '.........');
     });
 

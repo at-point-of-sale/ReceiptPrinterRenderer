@@ -1,6 +1,9 @@
 import fs from 'node:fs';
 import {stringify} from 'javascript-stringify';
-import CodepageEncoder from '@point-of-sale/codepage-encoder';
+
+import Rasterizer from './rasterize.js';
+import {boxGlyph, BOX_DRAWING} from './box-drawing.js';
+import {usedCodepoints, REPLACEMENT_CHARACTER} from './codepoints.js';
 
 /*
     Generates the packed resources in generated/ from the sources in data/:
@@ -8,8 +11,8 @@ import CodepageEncoder from '@point-of-sale/codepage-encoder';
     - generated/mapping.js    codepage mappings from data/mappings, the same
                               text format and output as ReceiptPrinterEncoder
     - generated/profiles.js   printer profiles from data/profiles
-    - generated/fonts.js      packed glyph bitmaps from the BDF fonts in
-                              data/fonts, added together with the painter
+    - generated/fonts.js      packed glyph bitmaps, rasterized from the outline
+                              font in data/fonts, added together with the painter
 
     See documentation/design.md for the formats.
 */
@@ -108,164 +111,54 @@ function generateProfiles() {
     The fallback glyph is U+FFFD when the font has it, and a hollow box drawn
     here when it does not.
 
-    Spleen 12x24 has fewer glyphs than Spleen 8x16, it misses the Greek and
-    mathematical tail of cp437 among others. A font with a `borrow` font takes
-    the glyphs it does not have from that font, centred in its own cell, so that
-    font A prints the same characters as font B instead of a row of fallback
-    boxes.
+    The glyphs are rasterized from the outline font in data/fonts, Iosevka
+    Medium, subset by tools/subset-font.js. The face is monospaced, so it is
+    fitted by its advance width, see tools/rasterize.js: the advance of one
+    character is exactly one cell, 12 dots for font A and 8 for font B, which
+    puts the em of Iosevka, whose advance is half an em, on 24 and 16 dots, and
+    the baseline on row 18 of font A and row 12 of font B. Nothing is squeezed
+    horizontally, so the rhythm of the face survives dot for dot.
 */
 
-/* The fonts that are packed, in the order they appear in the output */
+/* The outline font the glyphs are rasterized from */
+
+const SOURCE = 'data/fonts/iosevka-medium-subset.ttf';
+
+/*
+    The fraction of a dot the outline has to cover for the dot to be ink. This
+    is the value for Iosevka Medium at these sizes: well under a half, which is
+    dot gain, the way the heat of a thermal head bleeds into the dots around a
+    stem. A higher value thins the face until the light strokes of a `%` break,
+    a lower one closes the counters of `a` and `e`.
+*/
+
+const INK_THRESHOLD = 0.45;
+
+/* Samples per dot on each axis when the coverage of a dot is measured */
+
+const SAMPLES = 8;
+
+/* The fonts that are packed, in the order they appear in the output, with the
+   cell they are drawn in and the row their baseline sits on */
 
 const FONTS = [
-  {name: '12x24', file: 'data/fonts/spleen-12x24.bdf', borrow: '8x16'},
-  {name: '8x16', file: 'data/fonts/spleen-8x16.bdf'},
+  {name: '12x24', width: 12, height: 24, baseline: 18},
+  {name: '8x16', width: 8, height: 16, baseline: 12},
 ];
 
-const REPLACEMENT_CHARACTER = 0xfffd;
+/*
+    The box drawing and block characters, U+2500 to U+259F, are not taken from
+    the outline font, they are drawn on the dot grid by tools/box-drawing.js,
+    which says why. A code point in that range that it does not draw falls back
+    to the glyph of the font, at the size of the face and clipped by the cell
+    instead of squeezed to fit it, so that at least those land on the same dots
+    as each other.
+*/
 
 /**
- * Parse a BDF font into its bounding box and its glyphs
+ * Draw a hollow box, the fallback glyph for a font without U+FFFD
  *
- * @param  {string}   source   Contents of the BDF file
- * @return {object}            Bounding box of the font and a map of code point to glyph
- */
-function parseBdf(source) {
-  const font = {width: 0, height: 0, x: 0, y: 0, glyphs: new Map()};
-
-  let codepoint = null;
-  let box = null;
-  let rows = null;
-
-  for (const line of source.split('\n')) {
-    const value = line.trim();
-
-    if (value.startsWith('FONTBOUNDINGBOX ')) {
-      const [width, height, x, y] = value.split(/\s+/).slice(1).map(Number);
-      Object.assign(font, {width, height, x, y});
-    } else if (value.startsWith('ENCODING ')) {
-      codepoint = parseInt(value.slice(9), 10);
-    } else if (value.startsWith('BBX ')) {
-      box = value.split(/\s+/).slice(1).map(Number);
-    } else if (value === 'BITMAP') {
-      rows = [];
-    } else if (value.startsWith('STARTCHAR')) {
-      codepoint = null;
-      box = null;
-      rows = null;
-    } else if (value === 'ENDCHAR') {
-      /* A character without an ENCODING, or without a bitmap, is not a glyph */
-
-      if (rows && box && codepoint !== null && codepoint >= 0) {
-        font.glyphs.set(codepoint, {box, rows});
-      }
-
-      codepoint = null;
-      box = null;
-      rows = null;
-    } else if (rows) {
-      rows.push(value);
-    }
-  }
-
-  return font;
-}
-
-/**
- * Pack one BDF glyph into the rows of the font cell
- *
- * @param  {object}       font    Font as parseBdf returned it
- * @param  {object}       glyph   One glyph of that font
- * @return {Uint8Array}           Packed rows of the cell
- */
-function packGlyph(font, glyph) {
-  const rowBytes = Math.ceil(font.width / 8);
-  const cell = new Uint8Array(font.height * rowBytes);
-
-  const [width, height, x, y] = glyph.box;
-
-  /* The BDF origin is the baseline, the cell origin is the top left corner */
-
-  const top = font.y + font.height - (y + height);
-  const left = x - font.x;
-
-  for (let row = 0; row < height; row++) {
-    const target = top + row;
-
-    if (target < 0 || target >= font.height) {
-      continue;
-    }
-
-    const bits = glyph.rows[row];
-
-    for (let column = 0; column < width; column++) {
-      const byte = parseInt(bits.substr((column >> 3) * 2, 2), 16);
-
-      if (!(byte & (0x80 >> (column & 7)))) {
-        continue;
-      }
-
-      const dot = left + column;
-
-      if (dot < 0 || dot >= font.width) {
-        continue;
-      }
-
-      cell[target * rowBytes + (dot >> 3)] |= 0x80 >> (dot & 7);
-    }
-  }
-
-  return cell;
-}
-
-/**
- * Draw a glyph of another font in the cell of this font, centred, so that a
- * font can borrow the glyphs it does not have itself
- *
- * @param  {object}       font    Font that borrows the glyph
- * @param  {object}       donor   Font as parseBdf returned it, the one that has the glyph
- * @param  {object}       glyph   One glyph of the donor font
- * @return {Uint8Array}           Packed rows of the cell of the borrowing font
- */
-function borrowGlyph(font, donor, glyph) {
-  const source = packGlyph(donor, glyph);
-  const sourceBytes = Math.ceil(donor.width / 8);
-
-  const rowBytes = Math.ceil(font.width / 8);
-  const cell = new Uint8Array(font.height * rowBytes);
-
-  const left = Math.floor((font.width - donor.width) / 2);
-  const top = Math.floor((font.height - donor.height) / 2);
-
-  for (let row = 0; row < donor.height; row++) {
-    const target = top + row;
-
-    if (target < 0 || target >= font.height) {
-      continue;
-    }
-
-    for (let column = 0; column < donor.width; column++) {
-      if (!(source[row * sourceBytes + (column >> 3)] & (0x80 >> (column & 7)))) {
-        continue;
-      }
-
-      const dot = left + column;
-
-      if (dot < 0 || dot >= font.width) {
-        continue;
-      }
-
-      cell[target * rowBytes + (dot >> 3)] |= 0x80 >> (dot & 7);
-    }
-  }
-
-  return cell;
-}
-
-/**
- * Draw a hollow box, the fallback glyph for fonts without U+FFFD
- *
- * @param  {object}       font   Font as parseBdf returned it
+ * @param  {object}       font   Cell of the font
  * @return {Uint8Array}          Packed rows of the cell
  */
 function packFallback(font) {
@@ -293,52 +186,31 @@ function packFallback(font) {
 }
 
 /**
- * Every code point that can occur in a codepage of the codepage encoder, plus
- * printable ASCII, which every codepage shares
- *
- * @return {number[]}   Sorted list of code points
- */
-function usedCodepoints() {
-  const used = new Set();
-
-  for (const encoding of CodepageEncoder.getEncodings()) {
-    for (const codepoint of CodepageEncoder.getCodepoints(encoding, true)) {
-      if (codepoint) {
-        used.add(codepoint);
-      }
-    }
-  }
-
-  for (let codepoint = 0x20; codepoint <= 0x7e; codepoint++) {
-    used.add(codepoint);
-  }
-
-  return [...used].sort((a, b) => a - b);
-}
-
-/**
- * Pack the BDF fonts in data/fonts into the format documented above
+ * Rasterize the outline font in data/fonts into the format documented above
  *
  * @return {string}   Contents of generated/fonts.js
  */
 function generateFonts() {
   const codepoints = usedCodepoints();
-
-  /* Every font is parsed first, because a font can borrow from another one */
-
-  const parsed = new Map(FONTS.map(({name, file}) => [name, parseBdf(fs.readFileSync(file, 'utf8'))]));
+  const rasterizer = new Rasterizer(SOURCE);
 
   let output = 'const fonts = {\n';
 
-  for (const {name, borrow} of FONTS) {
-    const font = parsed.get(name);
-    const donor = borrow ? parsed.get(borrow) : null;
+  for (const font of FONTS) {
+    const metrics = rasterizer.metrics(font);
+
+    const box = (codepoint) => codepoint >= BOX_DRAWING.first && codepoint <= BOX_DRAWING.last;
+
+    const draw = (codepoint) => (box(codepoint) ? boxGlyph(codepoint, font.width, font.height) : null) ||
+      rasterizer.glyph(codepoint, font, metrics, {
+        threshold: INK_THRESHOLD,
+        samples: SAMPLES,
+        squeeze: !box(codepoint),
+      });
 
     /* Glyph 0 is the fallback, the rest follows in code point order */
 
-    const fallback = font.glyphs.has(REPLACEMENT_CHARACTER) ?
-      packGlyph(font, font.glyphs.get(REPLACEMENT_CHARACTER)) :
-      packFallback(font);
+    const fallback = draw(REPLACEMENT_CHARACTER) || packFallback(font);
 
     const cells = [fallback];
     const index = {};
@@ -348,13 +220,9 @@ function generateFonts() {
         continue;
       }
 
-      let cell = null;
+      const cell = draw(codepoint);
 
-      if (font.glyphs.has(codepoint)) {
-        cell = packGlyph(font, font.glyphs.get(codepoint));
-      } else if (donor && donor.glyphs.has(codepoint)) {
-        cell = borrowGlyph(font, donor, donor.glyphs.get(codepoint));
-      } else {
+      if (!cell) {
         continue;
       }
 
@@ -366,7 +234,12 @@ function generateFonts() {
 
     const data = Buffer.concat(cells).toString('base64');
 
-    output += `\t'${name}': {\n`;
+    process.stdout.write(
+        `${font.name}: ${cells.length} glyphs of ${codepoints.length} code points, ` +
+        `em ${metrics.size} dots, cap ${metrics.cap}, descender ${metrics.descender}\n`,
+    );
+
+    output += `\t'${font.name}': {\n`;
     output += `\t\twidth: ${font.width},\n`;
     output += `\t\theight: ${font.height},\n`;
     output += '\t\tfallback: 0,\n';

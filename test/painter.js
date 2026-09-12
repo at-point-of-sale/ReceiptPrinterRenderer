@@ -228,8 +228,8 @@ describe('Painter', function() {
 
       const bitmap = stitch(paper.end(), {width: WIDTH});
 
-      assert.equal(Bitmap.getPixel(bitmap, 1, 10), 1);
-      assert.equal(Bitmap.getPixel(bitmap, 85, 10), 0);
+      assert.equal(Bitmap.getPixel(bitmap, 3, 10), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 87, 10), 0);
     });
 
     it('should put a right aligned line against the right edge', function() {
@@ -241,8 +241,8 @@ describe('Painter', function() {
 
       const bitmap = stitch(paper.end(), {width: WIDTH});
 
-      assert.equal(Bitmap.getPixel(bitmap, 1, 10), 0);
-      assert.equal(Bitmap.getPixel(bitmap, 85, 10), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 3, 10), 0);
+      assert.equal(Bitmap.getPixel(bitmap, 87, 10), 1);
     });
 
     it('should centre a centred line', function() {
@@ -254,9 +254,9 @@ describe('Painter', function() {
 
       const bitmap = stitch(paper.end(), {width: WIDTH});
 
-      assert.equal(Bitmap.getPixel(bitmap, 1, 10), 0);
-      assert.equal(Bitmap.getPixel(bitmap, 43, 10), 1);
-      assert.equal(Bitmap.getPixel(bitmap, 85, 10), 0);
+      assert.equal(Bitmap.getPixel(bitmap, 3, 10), 0);
+      assert.equal(Bitmap.getPixel(bitmap, 45, 10), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 87, 10), 0);
     });
 
     it('should not accept an alignment it does not know', function() {
@@ -422,7 +422,9 @@ describe('Painter', function() {
 
       const items = paper.end();
 
-      assert.equal(items[0].height, 40 + 24);
+      /* The bars, the four dot gap and one line of font A cells */
+
+      assert.equal(items[0].height, 40 + 4 + 24);
     });
 
     it('should draw a QR code as a block of its own', function() {
@@ -658,7 +660,7 @@ describe('Painter', function() {
       const bitmap = stitch(paper.end(), {width: WIDTH});
 
       assert.equal(bitmap.height, 30);
-      assert.equal(Bitmap.getPixel(bitmap, 1, 10), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 3, 10), 1);
     });
   });
 
@@ -679,7 +681,7 @@ describe('Painter', function() {
       const bitmap = stitch(paper.end(), {width: WIDTH});
 
       assert.equal(bitmap.height, 30);
-      assert.equal(Bitmap.getPixel(bitmap, 1, 10), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 3, 10), 1);
     });
   });
 });
