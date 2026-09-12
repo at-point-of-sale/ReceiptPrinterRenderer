@@ -3,6 +3,7 @@
     "lineSpacing": 30,
     "motionUnit": 2,
     "dpi": 203,
+    "pageHeight": 1662,
     "fonts": {
         "A": { "width": 12, "height": 24 },
         "B": { "width": 9, "height": 17 }

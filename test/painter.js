@@ -1431,4 +1431,623 @@ describe('Painter', function() {
       assert.deepEqual(paper.end(), empty.end());
     });
   });
+  describe('page mode', function() {
+    /* A page of this narrow printer: the whole width and a few lines tall */
+
+    const AREA = {x: 0, y: 0, width: WIDTH, height: 96};
+
+    /**
+     * A rectangle of a bitmap, so that the print area of a page can be compared
+     * with the same content in another direction
+     *
+     * @param  {object}   bitmap   The bitmap to cut from
+     * @param  {number}   x        Left edge of the rectangle
+     * @param  {number}   y        Top row of the rectangle
+     * @param  {number}   width    Width of the rectangle
+     * @param  {number}   height   Height of the rectangle
+     * @return {object}            The rectangle
+     */
+    function crop(bitmap, x, y, width, height) {
+      const result = Bitmap.create(width, height);
+
+      for (let row = 0; row < height; row++) {
+        for (let column = 0; column < width; column++) {
+          Bitmap.setPixel(result, column, row, Bitmap.getPixel(bitmap, x + column, y + row));
+        }
+      }
+
+      return result;
+    }
+
+    /**
+     * The paper of a page with two lines on it, in one print direction
+     *
+     * @param  {number}   direction   The print direction, 0 to 3
+     * @return {object}               The paper
+     */
+    function page(direction) {
+      const paper = painter();
+
+      paper.page(true);
+      paper.pageArea(AREA);
+      paper.pageDirection(direction);
+      paper.text('Hi');
+      paper.lineFeed();
+      paper.text('.');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      return stitch(paper.end(), {width: WIDTH});
+    }
+
+    it('should report whether it is in page mode', function() {
+      const paper = painter();
+
+      assert.isFalse(paper.pageMode);
+
+      paper.page(true);
+      assert.isTrue(paper.pageMode);
+
+      paper.page(false);
+      assert.isFalse(paper.pageMode);
+    });
+
+    it('should print the page as a block of the height of its print area', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.pageArea(AREA);
+      paper.text('Hi');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      const items = paper.end();
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, AREA.height);
+    });
+
+    it('should print a page of direction 0 as the same lines as standard mode', function() {
+      const standard = painter();
+
+      standard.text('Hi');
+      standard.lineFeed();
+      standard.text('.');
+      standard.lineFeed();
+      standard.feed(96 - 60);
+
+      assert.deepEqual(
+          toAscii(page(0)),
+          toAscii(stitch(standard.end(), {width: WIDTH})),
+      );
+    });
+
+    it('should turn direction 1 a quarter turn counter-clockwise', function() {
+      assert.deepEqual(
+          toAscii(crop(page(1), 0, 0, AREA.width, AREA.height)),
+          toAscii(Bitmap.rotate90(crop(page(0), 0, 0, AREA.height, AREA.width))),
+      );
+    });
+
+    it('should turn direction 2 half a turn', function() {
+      assert.deepEqual(
+          toAscii(crop(page(2), 0, 0, AREA.width, AREA.height)),
+          toAscii(Bitmap.rotate180(crop(page(0), 0, 0, AREA.width, AREA.height))),
+      );
+    });
+
+    it('should turn direction 3 a quarter turn clockwise', function() {
+      assert.deepEqual(
+          toAscii(crop(page(3), 0, 0, AREA.width, AREA.height)),
+          toAscii(Bitmap.rotate270(crop(page(0), 0, 0, AREA.height, AREA.width))),
+      );
+    });
+
+    it('should lay a sideways direction out over the height of the area', function() {
+      const paper = painter();
+
+      /* An area of 24 by 96 dots holds two characters of font A per line in
+         direction 0 and eight of them in direction 1, where a line runs along
+         the height of the area */
+
+      paper.page(true);
+      paper.pageArea({x: 0, y: 0, width: 24, height: 96});
+      paper.pageDirection(1);
+      paper.text('AAAAAAAA');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      const items = paper.end();
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 96);
+    });
+
+    it('should wrap text inside the print area', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.pageArea({x: 0, y: 0, width: 24, height: 96});
+      paper.text('AAAA');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      /* Two characters fit on a line of 24 dots, so the other two are on the
+         line below and nothing is drawn to the right of the area */
+
+      assert.equal(Bitmap.getPixel(bitmap, 15, 10), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 15, 40), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 27, 10), 0);
+    });
+
+    it('should discard the dots below the print area', function() {
+      const paper = painter();
+      const shorter = painter();
+
+      paper.page(true);
+      paper.pageArea({x: 0, y: 0, width: WIDTH, height: 30});
+      paper.text('A');
+      paper.lineFeed();
+      paper.text('B');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      shorter.page(true);
+      shorter.pageArea({x: 0, y: 0, width: WIDTH, height: 30});
+      shorter.text('A');
+      shorter.lineFeed();
+      shorter.printPage();
+      shorter.page(false);
+
+      assert.deepEqual(
+          toAscii(stitch(paper.end(), {width: WIDTH})),
+          toAscii(stitch(shorter.end(), {width: WIDTH})),
+      );
+    });
+
+    it('should put the area at its origin on the page', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.pageArea({x: 24, y: 48, width: 24, height: 48});
+      paper.text('A');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(bitmap.height, 96);
+      assert.equal(Bitmap.getPixel(bitmap, 27, 58), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 3, 10), 0);
+    });
+
+    it('should ignore a print area with a size of zero', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.pageArea({x: 0, y: 0, width: 24, height: 48});
+      paper.pageArea({x: 0, y: 0, width: 0, height: 48});
+      paper.pageArea({x: 0, y: 0, width: 24, height: 0});
+      paper.text('A');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(bitmap.height, 48);
+      assert.equal(Bitmap.getPixel(bitmap, 3, 10), 1);
+    });
+
+    it('should lay out over the whole printable area without an area of its own', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.align('right');
+      paper.text('A');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      /* The line is against the right edge of the paper, so the area is the
+         paper, and the page is as tall as its dots because no area was set */
+
+      assert.equal(Bitmap.getPixel(stitch(paper.end(), {width: WIDTH}), WIDTH - 9, 10), 1);
+    });
+
+    it('should keep the area and the direction until they are reset', function() {
+      const paper = painter();
+
+      paper.pageArea({x: 0, y: 0, width: 48, height: 30});
+      paper.pageDirection(2);
+
+      paper.page(true);
+      paper.text('A');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      /* A second page takes the same area and the same direction, which were
+         set before the first page and survived it */
+
+      paper.page(true);
+      paper.text('A');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(bitmap.height, 60);
+      assert.deepEqual(
+          toAscii(Bitmap.extractRows(bitmap, 0, 30)),
+          toAscii(Bitmap.extractRows(bitmap, 30, 30)),
+      );
+
+      /* Direction 2 puts the character against the right edge of the area,
+         upside down */
+
+      assert.equal(Bitmap.getPixel(bitmap, 44, 19), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 3, 10), 0);
+    });
+
+    it('should put the area back on reset()', function() {
+      const paper = painter();
+
+      paper.pageArea({x: 0, y: 0, width: 48, height: 30});
+      paper.reset();
+
+      paper.page(true);
+      paper.align('right');
+      paper.text('A');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      assert.equal(Bitmap.getPixel(stitch(paper.end(), {width: WIDTH}), WIDTH - 9, 10), 1);
+    });
+
+    it('should feed the paper for an area that stayed empty', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.pageArea({x: 0, y: 0, width: WIDTH, height: 100});
+      paper.text('A');
+      paper.lineFeed();
+      paper.pageArea({x: 0, y: 100, width: WIDTH, height: 100});
+      paper.printPage();
+      paper.page(false);
+
+      const items = paper.end();
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 200);
+    });
+
+    it('should ignore an area whose origin is outside the page', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.pageArea({x: 0, y: 0, width: 24, height: 48});
+      paper.pageArea({x: WIDTH, y: 0, width: 24, height: 48});
+      paper.text('A');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(bitmap.height, 48);
+      assert.equal(Bitmap.getPixel(bitmap, 3, 10), 1);
+    });
+
+    it('should compose several print areas into one page', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.pageArea({x: 0, y: 0, width: 48, height: 30});
+      paper.text('A');
+      paper.lineFeed();
+      paper.pageArea({x: 48, y: 30, width: 48, height: 30});
+      paper.text('B');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(bitmap.height, 60);
+      assert.equal(Bitmap.getPixel(bitmap, 3, 10), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 51, 40), 1);
+    });
+
+    it('should move the position with pageVertical()', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.pageArea(AREA);
+      paper.pageVertical(48);
+      paper.text('A');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(Bitmap.getPixel(bitmap, 3, 58), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 3, 10), 0);
+    });
+
+    it('should count a relative move from the position', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.pageArea(AREA);
+      paper.pageVertical(30);
+      paper.pageVertical(30, {relative: true});
+      paper.text('A');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      assert.equal(Bitmap.getPixel(stitch(paper.end(), {width: WIDTH}), 3, 70), 1);
+    });
+
+    it('should ignore a position outside the print area', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.pageArea(AREA);
+      paper.pageVertical(1000);
+      paper.pageVertical(-30, {relative: true});
+      paper.text('A');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      assert.equal(Bitmap.getPixel(stitch(paper.end(), {width: WIDTH}), 3, 10), 1);
+    });
+
+    it('should draw the characters of the line before the position moves', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.pageArea(AREA);
+      paper.text('A');
+      paper.pageVertical(48);
+      paper.text('B');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(Bitmap.getPixel(bitmap, 3, 10), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 15, 58), 1);
+    });
+
+    it('should keep the page on printPage({keep: true})', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.pageArea({x: 0, y: 0, width: WIDTH, height: 30});
+      paper.text('A');
+      paper.lineFeed();
+      paper.printPage({keep: true});
+      paper.printPage({keep: true});
+      paper.page(false);
+
+      const items = paper.end();
+      const bitmap = stitch(items, {width: WIDTH});
+
+      assert.equal(bitmap.height, 60);
+      assert.equal(Bitmap.getPixel(bitmap, 3, 10), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 3, 40), 1);
+    });
+
+    it('should clear the page on printPage()', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.pageArea({x: 0, y: 0, width: WIDTH, height: 30});
+      paper.text('A');
+      paper.lineFeed();
+      paper.printPage();
+      paper.printPage();
+      paper.page(false);
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(bitmap.height, 60);
+      assert.equal(Bitmap.getPixel(bitmap, 3, 10), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 3, 40), 0);
+    });
+
+    it('should throw the dots away and keep the area on cancelPage()', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.pageArea({x: 0, y: 0, width: WIDTH, height: 48});
+      paper.text('A');
+      paper.lineFeed();
+      paper.cancelPage();
+      paper.text('B');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+      const b = painter();
+
+      b.text('B');
+      b.lineFeed();
+      b.feed(18);
+
+      assert.equal(bitmap.height, 48);
+      assert.deepEqual(toAscii(bitmap), toAscii(stitch(b.end(), {width: WIDTH})));
+    });
+
+    it('should throw the page away when page mode is left', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.pageArea(AREA);
+      paper.text('A');
+      paper.lineFeed();
+      paper.page(false);
+
+      assert.deepEqual(paper.end(), []);
+    });
+
+    it('should throw the page away at the end of the stream', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.pageArea(AREA);
+      paper.text('A');
+      paper.lineFeed();
+
+      assert.deepEqual(paper.end(), []);
+    });
+
+    it('should leave page mode on reset()', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.reset();
+
+      assert.isFalse(paper.pageMode);
+    });
+
+    it('should print nothing for a page without an area and without dots', function() {
+      const paper = painter();
+
+      paper.text('A');
+      paper.lineFeed();
+      paper.page(true);
+      paper.printPage();
+      paper.page(false);
+      paper.text('B');
+      paper.lineFeed();
+
+      const same = painter();
+
+      same.text('A');
+      same.lineFeed();
+      same.text('B');
+      same.lineFeed();
+
+      assert.deepEqual(paper.end(), same.end());
+    });
+
+    it('should be as tall as its dots when it was given no area', function() {
+      const paper = painter();
+      const standard = painter();
+
+      paper.page(true);
+      paper.text('A');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      standard.text('A');
+      standard.lineFeed();
+
+      /* The row below the deepest dot of the same line in standard mode */
+
+      const rows = toAscii(stitch(standard.end(), {width: WIDTH}));
+      const ink = rows.reduce((last, row, index) => row.includes('#') ? index + 1 : last, 0);
+
+      const items = paper.end();
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, ink);
+    });
+
+    it('should not enter page mode while a line is being composed', function() {
+      const paper = painter();
+
+      paper.text('A');
+      paper.page(true);
+
+      assert.isFalse(paper.pageMode);
+    });
+
+    it('should hold a cut until the page is printed', function() {
+      const paper = painter({commands: ['cut']});
+
+      paper.page(true);
+      paper.pageArea({x: 0, y: 0, width: WIDTH, height: 30});
+      paper.text('A');
+      paper.lineFeed();
+      paper.command({type: 'cut', value: 'full'});
+      paper.printPage();
+      paper.page(false);
+
+      const items = paper.end();
+
+      assert.deepEqual(items.map((item) => item.type), ['image', 'cut']);
+    });
+
+    it('should emit a held cut when page mode is left without printing', function() {
+      const paper = painter({commands: ['cut']});
+
+      paper.page(true);
+      paper.command({type: 'cut', value: 'full'});
+      paper.page(false);
+
+      assert.deepEqual(paper.end(), [{type: 'cut', value: 'full'}]);
+    });
+
+    it('should report an unknown command where it stands', function() {
+      const paper = painter({commands: ['unknown']});
+
+      paper.page(true);
+      paper.command({type: 'unknown', data: new Uint8Array([1])});
+
+      assert.equal(paper.end().length, 1);
+    });
+
+    it('should ignore the margins of the line mode', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.pageArea({x: 0, y: 0, width: WIDTH, height: 30});
+      paper.margins({left: 24});
+      paper.text('A');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      assert.equal(Bitmap.getPixel(stitch(paper.end(), {width: WIDTH}), 3, 10), 1);
+    });
+
+    it('should move the position back with a reverse feed', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.pageArea({x: 0, y: 0, width: WIDTH, height: 60});
+      paper.text('A');
+      paper.lineFeed();
+      paper.reverseLineFeed();
+      paper.position(12);
+      paper.text('B');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(Bitmap.getPixel(bitmap, 3, 10), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 15, 10), 1);
+    });
+  });
 });

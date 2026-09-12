@@ -185,6 +185,25 @@ const QRCODE_DEFAULTS = {model: 2, moduleSize: 3, errorLevel: 'L'};
 
 const PDF417_DEFAULTS = {columns: 0, rows: 0, moduleWidth: 2, rowHeight: 2, errorLevel: 0};
 
+/* The functions of ESC GS P, the page mode group, and the number of argument
+   bytes behind each of them: 0 and 1 enter and leave page mode, 2 sets the
+   print area, 3 the print direction, and 4 and 5 the absolute and the relative
+   position along the vertical axis of that direction. The numbers are accepted
+   as the binary values and as the ASCII digits, the way every other Star
+   parameter is; the encoder writes the digits.
+
+   Only the first two are settled by a producer, see the reference page: the
+   encoder's flush is ESC GS P '0' ESC GS P '1' around a job. The four others
+   are the ESC/POS group of page mode under Star's numbering, which is a
+   reading, and the lengths are part of that reading. */
+
+const PAGE_MODE_FUNCTIONS = Object.assign(Object.create(null), {
+  0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5,
+  48: 0, 49: 1, 50: 2, 51: 3, 52: 4, 53: 5,
+});
+
+const PAGE_MODE_ARGUMENTS = [0, 0, 8, 1, 2, 2];
+
 /* Pulse width of the drawer commands that do not carry one, in milliseconds.
    ESC BEL n1 n2 sets the width of BEL and FS, SUB and EM are fixed */
 
@@ -407,6 +426,24 @@ function rasterImageArguments(bytes, index) {
   const height = bytes[index + 3] + bytes[index + 4] * 256;
 
   return 6 + width * height;
+}
+
+/**
+ * Arguments of ESC GS P n .., the page mode group: the function byte and the
+ * arguments that belong to that function
+ *
+ * @param  {Uint8Array}   bytes   The whole stream
+ * @param  {number}       index   Position of the first argument
+ * @return {number}               Number of argument bytes, or -1 when the stream is too short
+ */
+function pageModeArguments(bytes, index) {
+  if (index + 1 > bytes.length) {
+    return -1;
+  }
+
+  const fn = PAGE_MODE_FUNCTIONS[bytes[index]];
+
+  return 1 + (typeof fn === 'number' ? PAGE_MODE_ARGUMENTS[fn] : 0);
 }
 
 /**
@@ -905,7 +942,7 @@ class StarPrntRenderer {
         0x19: {args: 4, run: null}, /* ESC GS EM DC1 or DC2 m n1 n2, buzzer */
         0x23: {args: 1, run: null}, /* print density */
         0x41: {args: 2, run: (a) => this.#painter.position(a[0] + a[1] * 256)},
-        0x50: {args: 1, run: null}, /* print mode, the encoder flushes with it, no effect on paper */
+        0x50: {args: pageModeArguments, run: (a) => this.#pageMode(a)}, /* the page mode group */
         0x52: {args: 2, run: (a) => this.#relative(a)},
         0x53: {args: rasterImageArguments, run: (a, consumed) => this.#rasterImage(a, consumed)},
         0x61: {args: 1, run: (a) => this.#align(a[0])},
@@ -1276,6 +1313,59 @@ class StarPrntRenderer {
     const distance = value > 32767 ? value - 65536 : value;
 
     this.#painter.position(this.#painter.cursor + distance);
+  }
+
+  /**
+     * ESC GS P n .., the page mode group.
+     *
+     * Function 0 enters page mode and function 1 leaves it, printing the page
+     * the printer composed. The encoder's flush is those two commands with
+     * nothing in between, which composes an empty page and prints nothing,
+     * exactly as it did while this renderer only parsed them.
+     *
+     * Functions 2 to 5 are the print area, the print direction and the two
+     * vertical positions of page mode, all of them in dots, which is the unit
+     * of the Star position commands. They are the ESC/POS group under Star's
+     * numbering and are a reading, see documentation/commands-star-prnt.md.
+     *
+     * @param  {Uint8Array}   args   The arguments of the command
+     */
+  #pageMode(args) {
+    const fn = PAGE_MODE_FUNCTIONS[args[0]];
+
+    if (fn === 0) {
+      this.#painter.page(true);
+      return;
+    }
+
+    if (fn === 1) {
+      this.#painter.printPage();
+      this.#painter.page(false);
+      return;
+    }
+
+    if (fn === 2) {
+      this.#painter.pageArea({
+        x: args[1] + args[2] * 256,
+        y: args[3] + args[4] * 256,
+        width: args[5] + args[6] * 256,
+        height: args[7] + args[8] * 256,
+      });
+
+      return;
+    }
+
+    if (fn === 3) {
+      this.#painter.pageDirection(args[1] >= 48 ? args[1] - 48 : args[1]);
+      return;
+    }
+
+    if (fn === 4 || fn === 5) {
+      const value = args[1] + args[2] * 256;
+      const relative = fn === 5;
+
+      this.#painter.pageVertical(relative && value > 32767 ? value - 65536 : value, {relative});
+    }
   }
 
   /**

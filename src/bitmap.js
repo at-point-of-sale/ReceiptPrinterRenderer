@@ -376,6 +376,51 @@ class Bitmap {
   }
 
   /**
+     * Turn a bitmap a quarter turn counter-clockwise, which is what the print
+     * direction of page mode does to the layout of a print area: the top left
+     * dot of the bitmap becomes its bottom left dot, and the result is as wide
+     * as the bitmap was tall.
+     *
+     * @param  {Image}   bitmap   The bitmap to rotate
+     * @return {Image}            A new bitmap, rotated by 90 degrees counter-clockwise
+     */
+  static rotate90(bitmap) {
+    const result = Bitmap.create(bitmap.height, bitmap.width);
+
+    for (let y = 0; y < bitmap.height; y++) {
+      for (let x = 0; x < bitmap.width; x++) {
+        if (Bitmap.getPixel(bitmap, x, y)) {
+          Bitmap.setPixel(result, y, bitmap.width - 1 - x, 1);
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /**
+     * Turn a bitmap three quarter turns counter-clockwise, which is one quarter
+     * turn clockwise: the top left dot of the bitmap becomes its top right dot,
+     * and the result is as wide as the bitmap was tall.
+     *
+     * @param  {Image}   bitmap   The bitmap to rotate
+     * @return {Image}            A new bitmap, rotated by 270 degrees counter-clockwise
+     */
+  static rotate270(bitmap) {
+    const result = Bitmap.create(bitmap.height, bitmap.width);
+
+    for (let y = 0; y < bitmap.height; y++) {
+      for (let x = 0; x < bitmap.width; x++) {
+        if (Bitmap.getPixel(bitmap, x, y)) {
+          Bitmap.setPixel(result, bitmap.height - 1 - y, x, 1);
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /**
      * The bytes of one row without the white bytes at its right edge, which is
      * what printers that trim their rows need. An all white row is one byte, so
      * that a row is never empty. A bitmap without width has no rows at all, and

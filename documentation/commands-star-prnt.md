@@ -13,6 +13,7 @@ Render the ESC/POS and StarPRNT commands created by [ReceiptPrinterEncoder](http
   - [Styles and sizes](#styles-and-sizes)
   - [Line spacing and feeds](#line-spacing-and-feeds)
   - [Alignment and position](#alignment-and-position)
+  - [Page mode](#page-mode)
   - [Codepages and character sets](#codepages-and-character-sets)
   - [Barcodes](#barcodes)
   - [Barcode symbologies](#barcode-symbologies)
@@ -34,7 +35,7 @@ This page lists every command `StarPrntRenderer` recognises, what it does to the
 
 The renderer emulates a Star printer. It interprets the bytes the way the firmware does, including the cases where the firmware prints nothing at all: a barcode with invalid data, a symbol wider than the paper, an argument outside the range of its command, which leaves the setting as it was rather than clipping it.
 
-It deliberately differs from the hardware in a few places, each of them because the behaviour is not on the wire and no hardware check settled it. They are marked in the notes below, and these are all of them: the module widths of `ESC b`, the line spacing of an `ESC z n` that is not `0` or `1`, the feeds of `ESC I`, `ESC J` and `ESC a`, the four dot gap between the bars of a barcode and its human readable text, the reading of `ESC GS x S 0`, a QR model 1 drawn as a model 2 symbol, the basic 43 character set of Code 93, the minimum of three data codewords of a PDF417 symbol, the reading of `ESC h n` and `ESC Q n`, `ESC R n` leaving the sets above 13 alone, `ESC SP n`, whose length and meaning are read from what receiptline writes, the tear bar mode of raster mode read as a partial cut, the twenty four dot band of `ESC k`, the length of `ESC s n1 n2`, the module widths above three of `ESC b`, the layout of `ESC GS S` and its alignment, the assumed layout of `ESC FS q`, and the heights of the GS1 DataBar family, which are a reading of the specification pending a hardware check.
+It deliberately differs from the hardware in a few places, each of them because the behaviour is not on the wire and no hardware check settled it. They are marked in the notes below, and these are all of them: the module widths of `ESC b`, the line spacing of an `ESC z n` that is not `0` or `1`, the feeds of `ESC I`, `ESC J` and `ESC a`, the four dot gap between the bars of a barcode and its human readable text, the reading of `ESC GS x S 0`, a QR model 1 drawn as a model 2 symbol, the basic 43 character set of Code 93, the minimum of three data codewords of a PDF417 symbol, the reading of `ESC h n` and `ESC Q n`, `ESC R n` leaving the sets above 13 alone, `ESC SP n`, whose length and meaning are read from what receiptline writes, the tear bar mode of raster mode read as a partial cut, the twenty four dot band of `ESC k`, the length of `ESC s n1 n2`, the module widths above three of `ESC b`, the layout of `ESC GS S` and its alignment, the assumed layout of `ESC FS q`, the heights of the GS1 DataBar family, which are a reading of the specification pending a hardware check, and the four functions of [page mode](#page-mode) that are not the two the encoder sends, whose numbering, lengths and units are read from the ESC/POS group of the same commands.
 
 Two differences are the printer itself rather than the renderer, and both show up when the same receipt is printed in both languages: a pulse to the second drawer is fixed at 200 ms on and 200 ms off, because the width is not on the wire, and the size multipliers of `ESC i` stop at six where `GS ! n` of ESC/POS goes to eight.
 
@@ -51,7 +52,7 @@ Two differences are the printer itself rather than the renderer, and both show u
 
 A `cut`, `pulse`, `feed` or `unknown` item only reaches the output when the driver put that type in the `commands` option, see [Commands the printer supports](usage.md#commands-the-printer-supports). A **Reported** command with `unknown` switched off therefore leaves nothing at all, which is the same paper as **Skipped**.
 
-**Reported** and **Parsed** are the same to the paper and say different things about it. **Reported** means the command may have changed the paper of a real printer and the renderer did not reproduce it, so the `unknown` item is the warning that this receipt could come out differently: a logo the printer holds, a page mode layout, a command whose effect is not settled here. A command that cannot touch the paper is **Parsed** instead, however much it changes about the printer: a status request, which has no channel back to the host to answer over, a print density or a print speed, a buzzer the item stream has no sound for. The number of unknown items of a stream is therefore a measure of how much of it this renderer is not showing, which is what the fixtures of section 16 of the [implementation plan](implementation-plan.md) count.
+**Reported** and **Parsed** are the same to the paper and say different things about it. **Reported** means the command may have changed the paper of a real printer and the renderer did not reproduce it, so the `unknown` item is the warning that this receipt could come out differently: a logo the printer holds, a downloaded glyph, a command whose effect is not settled here. A command that cannot touch the paper is **Parsed** instead, however much it changes about the printer: a status request, which has no channel back to the host to answer over, a print density or a print speed, a buzzer the item stream has no sound for. The number of unknown items of a stream is therefore a measure of how much of it this renderer is not showing, which is what the fixtures of section 16 of the [implementation plan](implementation-plan.md) count.
 
 A Star command is `ESC` and a command byte, or `ESC GS`, `ESC RS` or `ESC FS` and a command byte, so the parser has four tables. Every command in them knows how many argument bytes it has, so a command the renderer does not implement never derails the text behind it. A command that is in none of the tables consumes its prefix alone, two bytes or three, which is the best guess there is, and is reported. A command whose arguments run past the end of the stream stops the parser without an error, and everything before it is still rendered.
 
@@ -66,7 +67,7 @@ A Star command is `ESC` and a command byte, or `ESC GS`, `ESC RS` or `ESC FS` an
 | `CR` | carriage return | Skipped | Does not move the paper. The encoder ends every line with `LF CR`. |
 | `CAN` | cancel | Rendered | Throws away the print data of the line that is being composed, without advancing the paper. The encoder sends it right behind `ESC @`, where the line buffer is already empty. |
 | `ESC @` | initialize | Rendered | Resets style, font, alignment, line spacing, codepage and the stored QR code and PDF417 parameters, and discards a half composed line. The pulse width of `ESC BEL` survives it, as it does on a Star printer. Rows that were already committed stay on the paper, the command does not flush. |
-| `ESC GS P n` | print mode | Parsed | `ESC GS P 0` and `ESC GS P 1` switch the printer between page and line units, which changes when the printer prints and not what it prints. The encoder's flush emits both around a job. |
+| `ESC GS P n ..` | page mode | Rendered | The page mode group: `ESC GS P 0` enters page mode and `ESC GS P 1` leaves it and prints the page, see [Page mode](#page-mode). The encoder's flush is the two of them with nothing in between, which composes an empty page and prints nothing. |
 | `ESC FF n` | execute a raster mode | Rendered | `ESC FF NUL` runs the FF mode, `ESC FF EOT` the EOT mode and `ESC FF EM` the EM mode: the raster image buffer is printed and, when the stored mode cuts, a `cut` item follows it, see [Raster mode](#raster-mode). Any other mode byte is reported, and it is consumed with the command either way, so that it is not executed as a command of its own: `EM` would open a drawer and `LF` would feed a line. |
 | `HT` | horizontal tab | Rendered | Moves the cursor to the next tab stop, see [Alignment and position](#alignment-and-position). |
 | other bytes below `0x20` | — | Skipped | Everything that is not `HT`, `LF`, `CR`, `CAN`, `BEL`, `FS`, `SUB`, `EM` or `ESC` is ignored, the way a printer ignores it. |
@@ -131,6 +132,25 @@ Runs of blank rows of at least `feedThreshold` dots become `feed` items and spli
 | `ESC GS R n1 n2` | relative print position | Rendered | The same, relative to the cursor and signed: a value above 32767 is the negative distance below it, which moves back towards the left margin. A distance that lands outside the print area is ignored. |
 | `ESC RS A n` | print area | Reported | |
 | `ESC GS \ n1 n2` | vertical position | Reported | |
+
+The print area, the direction and the two vertical positions of page mode are in [Page mode](#page-mode) below.
+
+<br>
+
+### Page mode
+
+In page mode the printer composes a page in memory, in a print area on that page and in one of four print directions, and prints the whole area in one go. The semantics are the ones of [page mode of the ESC/POS page](commands-esc-pos.md#page-mode), which this renderer implements once in its painter for both languages: the same four rotations, the same wrapping and discarding inside the area, the same rule for how tall the printed page is, the same print area and print direction surviving the page they were set on, and the same holding of a `cut` or a `pulse` until the page is on the paper. The one difference is the unit: every distance of this group counts in dots, where the ESC/POS commands count in motion units.
+
+| Command | Name | Status | Notes |
+|---|---|---|---|
+| `ESC GS P 0` | page mode | Rendered | Enters page mode, and only at the beginning of a line: a line that already holds characters, or whose cursor was moved, drops the command. |
+| `ESC GS P 1` | line mode | Rendered | Leaves page mode and prints the page. A page without a print area and without a dot prints nothing at all, which is why the encoder's flush, `ESC GS P 0 ESC GS P 1` around a job, leaves every receipt exactly as it was. |
+| `ESC GS P 2 n1..n8` | print area | Rendered | The origin and the size of the print area, each of them two bytes, low byte first, **in dots**, which is the unit of `ESC GS A` and `ESC GS R`. A width or a height of `0`, and an origin outside the page, make the command do nothing. Like `ESC W` of ESC/POS the area is a setting of the printer: it may be set in line mode, the next page starts in it, and `ESC @` puts it back. |
+| `ESC GS P 3 n` | print direction | Rendered | `0` to `3`, and the ASCII digits for the same: left to right, bottom to top, right to left and top to bottom, the four directions of `ESC T` of ESC/POS, and a setting of the printer in the same way. |
+| `ESC GS P 4 n1 n2` | absolute vertical position | Rendered | Two bytes, low byte first, in dots along the vertical axis of the print direction, from the start of the print area. A position outside the area is ignored. |
+| `ESC GS P 5 n1 n2` | relative vertical position | Rendered | The same, relative to the position and signed: a value above 32767 is the negative distance below it. |
+
+**Functions 0 and 1 are the two the wild sends, and the four others are a reading.** ReceiptPrinterEncoder writes `ESC GS P '0'` and `ESC GS P '1'` as its flush, around a job and not around a page, which is exactly what entering page mode and leaving it again does on a printer: it prints what the printer holds. The other four functions are the print area, the direction and the two positions of the ESC/POS group under Star's numbering, with the lengths and the dot unit that numbering implies. **No StarPRNT specification text was available here to confirm the four**, no stream of the fixtures sends one, and the consequence of the reading being wrong is a stream that desynchronises on a command this renderer would otherwise have consumed as one byte. The `page-mode-directions` fixture is the same page in both languages, which the parity test compares dot for dot.
 
 <br>
 
@@ -305,7 +325,6 @@ These commands change nothing about the paper of the receipt that is being rende
 
 These are the StarPRNT and Star Line Mode commands the renderer parses but does not render. Every command the [implementation plan](implementation-plan.md) planned for is rendered now; what is left is the list below, and none of it is planned.
 
-- Page mode. `ESC GS P` switches the printer between page and line units and is parsed; composing a page in memory is a second layout engine next to the line one and is not modelled.
 - CJK fonts. A receipt that needs real CJK text needs a printer with the font.
 - User defined characters: glyphs downloaded into the printer.
 - NV logos: images a utility stored in the printer, which the renderer has never seen. `ESC FS p` reports an `unknown` item and prints nothing, and so does the definition command `ESC FS q`, whose layout is not settled here.

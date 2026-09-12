@@ -401,4 +401,64 @@ describe('Bitmap', function() {
       assert.deepEqual(Bitmap.rotate180(Bitmap.create(0, 0)), Bitmap.create(0, 0));
     });
   });
+
+  describe('rotate90() and rotate270()', function() {
+    const bitmap = fromAscii([
+      '#..#',
+      '.##.',
+      '#...',
+    ]);
+
+    it('should turn a bitmap a quarter turn counter-clockwise', function() {
+      assert.deepEqual(toAscii(Bitmap.rotate90(bitmap)), [
+        '#..',
+        '.#.',
+        '.#.',
+        '#.#',
+      ]);
+    });
+
+    it('should turn a bitmap a quarter turn clockwise', function() {
+      assert.deepEqual(toAscii(Bitmap.rotate270(bitmap)), [
+        '#.#',
+        '.#.',
+        '.#.',
+        '..#',
+      ]);
+    });
+
+    it('should give the result the other side of the bitmap', function() {
+      const rotated = Bitmap.rotate90(bitmap);
+
+      assert.equal(rotated.width, bitmap.height);
+      assert.equal(rotated.height, bitmap.width);
+    });
+
+    it('should be half a turn when the two are done after each other', function() {
+      assert.deepEqual(toAscii(Bitmap.rotate90(Bitmap.rotate90(bitmap))), toAscii(Bitmap.rotate180(bitmap)));
+      assert.deepEqual(toAscii(Bitmap.rotate270(Bitmap.rotate270(bitmap))), toAscii(Bitmap.rotate180(bitmap)));
+    });
+
+    it('should return the same bitmap when both are done', function() {
+      assert.deepEqual(toAscii(Bitmap.rotate270(Bitmap.rotate90(bitmap))), toAscii(bitmap));
+      assert.deepEqual(toAscii(Bitmap.rotate90(Bitmap.rotate270(bitmap))), toAscii(bitmap));
+    });
+
+    it('should return the same bitmap after four quarter turns', function() {
+      const turns = Bitmap.rotate90(Bitmap.rotate90(Bitmap.rotate90(Bitmap.rotate90(bitmap))));
+
+      assert.deepEqual(toAscii(turns), toAscii(bitmap));
+    });
+
+    it('should rotate a bitmap that is not a whole number of bytes wide', function() {
+      assert.deepEqual(toAscii(Bitmap.rotate90(fromAscii(['#....#..#..']))), [
+        '.', '.', '#', '.', '.', '#', '.', '.', '.', '.', '#',
+      ]);
+    });
+
+    it('should leave an empty bitmap empty', function() {
+      assert.deepEqual(Bitmap.rotate90(Bitmap.create(0, 0)), Bitmap.create(0, 0));
+      assert.deepEqual(Bitmap.rotate270(Bitmap.create(0, 0)), Bitmap.create(0, 0));
+    });
+  });
 });

@@ -248,7 +248,7 @@ The two renderers of one language keep their static `language` property, `esc-po
 
 ## Supported ESC/POS commands
 
-This is the complete set of commands ReceiptPrinterEncoder version 3 emits for the `esc-pos` language, plus the text layout commands of [section 12 of the implementation plan](implementation-plan.md#section-12-text-layout-commands) and the image commands of [section 13](implementation-plan.md#section-13-image-commands), which other producers use. The parser is a table driven state machine, so that more commands can be added later, and unknown commands are skipped according to the argument lengths in the ESC/POS specification, so that one unknown command does not derail the rest of the stream. [commands-esc-pos.md](commands-esc-pos.md) is the reference page with every command, its status and its exact values.
+This is the complete set of commands ReceiptPrinterEncoder version 3 emits for the `esc-pos` language, plus the text layout commands of [section 12 of the implementation plan](implementation-plan.md#section-12-text-layout-commands), the image commands of [section 13](implementation-plan.md#section-13-image-commands) and the page mode of [section 16d](implementation-plan.md#section-16d-page-mode), which other producers use. The parser is a table driven state machine, so that more commands can be added later, and unknown commands are skipped according to the argument lengths in the ESC/POS specification, so that one unknown command does not derail the rest of the stream. [commands-esc-pos.md](commands-esc-pos.md) is the reference page with every command, its status and its exact values.
 
 ### Text and control
 
@@ -260,6 +260,8 @@ This is the complete set of commands ReceiptPrinterEncoder version 3 emits for t
 | `ESC @` | initialize | Reset all state to the defaults, including codepage, font, alignment and line spacing. Does not flush. |
 | `FS .` | cancel Kanji mode | No effect on rendering. |
 | `ESC t n` | select codepage | Look up `n` in the codepage mapping, decode following bytes with that codepage. Unknown `n` falls back to cp437. |
+| `FF` | print the page | Print the page of page mode and return to standard mode, see Page mode below. Nothing in standard mode. |
+| `CAN` | cancel the page data | Delete the dots of the page of page mode. Nothing in standard mode. |
 
 ### Styles
 
@@ -285,7 +287,7 @@ The commands of section 12, which the encoder does not emit.
 | `ESC ! n` | print mode | Bit 0 font B, bit 3 emphasis, bit 4 double height, bit 5 double width, bit 7 underline, and the bits it does not set are cleared. The same state as the individual commands, `ESC G` excepted, which has a setting of its own; a later `GS !` decides the size. |
 | `ESC G n` | double strike | Bit 0, rendered as bold. Emphasis and double strike are two settings, so a cell is bold while either of them is on. |
 | `ESC R n` | international character set | Sets 0 to 17 of the Epson table, which replace twelve code points after the codepage decoding. Sets 16 and 17 are not settled and replace nothing. |
-| `ESC { n` | upside down | Bit 0. Every committed line box, blocks included, is rotated by 180 degrees over the width of the paper. The feed order of the lines does not change. |
+| `ESC { n` | upside down | Bit 0. Every committed line box, blocks included, is rotated by 180 degrees over the width of the paper. The feed order of the lines does not change. A standard mode command: it turns nothing in page mode, where the print direction does that. |
 | `ESC SP n` | character spacing | `n` horizontal motion units behind every cell, scaled with the width multiplier, and not counted in the alignment. It is part of the width of a character, so it moves the tab stops. |
 | `HT` | horizontal tab | To the first tab stop beyond the cursor. Nothing happens past the last stop; a stop outside the print area puts the cursor one dot beyond the area, so the next character wraps to a new line. |
 | `ESC D n1..nk NUL` | tab stops | Up to 32 stops, `n` characters of the current font each, the character spacing included, ascending. `ESC D NUL` cancels every stop, after which a tab does nothing, and `ESC @` returns to a stop every eight characters of font A. |
@@ -299,6 +301,21 @@ The commands of section 12, which the encoder does not emit.
 | `FS ! n`, `FS - n`, `FS S n1 n2`, `FS W n` | multibyte styles | Parsed, and nothing on paper: the multibyte characters are placeholder cells. |
 | `FS ( C pL pH ..` | character encode system | Reported, its layout is not settled here. |
 | `DLE EOT n`, `DLE ENQ n`, `DLE DC4 fn ..` | real time commands | Consumed with their lengths and reported. |
+
+### Page mode
+
+The commands of [section 16d](implementation-plan.md#section-16d-page-mode). The printer composes a page in memory and prints the whole print area in one go.
+
+| Bytes | Command | Rendering |
+|---|---|---|
+| `ESC L` | select page mode | Compose a page instead of lines. Only at the beginning of a line, as the reference says. A page starts in the print area and the print direction the printer holds. |
+| `ESC S` | select standard mode | Leave page mode and delete the page, which is never printed. `ESC @` and the end of the stream do the same. |
+| `ESC W xL xH yL yH dxL dxH dyL dyH` | print area | The origin and the width in horizontal motion units, the origin and the height in vertical ones. A width or a height of 0, and an origin outside the printable area, make the command do nothing. The area is a setting of the printer: it may be set in standard mode and it survives the page it is used on, until `ESC @`. Several areas compose into one page. |
+| `ESC T n` | print direction | 0 left to right from the top left, 1 bottom to top from the bottom left, 2 right to left from the bottom right, 3 top to bottom from the top right, and 48 to 51 for the same. The layout of the area is turned by a quarter, half or three quarter turn when it goes into the page. A setting of the printer like the print area. |
+| `GS $ nL nH`, `GS \ nL nH` | vertical position | The absolute and the relative position along the axis the lines of the direction go down. `ESC $` and `ESC \` move along the axis the characters run in. The unit follows the axis, so the two swap in the directions 1 and 3, and so do the units of `ESC 3`, `ESC J`, `ESC K`, `ESC d`, `ESC e` and `ESC SP`. |
+| `FF` | print and return to standard mode | Draw the page on the paper as one block, as tall as the print areas it was given, an area that stayed empty included, and leave page mode. A page without an area is as tall as its dots. |
+| `ESC FF` | print the page | The same, with the dots, the area, the direction and the position kept, so the page can be printed again. |
+| `CAN` | cancel the page data | Delete the dots and keep the print area. |
 
 ### Blocks
 
@@ -378,7 +395,7 @@ The human readable text is one line of cells of the HRI font, centred over the b
 
 ## Supported StarPRNT commands
 
-The complete set of commands ReceiptPrinterEncoder version 3 emits for the `star-prnt` and `star-line` languages, plus the text layout commands and the raster mode of section 12 and the image commands of section 13. The two languages share this set, `star-line` differs only in the encoder's line buffering. The parser has the same structure as the ESC/POS one and feeds the same painter. [commands-star-prnt.md](commands-star-prnt.md) is the reference page with every command, its status and its exact values.
+The complete set of commands ReceiptPrinterEncoder version 3 emits for the `star-prnt` and `star-line` languages, plus the text layout commands and the raster mode of section 12, the image commands of section 13 and the page mode of section 16d. The two languages share this set, `star-line` differs only in the encoder's line buffering. The parser has the same structure as the ESC/POS one and feeds the same painter. [commands-star-prnt.md](commands-star-prnt.md) is the reference page with every command, its status and its exact values.
 
 ### Text and control
 
@@ -390,7 +407,7 @@ The complete set of commands ReceiptPrinterEncoder version 3 emits for the `star
 | `ESC @` | initialize | Reset all state to the defaults. |
 | `CAN` | cancel | Throw away the line that is being composed, without advancing the paper. The encoder sends it right behind `ESC @`, where the line buffer is already empty. |
 | `ESC GS t n` | select codepage | Look up `n` in the Star codepage mapping. |
-| `ESC GS P 0`, `ESC GS P 1` | print mode | Emitted by the encoder's flush around a job. No effect on rendering. |
+| `ESC GS P n ..` | page mode | `ESC GS P 0` enters page mode and `ESC GS P 1` leaves it and prints the page; the encoder's flush is the two of them around a job, which composes an empty page and prints nothing. Functions 2 to 5 are the print area, the print direction and the two vertical positions, in dots, and they are a reading of the ESC/POS group under Star's numbering, see [commands-star-prnt.md](commands-star-prnt.md#page-mode). |
 
 ### Styles
 
@@ -472,6 +489,7 @@ The Star barcode symbology numbers map onto the same generators as the ESC/POS o
 - **Print area.** `margins({left, width})` moves the left edge of the line and narrows the area the line is composed in. The commands that set it are only effective at the beginning of a line, so a call while a line is being composed does nothing, the way a printer drops the command. Wrapping, the alignment and the tab stops all work inside the area. `block(bitmap, {margins: false})` puts a block on the paper instead, for content that carries its own position, such as the rows of the Star raster mode.
 - **Cursor.** `position(dots)` moves the cursor inside the line, `cursor` reads it, and `tab()` moves to the next stop of `tabs([columns])`, which counts in characters of the current font, the character spacing included. An empty list cancels every stop, `null` and a reset go back to a stop every eight characters of font A, and a stop outside the print area sends the cursor past it so that the next character wraps. Cells that were already placed stay where they are, so moving back and printing again overprints.
 - **Character spacing.** `spacing(dots)` leaves white behind every cell, scaled with the width multiplier and not counted in the width the alignment centres.
+- **Page mode.** `page(true)` composes a page instead of the paper: `pageArea({x, y, width, height})` puts a print area on the page and `pageDirection(0..3)` says which way the text runs in it, both of them settings of the printer that a page takes over and that survive it, and the lines and blocks of the area are laid out in a coordinate system of their own and turned by the direction when they go into the page. `pageVertical(dots, {relative})` moves the position down the area, `printPage({keep})` draws the page on the paper as one block, as tall as the areas it was given and as tall as its dots when it was given none, and `cancelPage()` throws the dots away. A `cut` or a `pulse` that arrives while a page is being composed waits until the page is on the paper. Leaving page mode, an initialize and the end of the stream all delete a page that was never printed.
 - **Upside down.** `style({upsideDown})` rotates every line box that is committed from then on by 180 degrees, blocks included. The order of the lines does not change.
 - **Placeholders.** `placeholder(count)` draws cells of the fallback glyph, which is what a multibyte character becomes without a CJK font.
 - **Memory.** Rows are packed as they are committed. A receipt of a few thousand rows at 576 dots is a few hundred kilobytes.
@@ -498,7 +516,7 @@ Decoding a byte is a lookup in the 256 entry codepoint table that `CodepageEncod
 
 ### Profiles
 
-Small JSON files in `data/profiles` with the defaults per printer family: line spacing, font B cell size, and the vertical motion unit. There are two, `epson` with 30 dot line spacing and a 9x17 font B, and `star` with 32 dot line spacing and a 9x24 font B. Each renderer picks its own by default. Drivers do not usually need to touch this.
+Small JSON files in `data/profiles` with the defaults per printer family: line spacing, font B cell size, the vertical motion unit, the resolution and the height of the page of page mode. There are two, `epson` with 30 dot line spacing and a 9x17 font B, and `star` with 32 dot line spacing and a 9x24 font B. Each renderer picks its own by default. Drivers do not usually need to touch this.
 
 ### PDF417 symbol characters
 

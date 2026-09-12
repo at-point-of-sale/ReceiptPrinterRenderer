@@ -514,6 +514,8 @@ const RS = 0x1e;
 const LF = 0x0a;
 const HT = 0x09;
 const NUL = 0x00;
+const FF = 0x0c;
+const CAN = 0x18;
 const EOT = 0x04;
 const BEL = 0x07;
 
@@ -710,6 +712,73 @@ function largeGraphics(fn, parameters) {
     length & 0xff, (length >> 8) & 0xff, (length >> 16) & 0xff, (length >> 24) & 0xff,
     ...payload,
   ];
+}
+
+/**
+ * A two byte number, low byte first, the way every size and position of both
+ * languages carries one
+ *
+ * @param  {number}     value   The number
+ * @return {number[]}           The two bytes
+ */
+function word(value) {
+  return [value & 0xff, (value >> 8) & 0xff];
+}
+
+/*
+    The page mode fixtures below say where things go in dots, and the commands
+    of the two languages count that in units of their own: ESC/POS counts the
+    horizontal distances in horizontal motion units, one dot each until GS P
+    says otherwise, and the vertical ones in vertical motion units, two per dot
+    on an Epson, while the StarPRNT group counts every distance in dots, the way
+    ESC GS A does. The helpers below hide that, so that the two streams of a
+    fixture describe the same page.
+*/
+
+/**
+ * ESC W, the print area of page mode, in dots on the page
+ *
+ * @param  {number}     x        Horizontal origin in dots
+ * @param  {number}     y        Vertical origin in dots
+ * @param  {number}     width    Width of the area in dots
+ * @param  {number}     height   Height of the area in dots
+ * @return {number[]}            The bytes of the command
+ */
+function pageArea(x, y, width, height) {
+  return [ESC, 0x57, ...word(x), ...word(y * 2), ...word(width), ...word(height * 2)];
+}
+
+/**
+ * ESC GS P 2, the same area in StarPRNT
+ *
+ * @param  {number}     x        Horizontal origin in dots
+ * @param  {number}     y        Vertical origin in dots
+ * @param  {number}     width    Width of the area in dots
+ * @param  {number}     height   Height of the area in dots
+ * @return {number[]}            The bytes of the command
+ */
+function starPageArea(x, y, width, height) {
+  return [ESC, GS, 0x50, 0x32, ...word(x), ...word(y), ...word(width), ...word(height)];
+}
+
+/**
+ * GS $, the absolute position along the vertical axis of the print direction
+ *
+ * @param  {number}     dots   The position in dots
+ * @return {number[]}          The bytes of the command
+ */
+function pageVertical(dots) {
+  return [GS, 0x24, ...word(dots * 2)];
+}
+
+/**
+ * ESC $, the absolute position along the horizontal axis of the direction
+ *
+ * @param  {number}     dots   The position in dots
+ * @return {number[]}          The bytes of the command
+ */
+function pageHorizontal(dots) {
+  return [ESC, 0x24, ...word(dots)];
 }
 
 const raw = {
@@ -1188,6 +1257,113 @@ const raw = {
         ESC, 'b', [13, 2, 1, 80], '(8110)106141410123456101100', RS,
         'Valid until 31 December', LF,
         ESC, 0x1d, 'a', 0,
+    ),
+  },
+
+  /*
+      Page mode, the four print directions. One page of 576 by 240 dots holds
+      four print areas of 288 by 120, each of them with a label and a rule in
+      one of the directions: 0 left to right from the top left, 1 bottom to top
+      from the bottom left, 2 right to left from the bottom right and 3 top to
+      bottom from the top right. FF prints the page and returns to standard
+      mode, and the line behind it is standard mode again.
+
+      The two streams describe the same page, so the parity test compares them.
+  */
+
+  'page-mode-directions': {
+    'esc-pos': stream(
+        ESC, '@',
+        'Four directions on one page', LF,
+        ESC, 'L',
+        pageArea(0, 0, 288, 120), ESC, 'T', 0, 'Dir 0', LF, '----------', LF,
+        pageArea(288, 0, 288, 120), ESC, 'T', 1, 'Dir 1', LF, '----------', LF,
+        pageArea(0, 120, 288, 120), ESC, 'T', 2, 'Dir 2', LF, '----------', LF,
+        pageArea(288, 120, 288, 120), ESC, 'T', 3, 'Dir 3', LF, '----------', LF,
+        FF,
+        'Standard mode again', LF,
+    ),
+
+    'star-prnt': stream(
+        ESC, '@',
+        'Four directions on one page', LF,
+        ESC, GS, 'P', '0',
+        starPageArea(0, 0, 288, 120), ESC, GS, 'P', '3', 0, 'Dir 0', LF, '----------', LF,
+        starPageArea(288, 0, 288, 120), ESC, GS, 'P', '3', 1, 'Dir 1', LF, '----------', LF,
+        starPageArea(0, 120, 288, 120), ESC, GS, 'P', '3', 2, 'Dir 2', LF, '----------', LF,
+        starPageArea(288, 120, 288, 120), ESC, GS, 'P', '3', 3, 'Dir 3', LF, '----------', LF,
+        ESC, GS, 'P', '1',
+        'Standard mode again', LF,
+    ),
+  },
+
+  /*
+      A coupon laid out in page mode with absolute positions: every line and
+      every block stands where GS $ and ESC $ put it, in a print area of the
+      full width, and the page reaches the paper as one block of its height.
+  */
+
+  'page-mode-coupon': {
+    'esc-pos': stream(
+        ESC, '@',
+        ESC, 'L',
+        pageArea(0, 0, 576, 400),
+        ESC, 'a', 1, ESC, '!', 0x38, 'THE CORNER STORE', LF, ESC, '!', 0x00,
+        ESC, 'a', 0,
+        pageVertical(70), pageHorizontal(24), 'Coupon',
+        pageHorizontal(300), '20% off one coffee',
+        pageVertical(110), pageHorizontal(24), 'Valid until 31 December',
+        pageVertical(150), GS, 'h', 60, GS, 'w', 2, GS, 'H', 2, GS, 'f', 0,
+        GS, 'k', 69, [8], 'CORNER20',
+        pageVertical(260), ESC, 'a', 1,
+        GS, '(', 'k', [4, 0, 49, 65, 50, 0],
+        GS, '(', 'k', [3, 0, 49, 67, 4],
+        GS, '(', 'k', [3, 0, 49, 69, 49],
+        GS, '(', 'k', [25, 0, 49, 80, 48], 'https://corner.example',
+        GS, '(', 'k', [3, 0, 49, 81, 48],
+        FF,
+        'Thank you, see you soon', LF,
+    ),
+  },
+
+  /*
+      ESC FF prints the page and keeps it, so the same page can be printed
+      again. The first print is the heading alone, the second one the heading
+      with the line that was added behind it, and ESC S then throws the page
+      away without printing it a third time.
+  */
+
+  'page-mode-esc-ff': {
+    'esc-pos': stream(
+        ESC, '@',
+        ESC, 'L',
+        pageArea(0, 0, 576, 100),
+        'Printed twice', LF,
+        ESC, FF,
+        'Only in the second print', LF,
+        ESC, FF,
+        'Not printed at all', LF,
+        ESC, 'S',
+        'Standard mode again', LF,
+    ),
+  },
+
+  /*
+      CAN throws the dots of the page away and keeps the print area, so the
+      page that FF prints is the text behind the CAN, in an area that still
+      feeds its full height.
+  */
+
+  'page-mode-cancel': {
+    'esc-pos': stream(
+        ESC, '@',
+        ESC, 'L',
+        pageArea(0, 0, 576, 100),
+        'Discarded by CAN', LF,
+        CAN,
+        'Printed after CAN', LF,
+        FF,
+        'Standard mode again', LF,
     ),
   },
 

@@ -557,7 +557,7 @@ describe('EscPosRenderer', function() {
   describe('unknown commands', function() {
     it('should render the text after a command it does not know', function() {
       const known = render(stream(ESC, '@', 'AB', LF));
-      const unknown = render(stream(ESC, '@', 'A', ESC, 'W', [1, 2, 3, 4, 5, 6, 7, 8], 'B', LF));
+      const unknown = render(stream(ESC, '@', 'A', GS, 'g', [0, 1, 2, 3], 'B', LF));
 
       assert.equal(dots(stitch(unknown, {width: WIDTH})), dots(stitch(known, {width: WIDTH})));
     });
@@ -571,18 +571,18 @@ describe('EscPosRenderer', function() {
 
     it('should report the bytes of the command when unknown is supported', function() {
       const items = render(
-          stream(ESC, '@', 'A', ESC, 'W', [1, 2, 3, 4, 5, 6, 7, 8], 'B', LF),
+          stream(ESC, '@', 'A', GS, 'g', [0, 1, 2, 3], 'B', LF),
           {commands: ['unknown']},
       );
 
       const unknown = items.filter((item) => item.type === 'unknown');
 
       assert.equal(unknown.length, 1);
-      assert.deepEqual(Array.from(unknown[0].data), [ESC, 0x57, 1, 2, 3, 4, 5, 6, 7, 8]);
+      assert.deepEqual(Array.from(unknown[0].data), [GS, 0x67, 0, 1, 2, 3]);
     });
 
     it('should drop the command when unknown is not supported', function() {
-      const items = render(stream(ESC, '@', 'A', ESC, 'W', [1, 2, 3, 4, 5, 6, 7, 8], 'B', LF));
+      const items = render(stream(ESC, '@', 'A', GS, 'g', [0, 1, 2, 3], 'B', LF));
 
       assert.isTrue(items.every((item) => item.type === 'image'));
     });
@@ -1914,6 +1914,585 @@ describe('EscPosRenderer', function() {
     });
   });
 
+  describe('page mode', function() {
+    /*
+        The commands of page mode. The area and the two vertical positions are
+        counted in motion units, the horizontal ones one dot each and the
+        vertical ones two per dot on the Epson profile, so the helpers take
+        dots and write the units.
+    */
+
+    const FF = 0x0c;
+    const CAN = 0x18;
+
+    const word = (value) => [value & 0xff, (value >> 8) & 0xff];
+    const area = (x, y, width, height) =>
+      [ESC, 0x57, ...word(x), ...word(y * 2), ...word(width), ...word(height * 2)];
+    const vertical = (dots) => [GS, 0x24, ...word(dots * 2)];
+    const relative = (dots) => [GS, 0x5c, ...word((dots * 2 + 65536) & 0xffff)];
+
+    /**
+     * The paper of a page with two lines on it, in one print direction
+     *
+     * @param  {number}   direction   The argument of ESC T
+     * @return {object}               The paper
+     */
+    function page(direction) {
+      return stitch(render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, 288, 288), ESC, 'T', direction,
+          'Hi', LF, '.', LF,
+          FF,
+      )), {width: WIDTH});
+    }
+
+    /**
+     * A rectangle of a bitmap, the print area out of the paper
+     *
+     * @param  {object}   bitmap   The bitmap to cut from
+     * @param  {number}   size     Width and height of the rectangle
+     * @return {object}            The rectangle
+     */
+    function crop(bitmap, size) {
+      const result = Bitmap.create(size, size);
+
+      for (let row = 0; row < size; row++) {
+        for (let column = 0; column < size; column++) {
+          Bitmap.setPixel(result, column, row, Bitmap.getPixel(bitmap, column, row));
+        }
+      }
+
+      return result;
+    }
+
+    it('should render a page of direction 0 as the same content in standard mode', function() {
+      const paged = render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, WIDTH, 90), ESC, 'T', 0,
+          'The corner store', LF,
+          ESC, 'a', 1, 'Thank you', LF, ESC, 'a', 0,
+          ESC, 'E', 1, 'Come again', LF, ESC, 'E', 0,
+          FF,
+      ));
+
+      const standard = render(stream(
+          ESC, '@',
+          'The corner store', LF,
+          ESC, 'a', 1, 'Thank you', LF, ESC, 'a', 0,
+          ESC, 'E', 1, 'Come again', LF, ESC, 'E', 0,
+      ));
+
+      assert.equal(
+          dots(stitch(paged, {width: WIDTH})),
+          dots(stitch(standard, {width: WIDTH})),
+      );
+    });
+
+    it('should turn the print directions the way the reference describes them', function() {
+      assert.deepEqual(crop(page(1), 288), Bitmap.rotate90(crop(page(0), 288)));
+      assert.deepEqual(crop(page(2), 288), Bitmap.rotate180(crop(page(0), 288)));
+      assert.deepEqual(crop(page(3), 288), Bitmap.rotate270(crop(page(0), 288)));
+    });
+
+    it('should accept the print directions as ASCII digits', function() {
+      assert.deepEqual(page(49), page(1));
+      assert.deepEqual(page(51), page(3));
+    });
+
+    it('should leave the direction alone for a value it does not define', function() {
+      assert.deepEqual(page(9), page(0));
+    });
+
+    it('should feed the paper over the whole print area', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, WIDTH, 240),
+          'One line', LF,
+          FF,
+      ));
+
+      assert.equal(stitch(items, {width: WIDTH}).height, 240);
+    });
+
+    it('should return to standard mode on FF', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, WIDTH, 30),
+          'In the page', LF,
+          FF,
+          'On the paper', LF,
+      ));
+
+      assert.equal(stitch(items, {width: WIDTH}).height, 60);
+    });
+
+    it('should keep the page and page mode on ESC FF', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, WIDTH, 30),
+          'Printed twice', LF,
+          ESC, FF,
+          ESC, FF,
+      ));
+
+      const paper = stitch(items, {width: WIDTH});
+
+      assert.equal(paper.height, 60);
+      assert.equal(dots(Bitmap.extractRows(paper, 0, 30)), dots(Bitmap.extractRows(paper, 30, 30)));
+    });
+
+    it('should delete the page on ESC S', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, WIDTH, 240),
+          'Never printed', LF,
+          ESC, 'S',
+          'On the paper', LF,
+      ));
+
+      assert.equal(
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'On the paper', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should leave page mode on ESC @', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, WIDTH, 240),
+          'Never printed', LF,
+          ESC, '@',
+          'On the paper', LF,
+      ));
+
+      assert.equal(
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'On the paper', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should print nothing of a page the stream never printed', function() {
+      const items = render(stream(
+          ESC, '@',
+          'On the paper', LF,
+          ESC, 'L', area(0, 0, WIDTH, 240),
+          'Never printed', LF,
+      ));
+
+      assert.equal(
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'On the paper', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should delete the dots of the page and keep the area on CAN', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, WIDTH, 60),
+          'Discarded', LF,
+          CAN,
+          'Printed', LF,
+          FF,
+      ));
+
+      const paper = stitch(items, {width: WIDTH});
+
+      assert.equal(paper.height, 60);
+      assert.equal(
+          dots(Bitmap.extractRows(paper, 0, 30)),
+          dots(stitch(render(stream(ESC, '@', 'Printed', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should do nothing with CAN and FF in standard mode', function() {
+      assert.equal(
+          dots(stitch(render(stream(ESC, '@', CAN, 'Hi', FF, LF)), {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should ignore a print area with a size of zero', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, WIDTH, 60), area(0, 0, 0, 60), area(0, 0, WIDTH, 0),
+          'Hi', LF,
+          FF,
+      ));
+
+      assert.equal(stitch(items, {width: WIDTH}).height, 60);
+    });
+
+    it('should lay a page out over the printable area when no area was set', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, 'L',
+          ESC, 'a', 2, 'Right', LF,
+          FF,
+      ));
+
+      /* The line is against the right edge of the paper, so the area is the
+         whole printable area, and the page is as tall as its dots because the
+         stream set no area of its own */
+
+      const paper = stitch(items, {width: WIDTH});
+
+      assert.equal(
+          dots(Bitmap.extractRows(paper, 0, paper.height)),
+          dots(Bitmap.extractRows(
+              stitch(render(stream(ESC, '@', ESC, 'a', 2, 'Right', LF)), {width: WIDTH}),
+              0, paper.height,
+          )),
+      );
+    });
+
+    it('should feed the paper for a print area that stayed empty', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, 'L',
+          area(0, 0, WIDTH, 100), 'Hi', LF,
+          area(0, 100, WIDTH, 100),
+          FF,
+      ));
+
+      assert.equal(stitch(items, {width: WIDTH}).height, 200);
+    });
+
+    it('should keep the print area and the direction across pages', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, WIDTH, 60), ESC, 'T', 2,
+          'Hi', LF,
+          FF,
+          ESC, 'L',
+          'Hi', LF,
+          FF,
+      ));
+
+      const paper = stitch(items, {width: WIDTH});
+
+      assert.equal(paper.height, 120);
+      assert.equal(dots(Bitmap.extractRows(paper, 0, 60)), dots(Bitmap.extractRows(paper, 60, 60)));
+
+      /* Direction 2 is still on for the second page, so both are upside down
+         against the right edge of the area */
+
+      assert.equal(
+          dots(Bitmap.extractRows(paper, 0, 60)),
+          dots(Bitmap.extractRows(stitch(render(stream(
+              ESC, '@',
+              ESC, 'L', area(0, 0, WIDTH, 60), ESC, 'T', 2, 'Hi', LF, FF,
+          )), {width: WIDTH}), 0, 60)),
+      );
+    });
+
+    it('should take the area and the direction a stream set in standard mode', function() {
+      const before = render(stream(
+          ESC, '@',
+          area(0, 0, 288, 60), ESC, 'T', 1,
+          ESC, 'L', 'Hi', LF,
+          FF,
+      ));
+
+      const inside = render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, 288, 60), ESC, 'T', 1, 'Hi', LF,
+          FF,
+      ));
+
+      assert.equal(dots(stitch(before, {width: WIDTH})), dots(stitch(inside, {width: WIDTH})));
+    });
+
+    it('should put the area and the direction back on ESC @', function() {
+      const items = render(stream(
+          ESC, '@',
+          area(0, 0, 288, 60), ESC, 'T', 2,
+          ESC, '@',
+          ESC, 'L', 'Hi', LF,
+          FF,
+      ));
+
+      const paper = stitch(items, {width: WIDTH});
+
+      assert.equal(
+          dots(Bitmap.extractRows(paper, 0, paper.height)),
+          dots(Bitmap.extractRows(
+              stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH}), 0, paper.height,
+          )),
+      );
+    });
+
+    it('should count a feed inside a page along the axis of the direction', function() {
+      /*
+          ESC 3, ESC J and ESC K move the position down the lines of the print
+          direction, so in a sideways direction they count in horizontal motion
+          units, one dot each, instead of in vertical ones. ESC 3 60 is 60 dots
+          along the x axis of the paper in direction 1, where five characters
+          of font A are the same distance.
+      */
+
+      const fed = (direction, spacing) => stitch(render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, 288, 288), ESC, 'T', direction,
+          ESC, '3', spacing, LF, 'Hi', LF,
+          FF,
+      )), {width: WIDTH});
+
+      /* Sixty horizontal motion units in direction 1 and the hundred and
+         twenty vertical ones of the upright page are the same sixty dots, and
+         the two pages are the same layout a quarter turn apart */
+
+      assert.deepEqual(crop(fed(1, 60), 288), Bitmap.rotate90(crop(fed(0, 120), 288)));
+
+      /* And those sixty dots are along the x axis of the paper here: the line
+         stands where GS $ 60, which moves along the same axis, puts it */
+
+      assert.deepEqual(fed(1, 60), stitch(render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, 288, 288), ESC, 'T', 1,
+          GS, 0x24, ...[word(60)], 'Hi', LF,
+          FF,
+      )), {width: WIDTH}));
+    });
+
+    it('should count the character spacing inside a page along the axis of the text', function() {
+      /*
+          ESC SP leaves its space behind a character, along the axis the text
+          runs in, so a sideways direction counts it in vertical motion units,
+          two per dot. Twenty four of those and the twelve horizontal units of
+          the upright page are the same twelve dots, and the two pages are the
+          same layout a quarter turn apart.
+      */
+
+      const spaced = (direction, spacing) => stitch(render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, 288, 288), ESC, 'T', direction,
+          ESC, ' ', spacing, 'Hi', LF,
+          FF,
+      )), {width: WIDTH});
+
+      assert.deepEqual(crop(spaced(1, 24), 288), Bitmap.rotate90(crop(spaced(0, 12), 288)));
+    });
+
+    it('should not turn a page upside down', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, '{', 1,
+          ESC, 'L', area(0, 0, WIDTH, 60),
+          'Hi', LF,
+          FF,
+      ));
+
+      const upright = render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, WIDTH, 60),
+          'Hi', LF,
+          FF,
+      ));
+
+      assert.equal(dots(stitch(items, {width: WIDTH})), dots(stitch(upright, {width: WIDTH})));
+    });
+
+    it('should keep the cursor as well as the position on ESC FF', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, WIDTH, 30),
+          'AB',
+          ESC, FF,
+          'CD', LF,
+          ESC, FF,
+      ));
+
+      const paper = stitch(items, {width: WIDTH});
+
+      /* The second print is the line as a whole, so the two prints together
+         are AB and then ABCD */
+
+      assert.equal(paper.height, 60);
+      assert.equal(
+          dots(Bitmap.extractRows(paper, 30, 30)),
+          dots(stitch(render(stream(ESC, '@', 'ABCD', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should ignore a print area whose origin is outside the page', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, WIDTH, 30), area(WIDTH, 0, WIDTH, 30),
+          'Hi', LF,
+          FF,
+      ));
+
+      assert.equal(stitch(items, {width: WIDTH}).height, 30);
+    });
+
+    it('should put a print area at its origin on the page', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, 'L', area(120, 60, 240, 60),
+          'Hi', LF,
+          FF,
+      ));
+
+      const paper = stitch(items, {width: WIDTH});
+
+      assert.equal(paper.height, 120);
+      assert.equal(Bitmap.getPixel(paper, 123, 70), 1);
+      assert.equal(Bitmap.getPixel(paper, 3, 10), 0);
+    });
+
+    it('should compose several print areas into one page', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, 'L',
+          area(0, 0, 288, 60), 'Left', LF,
+          area(288, 60, 288, 60), 'Right', LF,
+          FF,
+      ));
+
+      const paper = stitch(items, {width: WIDTH});
+
+      assert.equal(paper.height, 120);
+      assert.equal(Bitmap.getPixel(paper, 3, 10), 1);
+      assert.equal(Bitmap.getPixel(paper, 291, 70), 1);
+    });
+
+    it('should move the position inside the area with GS $ and GS \\', function() {
+      const absolute = render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, WIDTH, 120),
+          vertical(60), 'Hi', LF,
+          FF,
+      ));
+
+      const moved = render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, WIDTH, 120),
+          vertical(30), relative(30), 'Hi', LF,
+          FF,
+      ));
+
+      assert.equal(dots(stitch(absolute, {width: WIDTH})), dots(stitch(moved, {width: WIDTH})));
+      assert.equal(Bitmap.getPixel(stitch(absolute, {width: WIDTH}), 3, 70), 1);
+    });
+
+    it('should read a relative move above 32767 as a move back', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, WIDTH, 120),
+          vertical(60), relative(-60), 'Hi', LF,
+          FF,
+      ));
+
+      assert.equal(Bitmap.getPixel(stitch(items, {width: WIDTH}), 3, 10), 1);
+    });
+
+    it('should ignore GS $ and GS \\ in standard mode', function() {
+      assert.equal(
+          dots(stitch(render(stream(ESC, '@', vertical(60), 'Hi', LF)), {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should count a position in the motion unit of the axis it moves along', function() {
+      /*
+          In a sideways direction the text runs along the vertical axis of the
+          paper, so ESC $ counts in vertical motion units, two per dot on this
+          profile, and GS $, which goes down the lines, counts in the horizontal
+          ones, one dot each. Five characters of font A and two line feeds are
+          the sixty dots both of them ask for here.
+      */
+
+      const sideways = (position, text) => stitch(render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, 288, 288), ESC, 'T', 1,
+          position, text, LF,
+          FF,
+      )), {width: WIDTH});
+
+      assert.equal(
+          dots(sideways([ESC, 0x24, ...word(120)], 'Hi')),
+          dots(sideways([], '     Hi')),
+      );
+
+      assert.equal(
+          dots(sideways([GS, 0x24, ...word(60)], 'Hi')),
+          dots(sideways([LF, LF], 'Hi')),
+      );
+    });
+
+    it('should wrap text inside the print area', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, 24, 120),
+          'AAAA', LF,
+          FF,
+      ));
+
+      const paper = stitch(items, {width: WIDTH});
+
+      assert.equal(Bitmap.getPixel(paper, 3, 10), 1);
+      assert.equal(Bitmap.getPixel(paper, 3, 40), 1);
+      assert.equal(Bitmap.getPixel(paper, 27, 10), 0);
+    });
+
+    it('should discard what does not fit in the print area', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, WIDTH, 30),
+          'First', LF, 'Second', LF,
+          FF,
+      ));
+
+      const paper = stitch(items, {width: WIDTH});
+
+      assert.equal(paper.height, 30);
+      assert.equal(
+          dots(paper),
+          dots(stitch(render(stream(ESC, '@', ESC, 'L', area(0, 0, WIDTH, 30), 'First', LF, FF)), {width: WIDTH})),
+      );
+    });
+
+    it('should draw a block into the page at the position', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, WIDTH, 240),
+          vertical(60),
+          GS, 'v', '0', [0, 2, 0, 16, 0], new Array(32).fill(0xff),
+          FF,
+      ));
+
+      const paper = stitch(items, {width: WIDTH});
+
+      assert.equal(paper.height, 240);
+      assert.equal(Bitmap.getPixel(paper, 3, 62), 1);
+      assert.equal(Bitmap.getPixel(paper, 3, 10), 0);
+    });
+
+    it('should cut the paper behind the page', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, 'L', area(0, 0, WIDTH, 30),
+          'Coupon', LF,
+          GS, 'V', 0,
+          FF,
+      ), {commands: COMMANDS});
+
+      assert.deepEqual(items.map((item) => item.type), ['image', 'cut']);
+    });
+
+    it('should not enter page mode while a line is being composed', function() {
+      const items = render(stream(
+          ESC, '@',
+          'Hi', ESC, 'L', area(0, 0, WIDTH, 240), LF,
+      ));
+
+      assert.equal(
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+      );
+    });
+  });
+
   describe('the lengths of the text layout commands', function() {
     /* Every command with arguments that do not change the paper, so that the
        text behind it has to land where it lands without the command */
@@ -1937,6 +2516,12 @@ describe('EscPosRenderer', function() {
       ['FS S n1 n2', [FS, 0x53, 0, 0]],
       ['FS W n', [FS, 0x57, 0]],
       ['FS ( C pL pH fn m', [FS, 0x28, 0x43, 2, 0, 48, 1]],
+      ['ESC L and ESC S', [ESC, 0x4c, ESC, 0x53]],
+      ['ESC T n', [ESC, 0x54, 0]],
+      ['ESC W n1..n8', [ESC, 0x57, 0, 0, 0, 0, 0, 0, 0, 0]],
+      ['ESC FF', [ESC, 0x0c]],
+      ['GS $ nL nH', [GS, 0x24, 0, 0]],
+      ['GS \\ nL nH', [GS, 0x5c, 0, 0]],
     ];
 
     for (const [name, bytes] of lengths) {
@@ -1971,6 +2556,10 @@ describe('EscPosRenderer', function() {
       ['DLE DC4', [0x10, 0x14]],
       ['DLE DC4 1', [0x10, 0x14, 1, 0]],
       ['DLE DC4 8', [0x10, 0x14, 8, 1, 3]],
+      ['ESC T', [ESC, 0x54]],
+      ['ESC W', [ESC, 0x57, 0, 0, 0, 0]],
+      ['GS $', [GS, 0x24, 10]],
+      ['GS \\', [GS, 0x5c, 10]],
     ];
 
     for (const [name, bytes] of truncated) {

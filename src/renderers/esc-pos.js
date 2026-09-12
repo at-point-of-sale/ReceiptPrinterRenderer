@@ -18,7 +18,9 @@ const GS = 0x1d;
 const DLE = 0x10;
 const HT = 0x09;
 const LF = 0x0a;
+const FF = 0x0c;
 const CR = 0x0d;
+const CAN = 0x18;
 
 /* The resolution of a printer that has no dpi in its profile, which is what
    every receipt printer of this class prints at */
@@ -74,6 +76,15 @@ const SYMBOLOGIES = Object.assign(Object.create(null), {
   77: 'gs1-databar-limited',
   78: 'gs1-databar-expanded',
   79: 'code128-auto',
+});
+
+/* The print directions of ESC T, as the numbers and as the ASCII digits: 0 is
+   left to right from the top left of the print area, 1 bottom to top from the
+   bottom left, 2 right to left from the bottom right and 3 top to bottom from
+   the top right. Any other value leaves the direction as it was */
+
+const PRINT_DIRECTIONS = Object.assign(Object.create(null), {
+  0: 0, 1: 1, 2: 2, 3: 3, 48: 0, 49: 1, 50: 2, 51: 3,
 });
 
 /* Where GS H n puts the human readable text of a barcode */
@@ -467,23 +478,17 @@ const UNKNOWN_ARGUMENTS = {
     0x3d: 1, /* select peripheral device */
     0x3f: 1, /* cancel user defined character */
     0x43: 1, /* page length in lines */
-    0x4c: 0, /* page mode */
-    0x53: 0, /* standard mode */
-    0x54: 1, /* print direction in page mode */
     0x55: 1, /* unidirectional printing */
     0x56: 1, /* rotate 90 degrees */
-    0x57: 8, /* print area in page mode */
     0x63: 2, /* paper sensor and panel button settings */
     0x72: 1, /* print colour */
   },
 
   [GS]: {
-    0x24: 2, /* absolute vertical position in page mode */
     0x3a: 0, /* start or end macro definition */
     0x41: 2, /* print position adjustment */
     0x45: 1, /* print control method */
     0x54: 1, /* print position at the top of the line */
-    0x5c: 2, /* relative vertical position in page mode */
     0x63: 0, /* print counter */
     0x67: 4, /* maintenance counter, GS g 0 m nL nH and GS g 2 m nL nH */
     0x7a: 2, /* print density and other settings */
@@ -521,6 +526,7 @@ class EscPosRenderer {
   #horizontalUnits;
   #kanji;
   #codeSystem;
+  #direction;
   #dpi;
   #text;
   #graphics;
@@ -629,6 +635,7 @@ class EscPosRenderer {
     this.#doubleStrike = false;
     this.#kanji = false;
     this.#codeSystem = 'shift-jis';
+    this.#direction = 0;
     this.#text = [];
 
     /* The graphics print buffer is part of the print buffer of the printer,
@@ -688,6 +695,29 @@ class EscPosRenderer {
 
       if (byte === LF) {
         this.#painter.lineFeed();
+        index++;
+        continue;
+      }
+
+      /* FF prints the page of page mode and returns to standard mode. In
+         standard mode it feeds to the next page, which a receipt printer with
+         a roll of paper has not got, so it does nothing at all */
+
+      if (byte === FF) {
+        if (this.#painter.pageMode) {
+          this.#painter.printPage();
+          this.#painter.page(false);
+        }
+
+        index++;
+        continue;
+      }
+
+      /* CAN deletes the print data of the print area in page mode, which is
+         where this command is defined. In standard mode a printer ignores it */
+
+      if (byte === CAN) {
+        this.#painter.cancelPage();
         index++;
         continue;
       }
@@ -795,22 +825,27 @@ class EscPosRenderer {
       },
 
       [ESC]: {
-        0x20: {args: 1, run: (a) => this.#painter.spacing(this.#horizontal(a[0]))},
+        0x0c: {args: 0, run: () => this.#painter.printPage({keep: true})}, /* ESC FF, print the page */
+        0x20: {args: 1, run: (a) => this.#painter.spacing(this.#across(a[0]))},
         0x21: {args: 1, run: (a) => this.#printMode(a[0])},
-        0x24: {args: 2, run: (a) => this.#painter.position(this.#horizontal(a[0] + a[1] * 256))},
+        0x24: {args: 2, run: (a) => this.#painter.position(this.#across(a[0] + a[1] * 256))},
         0x2a: {args: columnImageArguments, run: (a) => this.#columnImage(a)},
         0x2d: {args: 1, run: (a) => this.#underline(a[0])},
         0x32: {args: 0, run: () => this.#painter.lineSpacing(null)},
-        0x33: {args: 1, run: (a) => this.#painter.lineSpacing(Math.round(a[0] / this.#verticalUnits))},
+        0x33: {args: 1, run: (a) => this.#painter.lineSpacing(this.#down(a[0]))},
         0x34: {args: 1, run: null}, /* italic, parsed and ignored, as the hardware does */
         0x40: {args: 0, run: () => this.#initialize()},
         0x44: {args: nulTerminated, run: (a) => this.#painter.tabs(Array.from(a.subarray(0, a.length - 1)))},
         0x45: {args: 1, run: (a) => this.#bold({emphasis: (a[0] & 1) !== 0})},
         0x47: {args: 1, run: (a) => this.#bold({doubleStrike: (a[0] & 1) !== 0})},
-        0x4a: {args: 1, run: (a) => this.#painter.feed(Math.round(a[0] / this.#verticalUnits))},
+        0x4a: {args: 1, run: (a) => this.#painter.feed(this.#down(a[0]))},
         0x4b: {args: 1, run: (a) => this.#reverseFeed(a[0])},
+        0x4c: {args: 0, run: () => this.#painter.page(true)}, /* ESC L, select page mode */
         0x4d: {args: 1, run: (a) => this.#font(a[0])},
         0x52: {args: 1, run: (a) => this.#international(a[0])},
+        0x53: {args: 0, run: () => this.#painter.page(false)}, /* ESC S, select standard mode */
+        0x54: {args: 1, run: (a) => this.#printDirection(a[0])},
+        0x57: {args: 8, run: (a) => this.#printArea(a)},
         0x5c: {args: 2, run: (a) => this.#relative(a)},
         0x61: {args: 1, run: (a) => this.#align(a[0])},
         0x64: {args: 1, run: (a) => this.#painter.lineFeed(a[0])},
@@ -826,6 +861,7 @@ class EscPosRenderer {
 
       [GS]: {
         0x21: {args: 1, run: (a) => this.#size(a[0])},
+        0x24: {args: 2, run: (a) => this.#pageVertical(a, false)}, /* GS $, absolute vertical position */
         0x28: {args: parenthesisArguments, run: (a, consumed) => this.#parenthesis(a, consumed)},
         0x2a: {args: downloadedBitmapArguments, run: (a) => this.#defineBitImage(a)},
         0x2f: {args: 1, run: (a, consumed) => this.#printBitImage(a, consumed)},
@@ -837,6 +873,7 @@ class EscPosRenderer {
         0x50: {args: 2, run: (a) => this.#motionUnits(a[0], a[1])},
         0x56: {args: cutArguments, run: (a) => this.#cut(a[0])},
         0x57: {args: 2, run: (a) => this.#painter.margins({width: this.#horizontal(a[0] + a[1] * 256)})},
+        0x5c: {args: 2, run: (a) => this.#pageVertical(a, true)}, /* GS \, relative vertical position */
         0x61: {args: 1, run: null}, /* automatic status back, parsed, there is no channel back */
         0x62: {args: 1, run: null}, /* smoothing, parsed, it changes no dot of a one bit image */
         0x66: {args: 1, run: (a) => this.#hriFont(a[0])},
@@ -1798,6 +1835,112 @@ class EscPosRenderer {
   }
 
   /**
+     * A distance in vertical motion units, in dots
+     *
+     * @param  {number}   units   The distance of the command
+     * @return {number}           The distance in dots
+     */
+  #vertical(units) {
+    return Math.round(units / this.#verticalUnits);
+  }
+
+  /**
+     * A distance along the axis the characters of a line run in, in dots, which
+     * is what ESC $ and ESC \ move the cursor by.
+     *
+     * That axis is the horizontal one of the paper in standard mode and in the
+     * print directions 0 and 2 of page mode, and the vertical one in the
+     * directions 1 and 3, where the text runs up or down the paper. The unit
+     * follows the axis, which is what the reference of these commands says of
+     * them in page mode.
+     *
+     * @param  {number}   units   The distance of the command
+     * @return {number}           The distance in dots
+     */
+  #across(units) {
+    return this.#sideways() ? this.#vertical(units) : this.#horizontal(units);
+  }
+
+  /**
+     * A distance along the axis the lines of a page go down in, which is what
+     * GS $ and GS \ move the position by. It is the other axis of #across().
+     *
+     * @param  {number}   units   The distance of the command
+     * @return {number}           The distance in dots
+     */
+  #down(units) {
+    return this.#sideways() ? this.#horizontal(units) : this.#vertical(units);
+  }
+
+  /**
+     * Whether the text of the page runs up or down the paper instead of across
+     * it, which is the case in the print directions 1 and 3
+     *
+     * @return {boolean}   True in a sideways print direction
+     */
+  #sideways() {
+    return this.#painter.pageMode && (this.#direction === 1 || this.#direction === 3);
+  }
+
+  /**
+     * ESC T n, the print direction and the starting position of page mode.
+     *
+     * The direction is a setting of the printer rather than of one page: a
+     * stream can set it in standard mode, it is what the next page starts in,
+     * and it survives that page. Only ESC @ puts it back to 0.
+     *
+     * @param  {number}   value   The argument of the command
+     */
+  #printDirection(value) {
+    const direction = PRINT_DIRECTIONS[value];
+
+    if (typeof direction !== 'number') {
+      return;
+    }
+
+    this.#painter.pageDirection(direction);
+    this.#direction = direction;
+  }
+
+  /**
+     * ESC W xL xH yL yH dxL dxH dyL dyH, the print area of page mode. The
+     * origin and the width are in horizontal motion units and the height in
+     * vertical ones, whatever the print direction is: the area is a rectangle
+     * on the page and not on the layout inside it.
+     *
+     * A width or a height of zero, and an origin outside the page, make the
+     * printer drop the command, which the painter does as well. The area is a
+     * setting of the printer and not of one page: it can be set in standard
+     * mode, the next page starts in it, and it survives that page until ESC @.
+     *
+     * @param  {Uint8Array}   args   The arguments of the command
+     */
+  #printArea(args) {
+    this.#painter.pageArea({
+      x: this.#horizontal(args[0] + args[1] * 256),
+      y: this.#vertical(args[2] + args[3] * 256),
+      width: this.#horizontal(args[4] + args[5] * 256),
+      height: this.#vertical(args[6] + args[7] * 256),
+    });
+  }
+
+  /**
+     * GS $ nL nH and GS \ nL nH, the absolute and the relative position along
+     * the vertical axis of the print direction. The relative distance is
+     * signed, a value above 32767 is the negative distance below it, the way
+     * ESC \ counts.
+     *
+     * @param  {Uint8Array}   args       The arguments of the command
+     * @param  {boolean}      relative   True for GS \, the relative position
+     */
+  #pageVertical(args, relative) {
+    const value = args[0] + args[1] * 256;
+    const distance = relative && value > 32767 ? value - 65536 : value;
+
+    this.#painter.pageVertical(this.#down(distance), {relative});
+  }
+
+  /**
      * ESC K n, print and reverse feed n vertical motion units. The pending line
      * is printed first and the paper then moves back over the rows that are
      * already on it, so that everything behind it overprints them.
@@ -1814,7 +1957,7 @@ class EscPosRenderer {
       return;
     }
 
-    this.#painter.reverseFeed(Math.round(units / this.#verticalUnits));
+    this.#painter.reverseFeed(this.#down(units));
   }
 
   /**
@@ -1827,7 +1970,7 @@ class EscPosRenderer {
     const value = args[0] + args[1] * 256;
     const distance = value > 32767 ? value - 65536 : value;
 
-    this.#painter.position(this.#painter.cursor + this.#horizontal(distance));
+    this.#painter.position(this.#painter.cursor + this.#across(distance));
   }
 
   /**

@@ -25,6 +25,7 @@ import {pdf417 as encodePdf417} from './symbologies/pdf417.js';
  * @property {number} lineSpacing                     Default line spacing in dots
  * @property {number} motionUnit                      Default vertical motion units per dot
  * @property {number} [dpi]                           Resolution of the printer, for the horizontal motion unit of GS P
+ * @property {number} [pageHeight]                    Height of the page of page mode in dots
  * @property {{A: CellSize, B: CellSize}} fonts       Cell size of font A and font B
  */
 
@@ -109,6 +110,30 @@ import {pdf417 as encodePdf417} from './symbologies/pdf417.js';
  * @property {number} [width]   Width of the print area in dots, null for the whole paper
  */
 
+/**
+ * The print area of page mode, in dots on the page
+ *
+ * @typedef {object} PageArea
+ * @property {number} x        Horizontal origin, from the left edge of the page
+ * @property {number} y        Vertical origin, from the top of the page
+ * @property {number} width    Width of the area in dots, 0 for the rest of the page
+ * @property {number} height   Height of the area in dots, 0 for the rest of the page
+ */
+
+/**
+ * How a page is printed
+ *
+ * @typedef {object} PrintPageRequest
+ * @property {boolean} [keep]   Keep the dots and the position, so the page can be printed again
+ */
+
+/**
+ * How a position of page mode is set
+ *
+ * @typedef {object} PageVerticalRequest
+ * @property {boolean} [relative]   Count the distance from the current position instead of the area
+ */
+
 /* The built in fonts the two printer fonts are drawn from. Font A is the 12x24
    font, font B is the 8x16 font, centred in whatever cell the profile gives it,
    which is 9x17 on Epson and 9x24 on Star */
@@ -129,6 +154,16 @@ const PLAIN = {bold: false, underline: 0, upperline: 0, invert: false, width: 1,
 
 const TAB_INTERVAL = 8;
 const MAX_TAB_STOPS = 32;
+
+/* How tall the page of page mode is when the profile does not say, in dots.
+   1662 dots is the page mode maximum of an Epson TM-T88 at 576 dots wide */
+
+const DEFAULT_PAGE_HEIGHT = 1662;
+
+/* The rotation the four print directions of page mode give the layout of a
+   print area, see pageDirection() */
+
+const PAGE_ROTATIONS = [null, Bitmap.rotate90, Bitmap.rotate180, Bitmap.rotate270];
 
 /* The code point of the glyph a multibyte character is drawn with, which the
    font draws as its fallback box */
@@ -154,6 +189,12 @@ const HRI_GAP = 4;
  * the position and the position moves on by its height, so the two are the same
  * number until a reverse feed moves the position back over rows that are
  * already on the paper, which the lines behind it are then drawn over.
+ *
+ * In page mode it composes a page instead of the paper: the lines and the
+ * blocks go into a print area of a page held in memory, in the coordinate
+ * system of the print direction, and the page reaches the paper as one block
+ * when the stream prints it. Everything above works the same way inside the
+ * area, the surface the layout happens on is the only thing that changes.
  */
 class Painter {
   #width;
@@ -178,6 +219,11 @@ class Painter {
 
   #line;
   #definitions;
+
+  #pageHeight;
+  #pageSetup;
+  #page;
+  #held;
 
   #buffer;
   #rows;
@@ -239,6 +285,8 @@ class Painter {
       B: this.#profile.fonts.B,
     };
 
+    this.#pageHeight = this.#profile.pageHeight || DEFAULT_PAGE_HEIGHT;
+
     this.#cache = new Map();
     this.#items = [];
 
@@ -285,6 +333,11 @@ class Painter {
      * emitted are kept, which is what ESC @ does on a real printer.
      */
   reset() {
+    /* An initialize leaves page mode and throws the page away, which is what
+       ESC @ does to the page buffer of a printer */
+
+    this.page(false);
+
     this.#style = {bold: false, underline: 0, upperline: 0, invert: false, width: 1, height: 1};
     this.#font = 'A';
     this.#align = 'left';
@@ -294,6 +347,13 @@ class Painter {
     this.#margins = {left: 0, width: null};
     this.#upsideDown = false;
     this.#line = this.#empty();
+
+    /* The print area and the print direction of page mode are settings of the
+       printer, not of one page: a stream sets them in standard mode or in page
+       mode, they survive the page they were used on, and only an initialize
+       puts them back. No area at all is the whole printable area */
+
+    this.#pageSetup = {area: null, direction: 0};
   }
 
   /**
@@ -479,7 +539,7 @@ class Painter {
      * @param  {Margins}   changes   The margins to change, the others keep their value
      */
   margins(changes) {
-    if (!changes || this.#line.cells.length !== 0 || this.#line.x !== 0) {
+    if (!changes || this.#page || this.#line.cells.length !== 0 || this.#line.x !== 0) {
       return;
     }
 
@@ -579,6 +639,14 @@ class Painter {
       return;
     }
 
+    /* In page mode the paper does not move at all, the position inside the
+       print area does, and the top of the area is the clamp there */
+
+    if (this.#page) {
+      this.#page.y = Math.max(0, this.#page.y - dots);
+      return;
+    }
+
     this.#position = Math.max(0, this.#position - dots);
   }
 
@@ -600,6 +668,258 @@ class Painter {
      */
   cancel() {
     this.#line = this.#empty();
+  }
+
+  /**
+     * Whether the painter is composing a page instead of the paper
+     *
+     * @return {boolean}   True in page mode
+     */
+  get pageMode() {
+    return this.#page !== null;
+  }
+
+  /**
+     * Enter page mode, or leave it and throw the page away.
+     *
+     * Page mode is entered at the beginning of a line only, which is what the
+     * commands that select it say: a line that already holds characters, or
+     * whose cursor was moved, makes the printer drop the command. Leaving page
+     * mode deletes everything the page held, dots and pending line alike; the
+     * page only ever reaches the paper through printPage().
+     *
+     * @param  {boolean}   enabled   True to enter page mode, false to leave it
+     */
+  page(enabled) {
+    if (enabled) {
+      if (this.#page || this.#line.cells.length !== 0 || this.#line.x !== 0) {
+        return;
+      }
+
+      const area = this.#pageSetup.area;
+
+      this.#page = {
+        bitmap: null,
+        canvas: null,
+        area: area || {x: 0, y: 0, width: this.#width, height: this.#pageHeight},
+        direction: this.#pageSetup.direction,
+        bottom: area ? area.y + area.height : 0,
+        y: 0,
+      };
+
+      return;
+    }
+
+    if (!this.#page) {
+      return;
+    }
+
+    this.#page = null;
+    this.#line = this.#empty();
+
+    this.#release();
+  }
+
+  /**
+     * Set the print area of the page, in dots on the page. The origin is the
+     * top left corner of the area, whatever the print direction is, and a width
+     * or a height of zero is the rest of the page in that direction.
+     *
+     * An origin outside the page is ignored, the way the printer ignores it.
+     * The area of a page that was given none is the whole page.
+     *
+     * The layout starts over in the new area, at its start position: what was
+     * drawn in the area before this goes into the page, so a stream can compose
+     * one page out of several areas.
+     *
+     * @param  {PageArea}   area   The print area
+     */
+  pageArea(area) {
+    if (!area) {
+      return;
+    }
+
+    const x = Number.isInteger(area.x) ? area.x : 0;
+    const y = Number.isInteger(area.y) ? area.y : 0;
+
+    if (x < 0 || y < 0 || x >= this.#width || y >= this.#pageHeight) {
+      return;
+    }
+
+    /* A width or a height of zero is not an area, and the command that carries
+       one does nothing at all, the way the printer ignores it */
+
+    if (!Number.isInteger(area.width) || !Number.isInteger(area.height) ||
+        area.width <= 0 || area.height <= 0) {
+      return;
+    }
+
+    const width = Math.min(area.width, this.#width - x);
+    const height = Math.min(area.height, this.#pageHeight - y);
+
+    this.#pageSetup.area = {x, y, width, height};
+
+    if (!this.#page) {
+      return;
+    }
+
+    this.#compose();
+
+    this.#page.area = this.#pageSetup.area;
+
+    /* The page feeds the paper over every area it was given, this one included,
+       whatever the areas hold */
+
+    this.#page.bottom = Math.max(this.#page.bottom, y + height);
+  }
+
+  /**
+     * Set the print direction of page mode, which is the direction the text
+     * runs in and the corner of the print area it starts in:
+     *
+     *   0   left to right, from the top left, drawn as it is laid out
+     *   1   bottom to top, from the bottom left, a quarter turn counter-clockwise
+     *   2   right to left, from the bottom right, half a turn
+     *   3   top to bottom, from the top right, a quarter turn clockwise
+     *
+     * The layout of a direction happens in a coordinate system of its own, in
+     * which the text runs to the right and the lines go down as they always do,
+     * and the whole of it is turned when it goes into the page. The area is as
+     * wide as it is tall in the two sideways directions, so a line of direction
+     * 1 is as long as the area is high.
+     *
+     * Like a new area, a new direction starts the layout over, at the start
+     * position of the direction.
+     *
+     * @param  {number}   direction   0, 1, 2 or 3
+     */
+  pageDirection(direction) {
+    if (!Number.isInteger(direction) || direction < 0 || direction > 3) {
+      return;
+    }
+
+    this.#pageSetup.direction = direction;
+
+    if (!this.#page) {
+      return;
+    }
+
+    this.#compose();
+
+    this.#page.direction = direction;
+  }
+
+  /**
+     * Move the position along the vertical axis of the print direction, which
+     * is what GS $ and GS \ do in page mode: the distance is counted from the
+     * start of the print area, or from the position itself when it is relative.
+     * A position outside the area is ignored, the way the printer ignores it.
+     *
+     * The characters that are on the line are drawn where they were placed
+     * before the position moves, so a stream that lays a page out with these
+     * commands gets what it asked for.
+     *
+     * @param  {number}                 dots        The distance in dots
+     * @param  {PageVerticalRequest}    [options]   `{relative: true}` to count from the position
+     */
+  pageVertical(dots, options) {
+    if (!this.#page || !Number.isInteger(dots)) {
+      return;
+    }
+
+    const position = options && options.relative === true ? this.#page.y + dots : dots;
+
+    if (position < 0 || position > this.#logical().height) {
+      return;
+    }
+
+    this.#settle();
+
+    this.#page.y = position;
+  }
+
+  /**
+     * Throw the dots of the page away and keep the print area, which is what
+     * CAN does in page mode
+     */
+  cancelPage() {
+    if (!this.#page) {
+      return;
+    }
+
+    this.#page.bitmap = null;
+    this.#page.canvas = null;
+    this.#page.y = 0;
+
+    this.#line = this.#empty();
+  }
+
+  /**
+     * Draw the page on the paper as one block and move the paper on by its
+     * height, which is what FF and ESC FF do.
+     *
+     * The page is as tall as the print areas the stream set on it, so that the
+     * paper advances over the whole area the way a printer feeds it, and as
+     * tall as its dots when the stream set no area at all: a page that was
+     * given neither an area nor a dot is not printed, which is what makes
+     * entering and leaving page mode without anything in between cost nothing.
+     *
+     * `{keep: true}` keeps the dots, the area, the direction and the position,
+     * so that the same page can be printed again.
+     *
+     * @param  {PrintPageRequest}   [options]   How the page is printed
+     */
+  printPage(options) {
+    if (!this.#page) {
+      return;
+    }
+
+    const keep = options ? options.keep === true : false;
+    const position = this.#page.y;
+    const cursor = this.#line.x;
+
+    this.#compose();
+
+    const page = this.#page;
+    const height = Math.max(page.bottom, this.#inked(page.bitmap));
+
+    if (height > 0) {
+      /* The page is as tall as the areas it was given, dots or no dots, so it
+         is drawn into a bitmap of that height rather than cut down to the rows
+         that carry something: an area that stayed empty still feeds the paper,
+         the way a printer feeds it */
+
+      const bitmap = Bitmap.create(this.#width, height);
+
+      if (page.bitmap) {
+        Bitmap.blit(page.bitmap, bitmap, 0, 0);
+      }
+
+      /* The page carries its own positions, so it goes on the paper itself and
+         not inside the margins of the line mode. Upside down printing is a
+         standard mode setting and does not turn a page either */
+
+      const upsideDown = this.#upsideDown;
+
+      this.#page = null;
+      this.#upsideDown = false;
+
+      this.block(bitmap, {margins: false});
+
+      this.#upsideDown = upsideDown;
+      this.#page = page;
+    }
+
+    if (keep) {
+      page.y = position;
+      this.#line.x = cursor;
+    } else {
+      page.bitmap = null;
+      page.canvas = null;
+      page.y = 0;
+    }
+
+    this.#release();
   }
 
   /**
@@ -634,14 +954,14 @@ class Painter {
       this.#line = this.#empty();
     }
 
-    const line = Bitmap.create(this.#width, bitmap.height);
+    const line = Bitmap.create(this.#surface(), bitmap.height);
     const offset = paper ?
-      this.#offset(bitmap.width, this.#width) :
-      this.#margins.left + this.#offset(bitmap.width);
+      this.#offset(bitmap.width, this.#surface()) :
+      this.#left() + this.#offset(bitmap.width);
 
     Bitmap.blit(bitmap, line, offset, 0);
 
-    this.#append(this.#upsideDown ? Bitmap.rotate180(line) : line);
+    this.#append(this.#turn(line));
   }
 
   /**
@@ -751,7 +1071,7 @@ class Painter {
       height = Math.max(height, code.height.minimum * moduleWidth);
     }
 
-    if (code.bars.reduce((total, width) => total + width, 0) * moduleWidth > this.#width) {
+    if (code.bars.reduce((total, width) => total + width, 0) * moduleWidth > this.#surface()) {
       return;
     }
 
@@ -822,7 +1142,7 @@ class Painter {
     const symbol = encodeQrcode(request.data, request.errorLevel);
     const moduleSize = Math.max(1, request.moduleSize || 1);
 
-    if (symbol === null || symbol.width * moduleSize > this.#width) {
+    if (symbol === null || symbol.width * moduleSize > this.#surface()) {
       return;
     }
 
@@ -865,7 +1185,7 @@ class Painter {
 
     const width = symbol.modules[0].length * moduleWidth;
 
-    if (width > this.#width) {
+    if (width > this.#surface()) {
       return;
     }
 
@@ -912,6 +1232,17 @@ class Painter {
       return;
     }
 
+    /* A cut or a drawer pulse that arrives while a page is being composed
+       waits for that page: the page is not on the paper yet, so an item in
+       front of it would tell the driver to cut paper that is still to be
+       printed. Everything else, the unknown items, is a diagnostic and is
+       reported where it stands */
+
+    if (this.#page && (item.type === 'cut' || item.type === 'pulse')) {
+      this.#held.push(item);
+      return;
+    }
+
     this.#flush();
     this.#items.push(item);
   }
@@ -931,6 +1262,10 @@ class Painter {
      * @return {object[]}   The items of this stream, in order
      */
   end() {
+    /* A page the stream never printed does not reach the paper, the way the
+       line that is being composed does not */
+
+    this.page(false);
     this.cancel();
 
     this.#flush();
@@ -964,6 +1299,8 @@ class Painter {
     this.#position = 0;
     this.#blankRuns = [];
     this.#overprinted = false;
+    this.#page = null;
+    this.#held = [];
   }
 
   /**
@@ -1048,10 +1385,48 @@ class Painter {
      * @return {number}   Width in dots
      */
   #area() {
-    const left = Math.min(this.#margins.left, this.#width);
+    if (this.#page) {
+      return this.#logical().width;
+    }
+
+    const left = this.#left();
     const width = this.#margins.width === null ? this.#width - left : this.#margins.width;
 
     return Math.max(0, Math.min(width, this.#width - left));
+  }
+
+  /**
+     * The left margin of the line, which is the left edge of the paper in page
+     * mode: the print area of the page is the margin there
+     *
+     * @return {number}   Left margin in dots
+     */
+  #left() {
+    return this.#page ? 0 : Math.min(this.#margins.left, this.#width);
+  }
+
+  /**
+     * Width of the surface the layout happens on: the paper in standard mode
+     * and the print area of the page, in the coordinate system of the print
+     * direction, in page mode
+     *
+     * @return {number}   Width in dots
+     */
+  #surface() {
+    return this.#page ? this.#logical().width : this.#width;
+  }
+
+  /**
+     * A line box the way it goes on the surface: turned by 180 degrees while
+     * upside down printing is on, and never in page mode, where the reference
+     * has ESC { as a standard mode command and the print direction is what
+     * turns the layout
+     *
+     * @param  {Bitmap}   bitmap   The line box
+     * @return {Bitmap}            The line box as it is drawn
+     */
+  #turn(bitmap) {
+    return this.#upsideDown && !this.#page ? Bitmap.rotate180(bitmap) : bitmap;
   }
 
   /**
@@ -1075,11 +1450,144 @@ class Painter {
     const stops = [];
     const step = (this.#cells.A.width + this.#spacing) * TAB_INTERVAL;
 
-    for (let stop = step; stop <= this.#width && stops.length < MAX_TAB_STOPS; stop += step) {
+    for (let stop = step; stop <= this.#surface() && stops.length < MAX_TAB_STOPS; stop += step) {
       stops.push(stop);
     }
 
     return stops;
+  }
+
+  /**
+     * The size of the print area in the coordinate system of the print
+     * direction: the two sideways directions lay their text out along the
+     * height of the area and their lines along its width
+     *
+     * @return {{width: number, height: number}}   The size in dots
+     */
+  #logical() {
+    const {area, direction} = this.#page;
+
+    return direction === 1 || direction === 3 ?
+      {width: area.height, height: area.width} :
+      {width: area.width, height: area.height};
+  }
+
+  /**
+     * The surface the current print area and direction are laid out on, made
+     * the first time something is drawn on it
+     *
+     * @return {Bitmap}   The canvas
+     */
+  #canvas() {
+    if (!this.#page.canvas) {
+      const size = this.#logical();
+
+      this.#page.canvas = Bitmap.create(size.width, size.height);
+    }
+
+    return this.#page.canvas;
+  }
+
+  /**
+     * Draw the characters that are on the line where they were placed, without
+     * moving the position, which is what a position command inside a page has
+     * to do: a printer puts a character in the page as it reads it, this
+     * painter keeps it on a line until something commits it.
+     */
+  #settle() {
+    if (this.#line.cells.length === 0) {
+      return;
+    }
+
+    const {x} = this.#line;
+    const y = this.#page.y;
+
+    this.#commit(0);
+
+    this.#page.y = y;
+    this.#line.x = x;
+  }
+
+  /**
+     * Put what was laid out in the current print area into the page, turned by
+     * the print direction, and start the area over. The page grows to hold it.
+     */
+  #compose() {
+    const page = this.#page;
+
+    this.#settle();
+
+    this.#line = this.#empty();
+
+    page.y = 0;
+
+    if (!page.canvas) {
+      return;
+    }
+
+    const rotate = PAGE_ROTATIONS[page.direction];
+    const dots = rotate ? rotate(page.canvas) : page.canvas;
+
+    page.canvas = null;
+
+    const height = Math.max(page.area.y + dots.height, page.bitmap ? page.bitmap.height : 0);
+
+    if (!page.bitmap || page.bitmap.height < height) {
+      const grown = Bitmap.create(this.#width, height);
+
+      if (page.bitmap) {
+        Bitmap.blit(page.bitmap, grown, 0, 0);
+      }
+
+      page.bitmap = grown;
+    }
+
+    Bitmap.blit(dots, page.bitmap, page.area.x, page.area.y);
+  }
+
+  /**
+     * The row below the last row of a bitmap that carries a dot, which is how
+     * tall a page without a print area of its own is
+     *
+     * @param  {Bitmap|null}   bitmap   The page, or nothing at all
+     * @return {number}                 Number of rows
+     */
+  #inked(bitmap) {
+    if (!bitmap) {
+      return 0;
+    }
+
+    const rowBytes = Bitmap.rowBytes(bitmap.width);
+
+    for (let row = bitmap.height - 1; row >= 0; row--) {
+      for (let byte = 0; byte < rowBytes; byte++) {
+        if (bitmap.data[row * rowBytes + byte] !== 0) {
+          return row + 1;
+        }
+      }
+    }
+
+    return 0;
+  }
+
+  /**
+     * Emit the cut and pulse items that waited for the page, behind the rows
+     * that are on the paper by now
+     */
+  #release() {
+    if (this.#held.length === 0) {
+      return;
+    }
+
+    const held = this.#held;
+
+    this.#held = [];
+
+    this.#flush();
+
+    for (const item of held) {
+      this.#items.push(item);
+    }
   }
 
   /**
@@ -1130,7 +1638,7 @@ class Painter {
   #commit(minimum) {
     const line = this.#line;
     const height = Math.max(minimum, line.height);
-    const margins = this.#margins;
+    const left = this.#left();
     const area = this.#area();
 
     this.#line = this.#empty();
@@ -1144,14 +1652,14 @@ class Painter {
       return;
     }
 
-    const bitmap = Bitmap.create(this.#width, height);
-    const offset = margins.left + this.#offset(line.extent, area);
+    const bitmap = Bitmap.create(this.#surface(), height);
+    const offset = left + this.#offset(line.extent, area);
 
     for (const cell of line.cells) {
       Bitmap.blit(cell.bitmap, bitmap, offset + cell.x, 0);
     }
 
-    this.#append(this.#upsideDown ? Bitmap.rotate180(bitmap) : bitmap);
+    this.#append(this.#turn(bitmap));
   }
 
   /**
@@ -1193,6 +1701,18 @@ class Painter {
      */
   #append(bitmap) {
     if (bitmap.height === 0) {
+      return;
+    }
+
+    /* In page mode the rows do not reach the paper at all, they go into the
+       print area of the page at the position inside it. The blit combines them
+       with OR, so a line that is printed over another one adds its dots the way
+       the paper does, and a row past the bottom of the area is clipped, which
+       is the printer discarding what does not fit in the area */
+
+    if (this.#page) {
+      Bitmap.blit(bitmap, this.#canvas(), 0, this.#page.y);
+      this.#page.y += bitmap.height;
       return;
     }
 
@@ -1243,6 +1763,11 @@ class Painter {
      */
   #appendBlank(count) {
     if (count <= 0) {
+      return;
+    }
+
+    if (this.#page) {
+      this.#page.y += count;
       return;
     }
 

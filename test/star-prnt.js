@@ -538,10 +538,93 @@ describe('StarPrntRenderer', function() {
     });
   });
 
-  describe('print mode', function() {
+  describe('page mode', function() {
+    /*
+        ESC GS P 0 and ESC GS P 1 are page mode start and page mode end, and the
+        end prints the page. The encoder's flush is the two of them with nothing
+        in between, which composes an empty page and prints nothing at all, so
+        every job the encoder writes comes out as it always did.
+
+        The area, the direction and the positions of functions 2 to 5 count in
+        dots, the unit of the Star position commands.
+    */
+
+    const page = (...parts) => stitch(render(stream(ESC, '@', ESC, GS, 'P', '0', ...parts,
+        ESC, GS, 'P', '1')), {width: WIDTH});
+
+    const word = (value) => [value & 0xff, (value >> 8) & 0xff];
+    const area = (x, y, width, height) =>
+      [ESC, GS, 0x50, 0x32, ...word(x), ...word(y), ...word(width), ...word(height)];
+
     it('should ignore the flush the encoder sends around a job', function() {
       assert.deepEqual(
           render(stream(ESC, '@', 'Hi', LF, ESC, GS, 'P', '0', ESC, GS, 'P', '1')),
+          render(stream(ESC, '@', 'Hi', LF)),
+      );
+    });
+
+    it('should print the page when page mode ends', function() {
+      const paper = page(area(0, 0, WIDTH, 64), 'In the page', LF);
+
+      assert.equal(paper.height, 64);
+      assert.equal(
+          dots(Bitmap.extractRows(paper, 0, 32)),
+          dots(stitch(render(stream(ESC, '@', 'In the page', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should turn the layout by the print direction', function() {
+      const directions = (direction) => page(
+          area(0, 0, 288, 288), ESC, GS, 'P', '3', direction, 'Hi', LF, '.', LF,
+      );
+
+      const crop = (bitmap) => {
+        const result = Bitmap.create(288, 288);
+
+        for (let row = 0; row < 288; row++) {
+          for (let column = 0; column < 288; column++) {
+            Bitmap.setPixel(result, column, row, Bitmap.getPixel(bitmap, column, row));
+          }
+        }
+
+        return result;
+      };
+
+      assert.deepEqual(crop(directions(1)), Bitmap.rotate90(crop(directions(0))));
+      assert.deepEqual(crop(directions(2)), Bitmap.rotate180(crop(directions(0))));
+      assert.deepEqual(crop(directions(3)), Bitmap.rotate270(crop(directions(0))));
+    });
+
+    it('should count the print area and the positions in dots', function() {
+      const positioned = page(area(0, 0, WIDTH, 128), [ESC, GS, 0x50, 0x34, ...word(64)], 'Hi', LF);
+      const relative = page(area(0, 0, WIDTH, 128), [ESC, GS, 0x50, 0x35, ...word(64)], 'Hi', LF);
+
+      assert.equal(positioned.height, 128);
+      assert.equal(dots(positioned), dots(relative));
+      assert.equal(Bitmap.getPixel(positioned, 3, 74), 1);
+    });
+
+    it('should compose several print areas into one page', function() {
+      const paper = page(
+          area(0, 0, 288, 64), 'Left', LF,
+          area(288, 64, 288, 64), 'Right', LF,
+      );
+
+      assert.equal(paper.height, 128);
+      assert.equal(Bitmap.getPixel(paper, 3, 10), 1);
+      assert.equal(Bitmap.getPixel(paper, 291, 74), 1);
+    });
+
+    it('should accept the functions as binary numbers as well as digits', function() {
+      assert.deepEqual(
+          render(stream(ESC, '@', ESC, GS, 'P', 0, 'Hi', LF, ESC, GS, 'P', 1)),
+          render(stream(ESC, '@', ESC, GS, 'P', '0', 'Hi', LF, ESC, GS, 'P', '1')),
+      );
+    });
+
+    it('should not enter page mode while a line is being composed', function() {
+      assert.deepEqual(
+          render(stream(ESC, '@', 'Hi', ESC, GS, 'P', '0', LF, ESC, GS, 'P', '1')),
           render(stream(ESC, '@', 'Hi', LF)),
       );
     });
@@ -1680,6 +1763,9 @@ describe('StarPrntRenderer', function() {
       ['ESC D', [ESC, 0x44, 10]],
       ['ESC GS BEL', [ESC, GS, 0x07, 1, 2]],
       ['ESC GS EM', [ESC, GS, 0x19, 0x11, 1, 2]],
+      ['ESC GS P', [ESC, GS, 0x50]],
+      ['ESC GS P 2', [ESC, GS, 0x50, 0x32, 0, 0, 0, 0]],
+      ['ESC GS P 4', [ESC, GS, 0x50, 0x34, 0]],
     ];
 
     for (const [name, bytes] of truncated) {
@@ -1710,6 +1796,11 @@ describe('StarPrntRenderer', function() {
       ['ESC * r P n NUL', [ESC, 0x2a, 0x72, 0x50, 0x30, 0x00]],
       ['ESC * r m r n NUL', [ESC, 0x2a, 0x72, 0x6d, 0x72, 0x30, 0x00]],
       ['ESC FF NUL', [ESC, 0x0c, 0x00]],
+      ['ESC GS P 0 and ESC GS P 1', [ESC, GS, 0x50, 0x30, ESC, GS, 0x50, 0x31]],
+      ['ESC GS P 2 n1..n8', [ESC, GS, 0x50, 0x32, 0, 0, 0, 0, 0, 0, 0, 0]],
+      ['ESC GS P 3 n', [ESC, GS, 0x50, 0x33, 0]],
+      ['ESC GS P 4 n1 n2', [ESC, GS, 0x50, 0x34, 0, 0]],
+      ['ESC GS P 5 n1 n2', [ESC, GS, 0x50, 0x35, 0, 0]],
     ];
 
     for (const [name, bytes] of lengths) {

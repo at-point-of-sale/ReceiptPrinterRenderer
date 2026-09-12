@@ -1014,6 +1014,106 @@ Effort: half a day.
 
 <br>
 
+## Section 16d: page mode
+
+Page mode is the one command group both reference pages listed under "Not
+planned": the printer composes a page in memory, in a print area of its own and
+in one of four print directions, and prints the whole area in one go. It is a
+second layout engine next to the line one, which is why it was left out, and it
+is the last group of the ESC/POS reference that a producer can reasonably send
+and this renderer answers with an `unknown` item. This section adds it, in both
+languages, and reverses the "not planned" entry of the design and of both
+reference pages.
+
+The painter gets a page mode next to its standard mode. The standard mode path
+does not change: every fixture of sections 2 to 16c must stay byte identical,
+and the page mode code is only reachable once a stream enters page mode.
+
+**The model.** A page is a bitmap of the paper width and the page height of the
+profile, and a print area is a rectangle on it. Text and blocks are laid out in
+the coordinate system of the print direction, in a canvas of their own, and the
+canvas is composited into the page rotated by the direction when the area, the
+direction or the page changes. Printing the page draws it on the paper as a
+block, at the position the paper is at, and the paper goes on below it.
+
+Painter additions:
+
+```js
+painter.page(true | false)                  // enter page mode, or leave it and discard the page
+painter.pageArea({x, y, width, height})     // the print area on the page, in dots
+painter.pageDirection(0 | 1 | 2 | 3)        // the print direction, which starts the layout over
+painter.pageVertical(dots, {relative})      // the position along the direction's vertical axis
+painter.printPage({keep})                   // draw the page on the paper, keeping or clearing it
+painter.cancelPage()                        // throw the dots of the page away, keep the area
+get painter.pageMode                        // whether the painter is in page mode
+```
+
+Deliverables, ESC/POS:
+
+- `ESC L` enters page mode, and only at the beginning of a line in standard
+  mode, as the reference says. `ESC S` returns to standard mode and the page
+  data is deleted, never printed. `ESC @` returns to standard mode as well.
+- `ESC W xL xH yL yH dxL dxH dyL dyH` sets the print area: the origin in
+  horizontal and vertical motion units and the size in the same units. A size of
+  zero is the maximum in that direction, an origin outside the printable area
+  makes the command do nothing. The area a page starts with is the whole
+  printable area, whose height is the `pageHeight` of the profile.
+- `ESC T n` sets the print direction and the starting position: 0 left to right
+  from the top left, 1 bottom to top from the bottom left, 2 right to left from
+  the bottom right, 3 top to bottom from the top right, the values 48 to 51 for
+  the same. A fixture per direction, and the rotation of each of them written
+  down.
+- `GS $ nL nH` and `GS \ nL nH` set the absolute and the relative position along
+  the vertical axis of the direction, `ESC $` and `ESC \` along the horizontal
+  one, all four in the coordinate system of the direction.
+- `LF`, `ESC J`, `ESC d`, `ESC K` and `ESC e` move the position inside the area
+  instead of the paper, with the line spacing and the styles of standard mode.
+  Text wraps inside the area and dots outside it are discarded.
+- Barcodes, QR codes, PDF417, DataBar and every image command draw into the page
+  at the position, aligned by `ESC a` inside the area.
+- `FF` prints the page and returns to standard mode, `ESC FF` prints it and
+  keeps both the page and page mode, so the same page can be printed again, and
+  `CAN` throws the dots of the page away and keeps the area. In standard mode
+  `CAN` and `FF` do what they do now.
+- A `cut` or a `pulse` that arrives in page mode waits for the page, so that the
+  items reach the driver in the order the paper does.
+
+Deliverables, StarPRNT:
+
+- `ESC GS P 0` and `ESC GS P 1`, which the encoder's flush emits around every
+  job and which this renderer has parsed as a print mode so far, are page mode
+  start and page mode end. Leaving page mode prints the page. The encoder sends
+  the pair with nothing in between, so its page is empty and nothing may change
+  for any existing fixture: every Star fixture of sections 3 to 16c stays byte
+  identical.
+- The area, the direction and the two vertical positions of the group, as far as
+  the Star specification the implementer knows defines them, with the reading
+  written down on the reference page the way `ESC SP` and `ESC GS S` are.
+
+Fixtures, hand assembled in `test/tools/make-fixtures.js`, ESC/POS and Star
+where the commands exist in both: `page-mode-directions`, four areas on one page
+with a label and a rule in each of the four directions, `page-mode-coupon`, a
+coupon laid out with absolute positions, a barcode and a QR code,
+`page-mode-esc-ff`, one page printed twice, and `page-mode-cancel`, where `CAN`
+throws a page away.
+
+Tests: the four rotations, wrapping inside the area, dots beyond the bottom of
+the area, the default area, `ESC S` discarding, the truncation sweep of every
+new command, standard mode unchanged, and the acceptance below.
+
+Acceptance:
+
+- A receipt laid out in page mode with direction 0 over the full width renders
+  the same paper as the same content in standard mode.
+- Every fixture of sections 2 to 16c is unchanged, the Star ones included.
+- The page mode rows of both reference pages are Rendered with their semantics,
+  and page mode is gone from "Not supported yet" and from the design.
+- `npm test` passes. Version stays 0.3.0, nothing committed.
+
+Effort: one day.
+
+<br>
+
 ## Notes per section
 
 Filled in during implementation.
@@ -3591,3 +3691,248 @@ Acceptance:
 - Version stays 0.3.0, nothing committed.
 
 **thermal and double strike.** On the contact sheet thermal draws every line after an `ESC G 1` with a strike-through, and keeps doing so after `ESC G 0`, through the alignment samples, the barcode text and the QR labels of the escpos-php demo. Epson defines double strike as a second pass of the head, visually emphasis, which is what this renderer draws. A divergence of the reference, not of the renderer; recorded so the next reader of the sheet does not chase it.
+
+### Section 16d
+
+Implemented on 2026-09-13. Files: `src/bitmap.js`, `src/painter.js`,
+`src/renderers/esc-pos.js`, `src/renderers/star-prnt.js`,
+`data/profiles/epson.json`, `data/profiles/star.json`, `generated/profiles.js`,
+`test/bitmap.js`, `test/painter.js`, `test/esc-pos.js`, `test/star-prnt.js`,
+`test/parity.js`, `test/tools/make-fixtures.js`, the four hand assembled
+fixtures in `test/fixtures/esc-pos/raw` and the one in
+`test/fixtures/star-prnt/raw`, `documentation/design.md`,
+`documentation/commands-esc-pos.md`, `documentation/commands-star-prnt.md`.
+
+The painter:
+
+- **A page is a surface next to the paper, and only the surface changes.** In
+  page mode `#append()` writes into the page instead of into the rows of the
+  paper, and `#area()`, the left margin and the width a block is centred over
+  come from the print area instead of from the paper. Everything above that,
+  the cells, the wrapping, the line height, the alignment, the tab stops, the
+  blocks, the styles and the upside down mode, is the code of standard mode
+  unchanged. That is why no fixture of sections 2 to 16c moved a dot: the
+  standard mode path is the same path it was, with `#surface()` returning the
+  width of the paper.
+- **Three layers: the canvas, the page and the paper.** The canvas is the
+  current print area in the coordinate system of the current print direction,
+  the page is the printer's page buffer, the paper is what the items carry. The
+  canvas goes into the page, turned by the direction, whenever the area, the
+  direction or the page changes, and the page goes on the paper as one block
+  when the stream prints it. A page is composed out of as many areas as the
+  stream sets; the blit into the page combines dots with OR, so a second area
+  over the same dots adds to them.
+- **The direction is a rotation, and this is the mapping.** The area is laid out
+  as if the text ran to the right and the lines went down, and the layout is
+  turned when it goes into the page: direction 0 no turn, direction 1 a quarter
+  turn counter-clockwise, direction 2 half a turn, direction 3 a quarter turn
+  clockwise, which is three quarter turns counter-clockwise. That follows from
+  the start positions of the reference: the top left of the area for 0, the
+  bottom left for 1, the bottom right for 2 and the top right for 3. In the two
+  sideways directions the canvas is as wide as the area is high, so a line of
+  direction 1 is as long as the area is tall and wraps over that length.
+  `Bitmap.rotate90()` and `Bitmap.rotate270()` are the two new operations,
+  counter-clockwise both, dot by dot like `rotate180()`.
+- **A vertical move draws the characters that are on the line first.** A printer
+  puts a character in the page as it reads it and this painter keeps it on a
+  line until something commits it, so `pageVertical()` commits what is there,
+  at the position it was placed, and then moves. The cursor survives that, the
+  alignment of the piece does not: a centred line that is cut in two by a
+  vertical move is centred per piece. Only a stream that mixes centring with
+  positions inside one line can see it.
+- **A page that was never printed does not reach the paper**, the same rule as
+  the line that is being composed: leaving page mode, `reset()` and `end()` all
+  throw it away.
+- **The print area and the print direction are settings of the printer, not of
+  one page.** They live next to the margins and the line spacing, a stream can
+  set them in standard mode, a page starts in whatever the printer holds, they
+  survive the page they were used on, and only an initialize puts them back.
+  Without an area at all the page is laid out over the whole printable area.
+- **Upside down printing does not reach a page.** `ESC {` is a standard mode
+  command in the reference, and the print direction is what turns a layout in
+  page mode, so neither a line of a print area nor the page block itself is
+  rotated by it.
+
+ESC/POS, the rules of the reference and where this renderer reads them:
+
+- **`FF` prints the page and returns to standard mode; `ESC FF` prints it and
+  stays.** The brief of this section said `FF` keeps page mode. The Epson
+  reference has the two as a pair, "print and return to standard mode" against
+  "print data in page mode", where only the second keeps the buffered data, the
+  print area, the direction and the position. thermal renders both that way,
+  which is the check that was available here: its render of `ESC L .. FF` puts
+  the text behind the `FF` on the paper, and its render of `ESC L .. ESC FF`
+  leaves the text behind the `ESC FF` in a page that is never printed again.
+  The reference is what is implemented, and the brief is noted here as the one
+  place this section did not follow it.
+- **`ESC FF` keeps the position, the cursor included.** The reference says the
+  command leaves the buffered data, the settings of `ESC T` and `ESC W` and the
+  position of the character data alone, so a page that is printed halfway
+  through a line goes on where it was: the vertical position inside the area and
+  the horizontal cursor on the line both come back after the print.
+- **`ESC S` deletes the page.** Only `FF` and `ESC FF` print one, which is what
+  the brief asked to check and what the reference says: switching to standard
+  mode clears the page buffer. `ESC @` does the same, and so does the end of a
+  stream.
+- **`ESC L` is only effective at the beginning of a line**, as the reference
+  says of it, so a command that arrives while a line holds characters or while
+  its cursor has been moved is dropped whole. The Star page mode start follows
+  the same rule, for want of a specification text that says otherwise.
+- **`CAN` deletes the dots of the page and keeps the print area.** That is the
+  ESC/POS definition of the command, which exists for page mode alone; in
+  standard mode a printer ignores it and so does this renderer, where it was
+  ignored before this section as well. The Star `CAN` still cancels the line
+  buffer, which is its Star Line Mode definition.
+- **A width or a height of zero makes `ESC W` do nothing**, which is what the
+  reference states, and so does an origin outside the printable area. The brief
+  of this section read a zero as the maximum in that direction; the first round
+  of the review corrected it. Without any `ESC W` since the last `ESC @` the
+  page is laid out over the whole printable area, which is the default area and
+  not a zero size.
+- **The unit follows the axis, for every command that moves along one.**
+  `ESC $`, `ESC \` and `ESC SP` move along the axis the characters run in and
+  `GS $`, `GS \`, `ESC 3`, `ESC J` and `ESC K` along the axis the lines go down
+  in; `ESC d` and `ESC e` count in lines of the spacing `ESC 3` set, so they
+  follow it. Those two axes are the horizontal and the vertical axis of the
+  paper in the directions 0 and 2 and the other way round in 1 and 3, so the
+  motion units swap with them, which is the page mode rule the Epson notes give
+  these commands. `ESC W` is not part of it: the area is a rectangle on the
+  page, so its origin and its width count in horizontal motion units and its
+  origin and its height in vertical ones whatever the direction is.
+- **A page starts in the settings the printer holds.** `ESC W` and `ESC T` are
+  accepted in standard mode as well, `ESC L` does not reset either of them, and
+  a stream that sets an area once prints every page of the job in it. `ESC @`
+  is what puts the whole printable area and direction 0 back.
+
+How tall the printed page is, which is the one rule of this section that is
+this renderer's own:
+
+- **The page is as tall as the print areas the stream set on it**, the origin of
+  an area included, so an `ESC W` of 400 dots leaves 400 dots of paper whatever
+  it holds. That is what a printer feeds and what thermal renders. The page is
+  drawn into a bitmap of that height rather than cut down to the rows that carry
+  a dot, so an area that was set and stayed empty still feeds the paper: a
+  96 by 100 area with text in it, followed by an empty 96 by 100 area, prints
+  200 rows.
+- **A page that was given no area is as tall as its dots**, and a page with
+  neither an area nor a dot prints nothing at all. The default area is the whole
+  page, 1662 dots, and feeding that for a page of two lines would put twenty
+  centimetres of white on a receipt. This is also what keeps the Star flush
+  free: the encoder writes `ESC GS P 0 ESC GS P 1` around every job, which is a
+  page without an area and without a dot.
+- **`pageHeight` is a profile value**, 1662 dots in both profiles, the page mode
+  maximum of an Epson TM-T88 at 576 dots wide that the brief names. **No Star
+  specification text available here gives a page height, so the Star profile
+  takes the same number**; the only page length a Star document in this
+  repository gives is the 64000 dots of the raster page length of Star Graphic
+  Mode, which is another buffer entirely.
+- **A cut or a pulse in page mode waits for the page.** The page is not on the
+  paper when the command arrives, so an item in front of it would tell a driver
+  to cut paper that is still to be printed. The painter holds `cut` and `pulse`
+  items and emits them right behind the page, or when page mode is left without
+  printing one, so the item stream keeps the order of the paper. `unknown` items
+  are diagnostics and are reported where they stand. **A reading**: no
+  specification text available here says what a printer does with `GS V` or
+  `ESC p` in page mode; the other reading is a printer that ignores a `GS V`
+  there altogether. The deviation list of the reference page names it, together
+  with the height of the printed page and with the third reading of this
+  section: **a line that half fits at the bottom of a print area is clipped
+  where the area ends, mid-glyph**, rather than dropped whole.
+
+StarPRNT, the finding about `ESC GS P`:
+
+- **The encoder's flush really is page mode, and this section made it one
+  without moving a dot.** `LanguageStarPrnt.flush()` of ReceiptPrinterEncoder
+  writes `ESC GS P '0'` as a print mode called `page` and `ESC GS P '1'` as one
+  called `line`; the renderer parsed both as a print mode with one argument
+  byte and no effect. In StarPRNT they are page mode start and page mode end,
+  and the end prints the page, which is exactly the flush the encoder wants: on
+  a printer, entering page mode finishes what is in the line buffer and leaving
+  it prints what the page holds. Since the encoder sends the two with nothing in
+  between, the page has no area and no dot and the page height rule above makes
+  it nothing at all. **Every Star fixture of sections 3 to 16c is byte identical
+  and so is every Star fixture of the external suite**, which is what the flush
+  appearing in all of them made the risk of this change.
+- **receiptline never writes the command.** Its `_star` command set opens a job
+  with `ESC @ ESC RS a ESC RS F ESC SP '0' ESC s '0' '0' ..` and closes it with
+  a cut and `ESC GS ETX`, so the 47 Star fixtures of the external suite say
+  nothing about `ESC GS P` at all. ReceiptPrinterEncoder is the only producer
+  the fixtures have for it.
+- **Functions 2 to 5 are a reading.** They are the print area, the print
+  direction and the two vertical positions of the ESC/POS group under Star's
+  numbering, with the argument lengths that implies, 8, 1, 2 and 2 bytes, and
+  the dot unit of `ESC GS A` and `ESC GS R` rather than motion units. **No
+  StarPRNT specification text was available here**, no stream of the fixtures
+  sends one of them, and the cost of the reading being wrong is a stream that
+  desynchronises where it would have consumed one byte before. It is in the
+  deviation list of the Star reference page, next to `ESC GS S` and `ESC FS q`.
+  The `page-mode-directions` fixture describes the same page in both languages
+  and `test/parity.js` compares the two dot for dot, which is the check the
+  reading can have without hardware.
+
+Fixtures and tests:
+
+- **Five fixtures**, four in ESC/POS and one of them in StarPRNT as well:
+  `page-mode-directions`, four print areas of 288 by 120 dots on one page of
+  576 by 240, one per direction, each with a label and a rule;
+  `page-mode-coupon`, a coupon of a page 400 dots tall laid out with `GS $` and
+  `ESC $`, with a Code 39 barcode and a QR code as blocks inside the page;
+  `page-mode-esc-ff`, one page printed twice, with a line added in between and a
+  third line that `ESC S` throws away; and `page-mode-cancel`, where `CAN`
+  discards a line and the page that is printed is what came after it.
+- **Reviewed as ASCII art and as a rendering before they were frozen**: the four
+  directions read left to right, bottom to top, right to left and top to bottom,
+  each starting in its own corner of its area, with the rule on the side the
+  lines advance to; the coupon has its heading centred, its two positioned lines
+  at 70 and 110 dots, the barcode at 150 and the QR code at 260, and the page
+  feeds its whole 400 dots before "Thank you, see you soon" on the paper below
+  it; the `ESC FF` fixture prints the heading alone and then the heading with
+  the second line under it, 100 dots apart; the cancel fixture prints one line
+  and feeds the 100 dots of the area.
+- **The acceptance is a test, not a fixture**: a receipt of three lines, centred
+  and bold among them, laid out in page mode with direction 0 over the full
+  width renders dot for dot the same paper as the same content in standard mode.
+- **thermal is the only reference renderer here that has page mode.** ESCPost
+  refuses a stream at the first `ESC L`, "unsupported ESC/POS command ESC 0x4c",
+  so the 24 pairs of the agreement table are unchanged. thermal's renders of the
+  four directions, of `FF`, of `ESC FF` and of `ESC S` are what the semantics
+  above were checked against; its heights are not, it counts `ESC W` in dots
+  where the reference counts the vertical ones in vertical motion units, and it
+  renders nothing at all for a page without an area.
+- **Not one external fixture uses page mode.** None of the 123 streams contains
+  `ESC L`, `ESC S`, `ESC T`, `ESC W`, `ESC FF`, `GS $`, `GS \` or `ESC GS P`
+  with a function other than the encoder's flush, which the zero unknown items
+  of section 16c already implied for the reported ones. So no provenance count
+  changed, nothing was rendered again, and "Seen in the wild" gains no row.
+- **One existing test changed rather than moved.** Three tests of the unknown
+  commands used `ESC W` as their example of a command the renderer does not
+  know, which it is not any more; they use `GS g`, the maintenance counter, now.
+- **Argument lengths and truncated streams** joined the sweeps of both
+  languages: `ESC L`, `ESC S`, `ESC T`, `ESC W`, `ESC FF`, `GS $` and `GS \` in
+  ESC/POS and the six functions of `ESC GS P` in StarPRNT.
+
+Review:
+
+The first round of this section was returned with seven points, all of them
+applied here: the printed page is drawn into a bitmap of its height instead of
+being cut down to the rows that carry a dot, so a print area that stayed empty
+still feeds the paper; the motion unit follows the axis for `ESC 3`, `ESC J`,
+`ESC K` and `ESC SP` as well as for the four position commands; a zero width or
+height in `ESC W` makes the command do nothing instead of asking for the
+maximum; `ESC W` and `ESC T` became settings of the printer that a stream may
+set in standard mode and that survive the page they were used on; `ESC {` turns
+nothing in page mode; `ESC FF` brings the cursor back along with the vertical
+position; and the deviation list of the ESC/POS reference page was made
+complete for page mode, the `ESC W` zero reading, which is no longer a
+deviation, taken out of it. No fixture changed a dot, in either round.
+
+Acceptance:
+
+- `npm test` 2268 passing, lint clean: the 2156 of section 16c plus 112 tests,
+  8 for the two rotations of the bitmap, 34 for page mode in the painter, 32 for
+  page mode in the ESC/POS renderer, 7 for page mode in StarPRNT, 15 in the two
+  length sweeps, 15 for the new fixtures over the fixture, item and parity loops
+  and 1 for the fixture list of the parity test.
+- `npm run build`, `npm run test:types` and `npm run test:umd` pass. Every
+  fixture of sections 2 to 16c, the 123 external ones included, is byte
+  identical. Version stays 0.3.0, nothing committed.
