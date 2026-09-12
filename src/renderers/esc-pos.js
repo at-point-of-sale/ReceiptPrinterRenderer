@@ -1,4 +1,5 @@
 import CodepageEncoder from '@point-of-sale/codepage-encoder';
+import Bitmap from '../bitmap.js';
 import Painter from '../painter.js';
 import codepageMappings from '../../generated/mapping.js';
 import printerProfiles from '../../generated/profiles.js';
@@ -36,6 +37,52 @@ const DEFAULT_CODEPAGE = 'cp437';
    alignment does */
 
 const UNDERLINE = Object.assign(Object.create(null), {0: 0, 1: 1, 2: 2, 48: 0, 49: 1, 50: 2});
+
+/* The symbologies of GS k m, by the value of m. The ones that are not in this
+   table are the GS1 DataBar family, 75 to 78, which version 1 does not render */
+
+const SYMBOLOGIES = Object.assign(Object.create(null), {
+  0: 'upca',
+  1: 'upce',
+  2: 'ean13',
+  3: 'ean8',
+  4: 'code39',
+  5: 'itf',
+  6: 'codabar',
+  65: 'upca',
+  66: 'upce',
+  67: 'ean13',
+  68: 'ean8',
+  69: 'code39',
+  70: 'itf',
+  71: 'codabar',
+  72: 'code93',
+  73: 'code128',
+  74: 'gs1-128',
+  79: 'code128-auto',
+});
+
+/* Where GS H n puts the human readable text of a barcode */
+
+const HRI = Object.assign(Object.create(null), {
+  0: 'none', 1: 'above', 2: 'below', 3: 'both',
+  48: 'none', 49: 'above', 50: 'below', 51: 'both',
+});
+
+/* The error correction levels of the QR code commands */
+
+const ERROR_LEVELS = Object.assign(Object.create(null), {48: 'L', 49: 'M', 50: 'Q', 51: 'H'});
+
+/* What a printer starts a barcode with, until the commands say otherwise. The
+   encoder always sets all three, so these are only reached by hand written
+   streams */
+
+const BARCODE_DEFAULTS = {height: 162, moduleWidth: 3, position: 'none', font: 'A'};
+
+/* And the same for a QR code: model 2, three dot modules and the lowest error
+   correction level, which are the defaults of the specification */
+
+const QRCODE_DEFAULTS = {model: 2, moduleSize: 3, errorLevel: 'L'};
 
 /**
  * The 256 entry table of a codepage, or null when the codepage encoder does not
@@ -293,7 +340,6 @@ const UNKNOWN_ARGUMENTS = {
     0x61: 1, /* automatic status back */
     0x62: 1, /* smoothing */
     0x63: 0, /* print counter */
-    0x66: 1, /* HRI font */
     0x67: 4, /* maintenance counter, GS g 0 m nL nH and GS g 2 m nL nH */
     0x6a: 1, /* transmit remaining paper sensor status */
     0x72: 1, /* transmit status */
@@ -335,6 +381,8 @@ class EscPosRenderer {
   #codepointCache;
   #verticalUnits;
   #text;
+  #barcode;
+  #qrcode;
 
   /**
      * Create a renderer
@@ -430,6 +478,8 @@ class EscPosRenderer {
     this.#painter.reset();
     this.#verticalUnits = this.#painter.profile.motionUnit;
     this.#text = [];
+    this.#barcode = Object.assign({}, BARCODE_DEFAULTS);
+    this.#qrcode = Object.assign({data: new Uint8Array(0)}, QRCODE_DEFAULTS);
     this.#selectCodepage(null);
   }
 
@@ -556,7 +606,7 @@ class EscPosRenderer {
   #tables() {
     return {
       [ESC]: {
-        0x2a: {args: columnImageArguments, run: null}, /* TODO column image, section 4 */
+        0x2a: {args: columnImageArguments, run: (a) => this.#columnImage(a)},
         0x2d: {args: 1, run: (a) => this.#underline(a[0])},
         0x32: {args: 0, run: () => this.#painter.lineSpacing(null)},
         0x33: {args: 1, run: (a) => this.#painter.lineSpacing(Math.round(a[0] / this.#verticalUnits))},
@@ -576,13 +626,14 @@ class EscPosRenderer {
         0x28: {args: parenthesisArguments, run: (a, consumed) => this.#parenthesis(a, consumed)},
         0x38: {args: largeParenthesisArguments, run: (a, consumed) => this.#unknown(consumed)},
         0x42: {args: 1, run: (a) => this.#painter.style({invert: (a[0] & 1) !== 0})},
-        0x48: {args: 1, run: null}, /* TODO barcode HRI position, section 4 */
+        0x48: {args: 1, run: (a) => this.#hriPosition(a[0])},
         0x50: {args: 2, run: (a) => this.#motionUnits(a[1])},
         0x56: {args: cutArguments, run: (a) => this.#cut(a[0])},
-        0x68: {args: 1, run: null}, /* TODO barcode height, section 4 */
-        0x6b: {args: barcodeArguments, run: null}, /* TODO barcode, section 4 */
-        0x76: {args: rasterImageArguments, run: null}, /* TODO raster image, section 4 */
-        0x77: {args: 1, run: null}, /* TODO barcode module width, section 4 */
+        0x66: {args: 1, run: (a) => this.#hriFont(a[0])},
+        0x68: {args: 1, run: (a) => this.#barcodeHeight(a[0])},
+        0x6b: {args: barcodeArguments, run: (a, consumed) => this.#drawBarcode(a, consumed)},
+        0x76: {args: rasterImageArguments, run: (a, consumed) => this.#rasterImage(a, consumed)},
+        0x77: {args: 1, run: (a) => this.#moduleWidth(a[0])},
       },
 
       [FS]: {
@@ -602,13 +653,243 @@ class EscPosRenderer {
      * @param  {Uint8Array}   consumed   The whole command, for the unknown item
      */
   #parenthesis(args, consumed) {
-    /* TODO section 4: GS ( k is the QR code and PDF417 group */
-
     if (args[0] === 0x6b) {
+      this.#symbol(args.subarray(3), consumed);
       return;
     }
 
     this.#unknown(consumed);
+  }
+
+  /**
+     * GS ( k, the two dimensional symbologies. The first byte says which one,
+     * 49 for QR codes and 48 for PDF417, and the second one which command of
+     * that symbology it is.
+     *
+     * PDF417 is not rendered in version 1: its parameters and its data are
+     * parsed and dropped, and the command that prints the symbol reports an
+     * unknown command, so that the driver knows something was left out.
+     *
+     * @param  {Uint8Array}   args       The arguments behind the length bytes
+     * @param  {Uint8Array}   consumed   The whole command, for the unknown item
+     */
+  #symbol(args, consumed) {
+    if (args.length < 2) {
+      this.#unknown(consumed);
+      return;
+    }
+
+    const [type, command] = args;
+
+    if (type === 0x30) {
+      /* PDF417: 65 to 70 are the parameters, 80 stores the data and 81 prints */
+
+      if (command === 0x51) {
+        this.#unknown(consumed);
+      }
+
+      return;
+    }
+
+    /* Maxicode, the two dimensional GS1 DataBar and the composite symbologies
+       are the other selectors of this group, and none of them is rendered */
+
+    if (type !== 0x31) {
+      this.#unknown(consumed);
+      return;
+    }
+
+    /* QR code, GS ( k pL pH 49 fn .. */
+
+    if (command === 0x41 && args.length >= 3) {
+      this.#qrcode.model = args[2] === 0x31 ? 1 : 2;
+    }
+
+    if (command === 0x43 && args.length >= 3) {
+      this.#qrcode.moduleSize = Math.min(16, Math.max(1, args[2]));
+    }
+
+    if (command === 0x45 && args.length >= 3 && ERROR_LEVELS[args[2]]) {
+      this.#qrcode.errorLevel = ERROR_LEVELS[args[2]];
+    }
+
+    /* The data of the next symbol, which stays stored until the next store, so
+       printing twice prints the same symbol twice */
+
+    if (command === 0x50 && args.length >= 3) {
+      this.#qrcode.data = args.slice(3);
+    }
+
+    if (command === 0x51) {
+      this.#painter.qrcode({
+        data: this.#qrcode.data,
+        moduleSize: this.#qrcode.moduleSize,
+        errorLevel: this.#qrcode.errorLevel,
+      });
+    }
+  }
+
+  /**
+     * GS h n, the height of the bars of the next barcode in dots
+     *
+     * @param  {number}   value   The argument of the command
+     */
+  #barcodeHeight(value) {
+    if (value > 0) {
+      this.#barcode.height = value;
+    }
+  }
+
+  /**
+     * GS w n, the width of the narrowest bar of the next barcode in dots. The
+     * specification defines 2 to 6, the encoder sends 1 for the GS1 symbologies,
+     * so the renderer takes everything a printer could draw.
+     *
+     * @param  {number}   value   The argument of the command
+     */
+  #moduleWidth(value) {
+    if (value >= 1 && value <= 6) {
+      this.#barcode.moduleWidth = value;
+    }
+  }
+
+  /**
+     * GS H n, where the human readable text of a barcode goes
+     *
+     * @param  {number}   value   The argument of the command
+     */
+  #hriPosition(value) {
+    if (HRI[value]) {
+      this.#barcode.position = HRI[value];
+    }
+  }
+
+  /**
+     * GS f n, the font of the human readable text of a barcode. The default is
+     * font A, as the ESC/POS reference of this command says, and the encoder
+     * never changes it.
+     *
+     * @param  {number}   value   The argument of the command
+     */
+  #hriFont(value) {
+    if (value === 0 || value === 48) {
+      this.#barcode.font = 'A';
+    }
+
+    if (value === 1 || value === 49) {
+      this.#barcode.font = 'B';
+    }
+  }
+
+  /**
+     * GS k m .., a barcode. Function A, for m below 65, ends its data at a NUL
+     * byte, function B carries the length of the data. The GS1 DataBar
+     * symbologies are not rendered in version 1 and report an unknown command.
+     *
+     * @param  {Uint8Array}   args       The arguments of the command
+     * @param  {Uint8Array}   consumed   The whole command, for the unknown item
+     */
+  #drawBarcode(args, consumed) {
+    const symbology = SYMBOLOGIES[args[0]];
+
+    if (!symbology) {
+      this.#unknown(consumed);
+      return;
+    }
+
+    const data = args[0] >= 65 ? args.subarray(2, 2 + args[1]) : args.subarray(1, args.length - 1);
+
+    this.#painter.barcode({
+      symbology,
+      data: this.#ascii(data),
+      moduleWidth: this.#barcode.moduleWidth,
+      height: this.#barcode.height,
+      hri: {position: this.#barcode.position, font: this.#barcode.font},
+    });
+  }
+
+  /**
+     * ESC * m nL nH d.., a column mode image: one strip of eight or twenty four
+     * rows, one or three bytes per column, the most significant bit of the first
+     * byte at the top. The single density modes print every column twice, so
+     * that the image keeps its proportions at half the resolution.
+     *
+     * The strip goes into the line that is being composed. The encoder sets the
+     * line spacing to the height of a strip, so that the strips of an image join
+     * up as the line feeds behind them commit the lines.
+     *
+     * @param  {Uint8Array}   args   The arguments of the command
+     */
+  #columnImage(args) {
+    const mode = args[0];
+    const columns = args[1] + args[2] * 256;
+    const bytes = mode === 32 || mode === 33 ? 3 : 1;
+    const double = mode === 1 || mode === 33;
+
+    const strip = Bitmap.create(columns, bytes * 8);
+
+    for (let column = 0; column < columns; column++) {
+      for (let byte = 0; byte < bytes; byte++) {
+        const value = args[3 + column * bytes + byte];
+
+        for (let bit = 0; bit < 8; bit++) {
+          if (value & (0x80 >> bit)) {
+            Bitmap.setPixel(strip, column, byte * 8 + bit, 1);
+          }
+        }
+      }
+    }
+
+    this.#painter.strip(double ? strip : Bitmap.scale(strip, 2, 1));
+  }
+
+  /**
+     * GS v 0 m xL xH yL yH d.., a raster image: rows of xL + xH * 256 bytes,
+     * eight dots per byte, drawn as a block of its own and aligned the way the
+     * alignment says. The mode doubles the width, the height, or both, and it
+     * is accepted as a number and as an ASCII digit, the way the other
+     * arguments of this language are.
+     *
+     * GS v is only defined with a 0 behind it, so anything else reports an
+     * unknown command instead of drawing whatever follows.
+     *
+     * @param  {Uint8Array}   args       The arguments of the command
+     * @param  {Uint8Array}   consumed   The whole command, for the unknown item
+     */
+  #rasterImage(args, consumed) {
+    if (args[0] !== 0x30) {
+      this.#unknown(consumed);
+      return;
+    }
+
+    /* The first argument byte is the 0 of the command itself, the mode is the
+       one behind it */
+
+    const mode = args[1] >= 48 ? args[1] - 48 : args[1];
+    const rowBytes = args[2] + args[3] * 256;
+    const rows = args[4] + args[5] * 256;
+
+    const bitmap = Bitmap.create(rowBytes * 8, rows);
+
+    bitmap.data.set(args.subarray(6, 6 + rowBytes * rows));
+
+    this.#painter.block(Bitmap.scale(bitmap, mode === 1 || mode === 3 ? 2 : 1, mode === 2 || mode === 3 ? 2 : 1));
+  }
+
+  /**
+     * Decode the bytes of a barcode, which a printer reads as ASCII
+     *
+     * @param  {Uint8Array}   bytes   The bytes
+     * @return {string}               The text
+     */
+  #ascii(bytes) {
+    let result = '';
+
+    for (const byte of bytes) {
+      result += String.fromCharCode(byte);
+    }
+
+    return result;
   }
 
   /**

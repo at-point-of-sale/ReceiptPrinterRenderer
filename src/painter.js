@@ -1,5 +1,7 @@
 import Bitmap from './bitmap.js';
 import Font from './font.js';
+import {barcode as encodeBarcode} from './symbologies/index.js';
+import {qrcode as encodeQrcode} from './symbologies/qrcode.js';
 
 /**
  * @typedef {import('./bitmap.js').Bitmap} Bitmap
@@ -36,6 +38,34 @@ import Font from './font.js';
  */
 
 /**
+ * The human readable text of a barcode
+ *
+ * @typedef {object} HriOptions
+ * @property {string} position   'none', 'above', 'below' or 'both'
+ * @property {string} font       Font the text is drawn in, 'A' or 'B'
+ */
+
+/**
+ * A barcode, as a parser asks the painter to draw it
+ *
+ * @typedef {object} BarcodeRequest
+ * @property {string} symbology       Name of the symbology, see src/symbologies
+ * @property {string} data            The value of the barcode
+ * @property {number} moduleWidth     Width of the narrowest bar in dots
+ * @property {number} height          Height of the bars in dots
+ * @property {HriOptions} [hri]       Where the human readable text goes, and in which font
+ */
+
+/**
+ * A QR code, as a parser asks the painter to draw it
+ *
+ * @typedef {object} QrcodeRequest
+ * @property {Uint8Array} data     The bytes to encode
+ * @property {number} moduleSize   Size of one module in dots
+ * @property {string} errorLevel   Error correction level, 'L', 'M', 'Q' or 'H'
+ */
+
+/**
  * The current print style, as the printers style commands set it
  *
  * @typedef {object} Style
@@ -55,6 +85,11 @@ const GLYPH_FONTS = {A: '12x24', B: '8x16'};
 /* How much a growing row buffer allocates the first time */
 
 const INITIAL_ROWS = 256;
+
+/* The style the human readable text of a barcode is drawn in, which is never
+   the style of the text around it */
+
+const PLAIN = {bold: false, underline: 0, invert: false, width: 1, height: 1};
 
 /**
  * The painter keeps the state of the printer, composes lines from cells,
@@ -328,17 +363,101 @@ class Painter {
   }
 
   /**
-     * Draw a barcode as a block
+     * Draw a one dimensional barcode as a block, with its human readable text
+     * above it, below it, or not at all.
+     *
+     * Data that is not valid for the symbology prints nothing, which is what
+     * printer firmware does: the barcode is skipped and the paper does not
+     * advance. Bars that are wider than the print area are skipped for the same
+     * reason, an Epson prints nothing at all rather than a barcode no reader
+     * can read. The human readable text is not part of that rule, it is centred
+     * under the bars and clipped when it is wider than the paper.
+     *
+     * @param  {BarcodeRequest}   request   The barcode to draw
      */
-  barcode() {
-    throw new Error('Barcodes are not implemented');
+  barcode(request) {
+    const code = encodeBarcode(request.symbology, request.data);
+
+    if (code === null || code.bars.length === 0) {
+      return;
+    }
+
+    const moduleWidth = Math.max(1, request.moduleWidth || 1);
+    const height = Math.max(1, request.height || 1);
+
+    if (code.bars.reduce((total, width) => total + width, 0) * moduleWidth > this.#width) {
+      return;
+    }
+
+    const position = (request.hri && request.hri.position) || 'none';
+    const text = position === 'none' ? null : this.#textBitmap(code.text, (request.hri && request.hri.font) || 'A');
+
+    /* The bars are one bitmap, the text one line of cells below them, above
+       them, or both, and the block is as wide as the wider of the two */
+
+    const bars = Bitmap.create(code.bars.reduce((total, width) => total + width, 0) * moduleWidth, height);
+
+    let x = 0;
+
+    for (let index = 0; index < code.bars.length; index++) {
+      const width = code.bars[index] * moduleWidth;
+
+      if (index % 2 === 0) {
+        for (let column = x; column < x + width; column++) {
+          for (let row = 0; row < height; row++) {
+            Bitmap.setPixel(bars, column, row, 1);
+          }
+        }
+      }
+
+      x += width;
+    }
+
+    if (text === null) {
+      this.block(bars);
+      return;
+    }
+
+    const above = position === 'above' || position === 'both';
+    const below = position === 'below' || position === 'both';
+
+    const width = Math.max(bars.width, text.width);
+    const block = Bitmap.create(width, bars.height + (above ? text.height : 0) + (below ? text.height : 0));
+
+    if (above) {
+      Bitmap.blit(text, block, (width - text.width) >> 1, 0);
+    }
+
+    Bitmap.blit(bars, block, (width - bars.width) >> 1, above ? text.height : 0);
+
+    if (below) {
+      Bitmap.blit(text, block, (width - text.width) >> 1, block.height - text.height);
+    }
+
+    this.block(block);
   }
 
   /**
-     * Draw a QR code as a block
+     * Draw a QR code as a block. Nothing is printed when there is no data to
+     * encode, when the data does not fit in the largest symbol of its error
+     * correction level, or when the symbol would be wider than the print area,
+     * which is what a printer does in all three cases.
+     *
+     * @param  {QrcodeRequest}   request   The QR code to draw
      */
-  qrcode() {
-    throw new Error('QR codes are not implemented');
+  qrcode(request) {
+    if (!request.data || request.data.length === 0) {
+      return;
+    }
+
+    const symbol = encodeQrcode(request.data, request.errorLevel);
+    const moduleSize = Math.max(1, request.moduleSize || 1);
+
+    if (symbol === null || symbol.width * moduleSize > this.#width) {
+      return;
+    }
+
+    this.block(Bitmap.scale(symbol, moduleSize, moduleSize));
   }
 
   /**
@@ -410,23 +529,27 @@ class Painter {
   }
 
   /**
-     * The cell of a code point in the current style. Cells repeat a lot on a
+     * The cell of a code point, in a style and a font. Cells repeat a lot on a
      * receipt, so they are kept, and the painter only ever reads from them.
      *
      * @param  {number}   codepoint   Unicode code point
+     * @param  {string}   [name]      Font of the cell, the current font when it is left out
+     * @param  {Style}    [style]     Style of the cell, the current style when it is left out
      * @return {Bitmap}               The cell
      */
-  #cell(codepoint) {
-    const style = this.#style;
-    const key = `${this.#font}|${codepoint}|${style.bold ? 1 : 0}${style.underline}${style.invert ? 1 : 0}` +
+  #cell(codepoint, name, style) {
+    name = name || this.#font;
+    style = style || this.#style;
+
+    const key = `${name}|${codepoint}|${style.bold ? 1 : 0}${style.underline}${style.invert ? 1 : 0}` +
       `|${style.width}x${style.height}`;
 
     if (this.#cache.has(key)) {
       return this.#cache.get(key);
     }
 
-    const font = this.#fonts[this.#font];
-    const size = this.#cells[this.#font];
+    const font = this.#fonts[name];
+    const size = this.#cells[name];
 
     const cell = font.renderGlyph(font.lookup(codepoint), {
       cellWidth: size.width,
@@ -442,6 +565,31 @@ class Painter {
     this.#cache.set(key, cell);
 
     return cell;
+  }
+
+  /**
+     * A line of text as a bitmap of its own, in one font and without any style,
+     * which is how a printer draws the human readable text of a barcode
+     *
+     * @param  {string}   text   The text to draw
+     * @param  {string}   name   Font of the text, 'A' or 'B'
+     * @return {Bitmap}          The text, one cell per character
+     */
+  #textBitmap(text, name) {
+    const font = this.#cells[name] ? name : 'A';
+    const size = this.#cells[font];
+
+    const characters = Array.from(text);
+    const bitmap = Bitmap.create(Math.max(0, characters.length * size.width), size.height);
+
+    let x = 0;
+
+    for (const character of characters) {
+      Bitmap.blit(this.#cell(character.codePointAt(0), font, PLAIN), bitmap, x, 0);
+      x += size.width;
+    }
+
+    return bitmap;
   }
 
   /**

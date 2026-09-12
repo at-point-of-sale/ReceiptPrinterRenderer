@@ -216,6 +216,51 @@ describe('Bitmap', function() {
     });
   });
 
+  describe('scale()', function() {
+    const bitmap = fromAscii([
+      '#..#',
+      '.##.',
+    ]);
+
+    it('should repeat every dot horizontally', function() {
+      assert.deepEqual(toAscii(Bitmap.scale(bitmap, 2, 1)), [
+        '##....##',
+        '..####..',
+      ]);
+    });
+
+    it('should repeat every dot vertically', function() {
+      assert.deepEqual(toAscii(Bitmap.scale(bitmap, 1, 2)), [
+        '#..#',
+        '#..#',
+        '.##.',
+        '.##.',
+      ]);
+    });
+
+    it('should repeat in both directions at once', function() {
+      assert.deepEqual(toAscii(Bitmap.scale(bitmap, 2, 2)), [
+        '##....##',
+        '##....##',
+        '..####..',
+        '..####..',
+      ]);
+    });
+
+    it('should return the bitmap itself when nothing changes', function() {
+      assert.strictEqual(Bitmap.scale(bitmap, 1, 1), bitmap);
+    });
+
+    it('should scale a bitmap that is not a whole number of bytes wide', function() {
+      assert.deepEqual(toAscii(Bitmap.scale(fromAscii(['#.#.#']), 3, 1)), ['###...###...###']);
+    });
+
+    it('should not accept a multiplier that is not a positive integer', function() {
+      assert.throws(() => Bitmap.scale(bitmap, 0, 1), /positive integers/);
+      assert.throws(() => Bitmap.scale(bitmap, 1, 1.5), /positive integers/);
+    });
+  });
+
   describe('split()', function() {
     const bitmap = fromAscii(['#...', '.#..', '..#.', '...#', '#..#']);
 

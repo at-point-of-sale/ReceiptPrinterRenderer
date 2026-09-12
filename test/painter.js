@@ -1,7 +1,7 @@
 import Painter from '../src/painter.js';
 import Bitmap from '../src/bitmap.js';
 import profiles from '../generated/profiles.js';
-import {stitch} from './helpers/stitch.js';
+import {stitch} from '../src/formats/stitch.js';
 import {assert} from 'chai';
 
 /* A narrow printer, eight columns of font A, so that a line fits on screen */
@@ -193,7 +193,7 @@ describe('Painter', function() {
       paper.text('AAAAAAAAB');
       paper.lineFeed();
 
-      const bitmap = stitch(paper.end(), WIDTH);
+      const bitmap = stitch(paper.end(), {width: WIDTH});
 
       /* The ninth character is the only ink on the second line, and it is in
          the first cell of that line */
@@ -226,7 +226,7 @@ describe('Painter', function() {
       paper.text('A');
       paper.lineFeed();
 
-      const bitmap = stitch(paper.end(), WIDTH);
+      const bitmap = stitch(paper.end(), {width: WIDTH});
 
       assert.equal(Bitmap.getPixel(bitmap, 1, 10), 1);
       assert.equal(Bitmap.getPixel(bitmap, 85, 10), 0);
@@ -239,7 +239,7 @@ describe('Painter', function() {
       paper.text('A');
       paper.lineFeed();
 
-      const bitmap = stitch(paper.end(), WIDTH);
+      const bitmap = stitch(paper.end(), {width: WIDTH});
 
       assert.equal(Bitmap.getPixel(bitmap, 1, 10), 0);
       assert.equal(Bitmap.getPixel(bitmap, 85, 10), 1);
@@ -252,7 +252,7 @@ describe('Painter', function() {
       paper.text('A');
       paper.lineFeed();
 
-      const bitmap = stitch(paper.end(), WIDTH);
+      const bitmap = stitch(paper.end(), {width: WIDTH});
 
       assert.equal(Bitmap.getPixel(bitmap, 1, 10), 0);
       assert.equal(Bitmap.getPixel(bitmap, 43, 10), 1);
@@ -272,7 +272,7 @@ describe('Painter', function() {
       paper.strip(black(10, 8));
       paper.lineFeed();
 
-      const bitmap = stitch(paper.end(), WIDTH);
+      const bitmap = stitch(paper.end(), {width: WIDTH});
 
       assert.equal(Bitmap.getPixel(bitmap, 11, 0), 0);
       assert.equal(Bitmap.getPixel(bitmap, 12, 0), 1);
@@ -322,7 +322,7 @@ describe('Painter', function() {
       paper.align('center');
       paper.block(black(48, 10));
 
-      const bitmap = stitch(paper.end(), WIDTH);
+      const bitmap = stitch(paper.end(), {width: WIDTH});
 
       assert.equal(Bitmap.getPixel(bitmap, 23, 0), 0);
       assert.equal(Bitmap.getPixel(bitmap, 24, 0), 1);
@@ -336,7 +336,7 @@ describe('Painter', function() {
       paper.align('right');
       paper.block(black(48, 10));
 
-      const bitmap = stitch(paper.end(), WIDTH);
+      const bitmap = stitch(paper.end(), {width: WIDTH});
 
       assert.equal(Bitmap.getPixel(bitmap, 47, 0), 0);
       assert.equal(Bitmap.getPixel(bitmap, 48, 0), 1);
@@ -344,13 +344,103 @@ describe('Painter', function() {
     });
   });
 
-  describe('blocks that are not implemented yet', function() {
-    it('should say that barcodes are not implemented', function() {
-      assert.throws(() => painter().barcode({}), /not implemented/);
+  describe('barcodes and QR codes', function() {
+    it('should draw a barcode as a block of its own', function() {
+      const paper = painter();
+
+      /* Ninety five modules of one dot, which is the widest barcode that fits
+         on this narrow printer */
+
+      paper.barcode({symbology: 'ean13', data: '4006381333931', moduleWidth: 1, height: 40});
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(bitmap.height, 40);
+      assert.equal(Bitmap.getPixel(bitmap, 0, 0), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 1, 39), 0);
+      assert.equal(Bitmap.getPixel(bitmap, 94, 39), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 95, 0), 0);
     });
 
-    it('should say that QR codes are not implemented', function() {
-      assert.throws(() => painter().qrcode({}), /not implemented/);
+    it('should draw nothing for bars that are wider than the print area', function() {
+      const paper = painter();
+
+      /* Ninety five modules of two dots do not fit on this narrow printer */
+
+      paper.barcode({symbology: 'ean13', data: '4006381333931', moduleWidth: 2, height: 40});
+
+      assert.deepEqual(paper.end(), []);
+    });
+
+    it('should draw nothing for a QR code that is wider than the print area', function() {
+      const paper = painter();
+
+      paper.qrcode({data: new TextEncoder().encode('test'), moduleSize: 8, errorLevel: 'M'});
+
+      assert.deepEqual(paper.end(), []);
+    });
+
+    it('should draw nothing when there is no data to encode', function() {
+      const paper = painter();
+
+      paper.qrcode({data: new Uint8Array(0), moduleSize: 3, errorLevel: 'M'});
+
+      assert.deepEqual(paper.end(), []);
+    });
+
+    it('should draw nothing for data the symbology cannot carry', function() {
+      const paper = painter();
+
+      paper.text('Hi');
+      paper.barcode({symbology: 'ean13', data: 'nonsense', moduleWidth: 2, height: 40});
+      paper.lineFeed();
+
+      const items = paper.end();
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 30);
+    });
+
+    it('should draw nothing for a symbology it does not know', function() {
+      const paper = painter();
+
+      paper.barcode({symbology: 'pharmacode', data: '1234', moduleWidth: 2, height: 40});
+
+      assert.deepEqual(paper.end(), []);
+    });
+
+    it('should add a line of text below the bars', function() {
+      const paper = painter();
+
+      paper.barcode({
+        symbology: 'ean13',
+        data: '4006381333931',
+        moduleWidth: 1,
+        height: 40,
+        hri: {position: 'below', font: 'A'},
+      });
+
+      const items = paper.end();
+
+      assert.equal(items[0].height, 40 + 24);
+    });
+
+    it('should draw a QR code as a block of its own', function() {
+      const paper = painter();
+
+      paper.qrcode({data: new TextEncoder().encode('test'), moduleSize: 3, errorLevel: 'M'});
+
+      const items = paper.end();
+
+      assert.equal(items[0].height, 21 * 3);
+    });
+
+    it('should draw nothing for data that does not fit in a QR code', function() {
+      const paper = painter();
+
+      paper.qrcode({data: new Uint8Array(4000).fill(0x41), moduleSize: 3, errorLevel: 'H'});
+
+      assert.deepEqual(paper.end(), []);
     });
   });
 
@@ -454,8 +544,8 @@ describe('Painter', function() {
       }
 
       assert.deepEqual(
-          Array.from(stitch(split.end(), WIDTH).data),
-          Array.from(stitch(whole.end(), WIDTH).data),
+          Array.from(stitch(split.end(), {width: WIDTH}).data),
+          Array.from(stitch(whole.end(), {width: WIDTH}).data),
       );
     });
   });
@@ -565,7 +655,7 @@ describe('Painter', function() {
       paper.text('A');
       paper.lineFeed();
 
-      const bitmap = stitch(paper.end(), WIDTH);
+      const bitmap = stitch(paper.end(), {width: WIDTH});
 
       assert.equal(bitmap.height, 30);
       assert.equal(Bitmap.getPixel(bitmap, 1, 10), 1);
@@ -586,7 +676,7 @@ describe('Painter', function() {
       paper.text('A');
       paper.lineFeed();
 
-      const bitmap = stitch(paper.end(), WIDTH);
+      const bitmap = stitch(paper.end(), {width: WIDTH});
 
       assert.equal(bitmap.height, 30);
       assert.equal(Bitmap.getPixel(bitmap, 1, 10), 1);

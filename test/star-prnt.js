@@ -1,7 +1,8 @@
 import StarPrntRenderer from '../src/renderers/star-prnt.js';
 import Painter from '../src/painter.js';
 import Bitmap from '../src/bitmap.js';
-import {stitch, commands} from './helpers/stitch.js';
+import {stitch} from '../src/formats/stitch.js';
+import {commands} from './helpers/items.js';
 import {names, fixture} from './helpers/fixtures.js';
 import {diff} from './helpers/ascii.js';
 import {assert} from 'chai';
@@ -82,6 +83,7 @@ function ink(bitmap, top, bottom) {
 
 const BEL = 0x07;
 const LF = 0x0a;
+const CR = 0x0d;
 const EM = 0x19;
 const SUB = 0x1a;
 const CAN = 0x18;
@@ -172,7 +174,7 @@ describe('StarPrntRenderer', function() {
 
         it('should render the paper of the fixture', function() {
           const expected = fixture('star-prnt', name);
-          const paper = stitch(render(expected.bytes, {commands: COMMANDS}), WIDTH);
+          const paper = stitch(render(expected.bytes, {commands: COMMANDS}), {width: WIDTH});
 
           if (dots(paper) !== dots(expected.paper)) {
             assert.fail(`${name} does not match its fixture\n${diff(paper, expected.paper)}`);
@@ -249,16 +251,16 @@ describe('StarPrntRenderer', function() {
     });
 
     it('should switch bold on with ESC E and off with ESC F', function() {
-      const bold = stitch(render(stream(ESC, '@', ESC, 'E', 'H', LF)), WIDTH);
-      const normal = stitch(render(stream(ESC, '@', ESC, 'E', ESC, 'F', 'H', LF)), WIDTH);
+      const bold = stitch(render(stream(ESC, '@', ESC, 'E', 'H', LF)), {width: WIDTH});
+      const normal = stitch(render(stream(ESC, '@', ESC, 'E', ESC, 'F', 'H', LF)), {width: WIDTH});
 
       assert.notEqual(dots(bold), dots(normal));
-      assert.equal(dots(normal), dots(stitch(render(stream(ESC, '@', 'H', LF)), WIDTH)));
+      assert.equal(dots(normal), dots(stitch(render(stream(ESC, '@', 'H', LF)), {width: WIDTH})));
     });
 
     it('should switch invert on with ESC 4 and off with ESC 5', function() {
-      const inverted = stitch(render(stream(ESC, '@', ESC, '4', 'H', LF)), WIDTH);
-      const normal = stitch(render(stream(ESC, '@', ESC, '4', ESC, '5', 'H', LF)), WIDTH);
+      const inverted = stitch(render(stream(ESC, '@', ESC, '4', 'H', LF)), {width: WIDTH});
+      const normal = stitch(render(stream(ESC, '@', ESC, '4', ESC, '5', 'H', LF)), {width: WIDTH});
 
       /* An inverted cell is black where the glyph is white, so the first dot of
          the line is ink */
@@ -268,7 +270,7 @@ describe('StarPrntRenderer', function() {
     });
 
     it('should draw an underline one dot thick with ESC - 1', function() {
-      const paper = stitch(render(stream(ESC, '@', ESC, '-', 1, 'Hi', LF)), WIDTH);
+      const paper = stitch(render(stream(ESC, '@', ESC, '-', 1, 'Hi', LF)), {width: WIDTH});
 
       assert.equal(Bitmap.getPixel(paper, 0, 23), 1);
       assert.equal(Bitmap.getPixel(paper, 0, 22), 0);
@@ -291,14 +293,14 @@ describe('StarPrntRenderer', function() {
     });
 
     it('should align a short line to the right with ESC GS a', function() {
-      const paper = stitch(render(stream(ESC, '@', ESC, GS, 'a', 2, 'Hi', LF)), WIDTH);
+      const paper = stitch(render(stream(ESC, '@', ESC, GS, 'a', 2, 'Hi', LF)), {width: WIDTH});
 
       assert.isAtLeast(ink(paper, 0, 32).min, 552);
       assert.isAtLeast(ink(paper, 0, 32).max, 564);
     });
 
     it('should centre a short line with ESC GS a', function() {
-      const paper = stitch(render(stream(ESC, '@', ESC, GS, 'a', 1, 'Hi', LF)), WIDTH);
+      const paper = stitch(render(stream(ESC, '@', ESC, GS, 'a', 1, 'Hi', LF)), {width: WIDTH});
 
       assert.isAtLeast(ink(paper, 0, 32).min, 276);
       assert.isBelow(ink(paper, 0, 32).max, 300);
@@ -312,8 +314,8 @@ describe('StarPrntRenderer', function() {
     });
 
     it('should switch to font B with ESC RS F', function() {
-      const wide = stitch(render(stream(ESC, '@', 'H'.repeat(48), LF)), WIDTH);
-      const narrow = stitch(render(stream(ESC, '@', ESC, RS, 'F', 1, 'H'.repeat(48), LF)), WIDTH);
+      const wide = stitch(render(stream(ESC, '@', 'H'.repeat(48), LF)), {width: WIDTH});
+      const narrow = stitch(render(stream(ESC, '@', ESC, RS, 'F', 1, 'H'.repeat(48), LF)), {width: WIDTH});
 
       /* Font B sits in a nine dot cell, so 48 characters end at 432 instead of
          at the edge of the paper */
@@ -340,8 +342,8 @@ describe('StarPrntRenderer', function() {
     });
 
     it('should take the width multiplier from the second argument of ESC i', function() {
-      const wide = stitch(render(stream(ESC, '@', ESC, 'i', 0, 1, 'H', LF)), WIDTH);
-      const normal = stitch(render(stream(ESC, '@', 'H', LF)), WIDTH);
+      const wide = stitch(render(stream(ESC, '@', ESC, 'i', 0, 1, 'H', LF)), {width: WIDTH});
+      const normal = stitch(render(stream(ESC, '@', 'H', LF)), {width: WIDTH});
 
       assert.equal(Bitmap.getPixel(wide, 2, 10), 1);
       assert.equal(Bitmap.getPixel(wide, 3, 10), 1);
@@ -453,15 +455,15 @@ describe('StarPrntRenderer', function() {
       /* Number 1 of the Star mapping is cp437, where 0x82 is an e with an acute
          accent, and so is 0xe9 in windows1252, which is number 32 */
 
-      const left = stitch(render(stream(ESC, '@', ESC, GS, 't', 1, [0x82], LF)), WIDTH);
-      const right = stitch(render(stream(ESC, '@', ESC, GS, 't', 32, [0xe9], LF)), WIDTH);
+      const left = stitch(render(stream(ESC, '@', ESC, GS, 't', 1, [0x82], LF)), {width: WIDTH});
+      const right = stitch(render(stream(ESC, '@', ESC, GS, 't', 32, [0xe9], LF)), {width: WIDTH});
 
       assert.equal(dots(left), dots(right));
     });
 
     it('should not decode the Star standard character set as cp437', function() {
-      const standard = stitch(render(stream(ESC, '@', [0x82], LF)), WIDTH);
-      const cp437 = stitch(render(stream(ESC, '@', ESC, GS, 't', 1, [0x82], LF)), WIDTH);
+      const standard = stitch(render(stream(ESC, '@', [0x82], LF)), {width: WIDTH});
+      const cp437 = stitch(render(stream(ESC, '@', ESC, GS, 't', 1, [0x82], LF)), {width: WIDTH});
 
       assert.notEqual(dots(standard), dots(cp437));
     });
@@ -512,7 +514,7 @@ describe('StarPrntRenderer', function() {
       const known = render(stream(ESC, '@', 'AB', LF));
       const unknown = render(stream(ESC, '@', 'A', ESC, 'W', 1, 'B', LF));
 
-      assert.equal(dots(stitch(unknown, WIDTH)), dots(stitch(known, WIDTH)));
+      assert.equal(dots(stitch(unknown, {width: WIDTH})), dots(stitch(known, {width: WIDTH})));
     });
 
     it('should report the bytes of the command when unknown is supported', function() {
@@ -537,7 +539,10 @@ describe('StarPrntRenderer', function() {
           [ESC, 0x03],
       );
 
-      assert.equal(dots(stitch(items, WIDTH)), dots(stitch(render(stream(ESC, '@', 'Hi', LF)), WIDTH)));
+      assert.equal(
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+      );
     });
 
     it('should consume the prefix of an unknown command of the ESC GS group', function() {
@@ -548,7 +553,10 @@ describe('StarPrntRenderer', function() {
           [ESC, GS, 0x7f],
       );
 
-      assert.equal(dots(stitch(items, WIDTH)), dots(stitch(render(stream(ESC, '@', 'Hi', LF)), WIDTH)));
+      assert.equal(
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+      );
     });
 
     it('should consume the argument of an unknown command of the ESC RS group', function() {
@@ -560,8 +568,8 @@ describe('StarPrntRenderer', function() {
       );
 
       assert.equal(
-          dots(stitch(items, WIDTH)),
-          dots(stitch(render(stream(ESC, '@', 'AB', LF)), WIDTH)),
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'AB', LF)), {width: WIDTH})),
       );
     });
 
@@ -569,21 +577,24 @@ describe('StarPrntRenderer', function() {
       const known = render(stream(ESC, '@', 'AB', LF));
       const skipped = render(stream(ESC, '@', 'A', ESC, GS, [0x03], 's', [1, 0], 'B', LF));
 
-      assert.equal(dots(stitch(skipped, WIDTH)), dots(stitch(known, WIDTH)));
+      assert.equal(dots(stitch(skipped, {width: WIDTH})), dots(stitch(known, {width: WIDTH})));
     });
 
     it('should consume the tab positions of ESC D', function() {
       const known = render(stream(ESC, '@', 'AB', LF));
       const skipped = render(stream(ESC, '@', 'A', ESC, 'D', [10, 20, 30, 0], 'B', LF));
 
-      assert.equal(dots(stitch(skipped, WIDTH)), dots(stitch(known, WIDTH)));
+      assert.equal(dots(stitch(skipped, {width: WIDTH})), dots(stitch(known, {width: WIDTH})));
     });
 
     it('should consume the data of a bit image command', function() {
-      const known = render(stream(ESC, '@', 'AB', LF));
-      const skipped = render(stream(ESC, '@', 'A', ESC, 'K', [6, 0], [1, 2, 3, 4, 5, 6], 'B', LF));
+      const items = render(stream(ESC, '@', 'A', ESC, 'K', [6, 0], [1, 2, 3, 4, 5, 6], 'B', LF));
 
-      assert.equal(dots(stitch(skipped, WIDTH)), dots(stitch(known, WIDTH)));
+      /* The image is drawn, and the text on both sides of it is where it would
+         be without it: one line of the default spacing */
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 32);
     });
 
     it('should consume the mode byte of ESC FF', function() {
@@ -595,8 +606,8 @@ describe('StarPrntRenderer', function() {
       assert.isTrue(items.every((item) => item.type !== 'pulse'));
       assert.equal(items.length, 1);
       assert.equal(
-          dots(stitch(items, WIDTH)),
-          dots(stitch(render(stream(ESC, '@', 'AB', LF)), WIDTH)),
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'AB', LF)), {width: WIDTH})),
       );
     });
 
@@ -609,8 +620,8 @@ describe('StarPrntRenderer', function() {
       );
 
       assert.equal(
-          dots(stitch(items, WIDTH)),
-          dots(stitch(render(stream(ESC, '@', 'A', LF)), WIDTH)),
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'A', LF)), {width: WIDTH})),
       );
     });
 
@@ -627,7 +638,7 @@ describe('StarPrntRenderer', function() {
           'B', LF,
       ));
 
-      assert.equal(dots(stitch(skipped, WIDTH)), dots(stitch(known, WIDTH)));
+      assert.equal(dots(stitch(skipped, {width: WIDTH})), dots(stitch(known, {width: WIDTH})));
     });
 
     it('should stop without an error when a command runs past the end', function() {
@@ -650,53 +661,218 @@ describe('StarPrntRenderer', function() {
     });
   });
 
-  describe('blocks that are skipped in this section', function() {
-    it('should stay in sync over a barcode', function() {
-      const known = render(stream(ESC, '@', 'AB', LF));
-      const skipped = render(stream(ESC, '@', 'A', ESC, 'b', [6, 2, 2, 40], '12345', [RS], 'B', LF));
+  describe('blocks', function() {
+    it('should draw a barcode with the module width of n3', function() {
+      const paper = stitch(render(stream(ESC, '@', ESC, 'b', [3, 1, 2, 40], '4006381333931', [RS])), {width: WIDTH});
 
-      assert.equal(dots(stitch(skipped, WIDTH)), dots(stitch(known, WIDTH)));
+      /* EAN-13 is 95 modules, three dots each at n3 = 2, and the bars are 40
+         dots tall, on a line of their own */
+
+      assert.equal(paper.height, 40);
+      assert.equal(ink(paper, 0, 40).max - ink(paper, 0, 40).min + 1, 95 * 3);
     });
 
-    it('should stay in sync over a QR code', function() {
+    it('should take the module width of n3 from a table of its own', function() {
+      const width = (n3) => {
+        const paper = stitch(render(stream(ESC, '@', ESC, 'b', [3, 1, n3, 40], '4006381333931', [RS])), {width: WIDTH});
+        const edges = ink(paper, 0, 40);
+
+        return (edges.max - edges.min + 1) / 95;
+      };
+
+      assert.deepEqual([width(1), width(2), width(3)], [2, 3, 4]);
+    });
+
+    it('should draw the human readable text below the bars when n2 is 2', function() {
+      const without = stitch(render(stream(ESC, '@', ESC, 'b', [3, 1, 2, 40], '4006381333931', [RS])), {width: WIDTH});
+      const with_ = stitch(render(stream(ESC, '@', ESC, 'b', [3, 2, 2, 40], '4006381333931', [RS])), {width: WIDTH});
+
+      /* The text is one line of font A cells, which are 24 dots tall in the
+         Star profile */
+
+      assert.equal(without.height, 40);
+      assert.equal(with_.height, 64);
+    });
+
+    it('should print nothing for data that is not valid for the symbology', function() {
+      const items = render(stream(ESC, '@', 'A', ESC, 'b', [3, 2, 2, 40], '400638133393X', [RS], 'B', LF));
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 32);
+    });
+
+    it('should print nothing for a barcode that is wider than the print area', function() {
+      /* Code 93 of six characters is 91 modules, and n3 of 3 is four dots per
+         module, 364 dots, which does not fit on a 256 dot printer */
+
+      const items = render(
+          stream(ESC, '@', 'A', ESC, 'b', [7, 1, 3, 40], 'TEST93', [RS], 'B', LF),
+          {width: 256},
+      );
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 32);
+    });
+
+    it('should print nothing for a byte the code sets of Code 128 cannot carry', function() {
+      const code128 = render(stream(ESC, '@', 'A', ESC, 'b', [6, 1, 2, 40], 'AB', [0xe9], [RS], 'B', LF));
+      const gs1 = render(stream(ESC, '@', 'A', ESC, 'b', [9, 1, 2, 40], '01', [0xe9], [RS], 'B', LF));
       const known = render(stream(ESC, '@', 'AB', LF));
 
-      const skipped = render(stream(
-          ESC, '@', 'A',
+      assert.equal(dots(stitch(code128, {width: WIDTH})), dots(stitch(known, {width: WIDTH})));
+      assert.equal(dots(stitch(gs1, {width: WIDTH})), dots(stitch(known, {width: WIDTH})));
+    });
+
+    it('should report the GS1 DataBar symbologies as unknown', function() {
+      const items = render(
+          stream(ESC, '@', ESC, 'b', [10, 1, 2, 40], '12345', [RS]),
+          {commands: ['unknown']},
+      );
+
+      assert.equal(items.filter((item) => item.type === 'image').length, 0);
+      assert.deepEqual(
+          Array.from(items.find((item) => item.type === 'unknown').data),
+          [ESC, 0x62, 10, 1, 2, 40, 0x31, 0x32, 0x33, 0x34, 0x35, RS],
+      );
+    });
+
+    it('should draw a QR code of the size the commands ask for', function() {
+      const paper = stitch(render(stream(
+          ESC, '@',
           ESC, GS, 'yS', [0x30, 0x02],
           ESC, GS, 'yS', [0x32, 0x04],
           ESC, GS, 'yS', [0x31, 0x01],
           ESC, GS, 'yD', [0x31, 0x00, 4, 0], 'test',
           ESC, GS, 'yP',
-          'B', LF,
-      ));
+      )), {width: WIDTH});
 
-      assert.equal(dots(stitch(skipped, WIDTH)), dots(stitch(known, WIDTH)));
+      /* The smallest symbol that holds four bytes is version 1, 21 modules, at
+         four dots per module */
+
+      assert.equal(paper.height, 21 * 4);
+      assert.equal(ink(paper, 0, paper.height).max - ink(paper, 0, paper.height).min + 1, 21 * 4);
     });
 
-    it('should stay in sync over a PDF417', function() {
-      const known = render(stream(ESC, '@', 'AB', LF));
+    it('should print a smaller symbol at error correction level L than at M', function() {
+      const size = (level) => {
+        const value = 'https://example.com/order/9912';
 
-      const skipped = render(stream(
-          ESC, '@', 'A',
+        const items = render(stream(
+            ESC, '@',
+            ESC, GS, 'yS', [0x32, 3],
+            ESC, GS, 'yS', [0x31, level],
+            ESC, GS, 'yD', [0x31, 0x00, value.length, 0], value,
+            ESC, GS, 'yP',
+        ));
+
+        return items[0].height / 3;
+      };
+
+      assert.deepEqual([size(0), size(1), size(2), size(3)], [25, 29, 29, 33]);
+    });
+
+    it('should print nothing when no data was stored', function() {
+      const items = render(stream(ESC, '@', ESC, GS, 'yP', 'A', LF));
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 32);
+    });
+
+    it('should print nothing after ESC @ threw the stored data away', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, GS, 'yD', [0x31, 0x00, 4, 0], 'test',
+          ESC, '@',
+          ESC, GS, 'yP',
+          'A', LF,
+      ));
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 32);
+    });
+
+    it('should not carry the stored data over to the next stream', function() {
+      const renderer = new StarPrntRenderer({width: WIDTH});
+
+      renderer.render(stream(ESC, '@', ESC, GS, 'yD', [0x31, 0x00, 4, 0], 'test'));
+
+      const items = renderer.render(stream(ESC, '@', ESC, GS, 'yP', 'A', LF));
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 32);
+    });
+
+    it('should print nothing for a QR code that is wider than the print area', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, GS, 'yS', [0x32, 8],
+          ESC, GS, 'yD', [0x31, 0x00, 4, 0], 'test',
+          ESC, GS, 'yP',
+          'A', LF,
+      ), {width: 128});
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 32);
+    });
+
+    it('should keep the data of a QR code until the next store', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, GS, 'yS', [0x32, 0x03],
+          ESC, GS, 'yD', [0x31, 0x00, 4, 0], 'test',
+          ESC, GS, 'yP',
+          ESC, GS, 'yP',
+      ));
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 21 * 3 * 2);
+    });
+
+    it('should report the print command of a PDF417 as unknown', function() {
+      const items = render(stream(
+          ESC, '@',
           ESC, GS, 'xS', [0x30, 0x01, 0, 0],
           ESC, GS, 'xS', [0x32, 0x03],
-          ESC, GS, 'xS', [0x33, 0x03],
-          ESC, GS, 'xS', [0x31, 0x01],
           ESC, GS, 'xD', [4, 0], 'test',
           ESC, GS, 'xP',
-          'B', LF,
-      ));
+      ), {commands: ['unknown']});
 
-      assert.equal(dots(stitch(skipped, WIDTH)), dots(stitch(known, WIDTH)));
+      assert.deepEqual(
+          items.map((item) => item.type),
+          ['unknown'],
+      );
+
+      assert.deepEqual(Array.from(items[0].data), [ESC, GS, 0x78, 0x50]);
     });
 
-    it('should stay in sync over a column image', function() {
+    it('should draw a column image as a strip in the line', function() {
       const data = new Array(24 * 3).fill(0xff);
-      const known = render(stream(ESC, '@', 'AB', LF));
-      const skipped = render(stream(ESC, '@', 'A', ESC, 'X', [24, 0], data, 'B', LF));
+      const items = render(stream(ESC, '@', ESC, '0', ESC, 'X', [24, 0], data, LF, CR, ESC, 'z', 1));
 
-      assert.equal(dots(stitch(skipped, WIDTH)), dots(stitch(known, WIDTH)));
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 24);
+
+      const paper = stitch(items, {width: WIDTH});
+
+      assert.equal(ink(paper, 0, 24).min, 0);
+      assert.equal(ink(paper, 0, 24).max, 23);
+    });
+
+    it('should put the top dot of a column in the most significant bit', function() {
+      const items = render(stream(ESC, '@', ESC, '0', ESC, 'X', [1, 0], [0x80, 0x00, 0x01], LF, CR));
+      const paper = stitch(items, {width: WIDTH});
+
+      assert.equal(Bitmap.getPixel(paper, 0, 0), 1);
+      assert.equal(Bitmap.getPixel(paper, 0, 1), 0);
+      assert.equal(Bitmap.getPixel(paper, 0, 23), 1);
+    });
+
+    it('should print the columns of ESC K twice and those of ESC L once', function() {
+      const single = stitch(render(stream(ESC, '@', ESC, 'K', [2, 0], [0xff, 0xff], LF)), {width: WIDTH});
+      const double = stitch(render(stream(ESC, '@', ESC, 'L', [2, 0], [0xff, 0xff], LF)), {width: WIDTH});
+
+      assert.equal(ink(single, 0, 8).max, 3);
+      assert.equal(ink(double, 0, 8).max, 1);
     });
   });
 
@@ -738,7 +914,7 @@ describe('StarPrntRenderer', function() {
       const supported = render(fixture('star-prnt', 'cut').bytes, {commands: ['cut']});
       const dropped = render(fixture('star-prnt', 'cut').bytes);
 
-      assert.equal(dots(stitch(dropped, WIDTH)), dots(stitch(supported, WIDTH)));
+      assert.equal(dots(stitch(dropped, {width: WIDTH})), dots(stitch(supported, {width: WIDTH})));
     });
   });
 
@@ -835,8 +1011,8 @@ describe('StarPrntRenderer', function() {
       const bytes = fixture('star-prnt', 'feed').bytes;
 
       assert.equal(
-          dots(stitch(render(bytes, {commands: ['feed']}), WIDTH)),
-          dots(stitch(render(bytes), WIDTH)),
+          dots(stitch(render(bytes, {commands: ['feed']}), {width: WIDTH})),
+          dots(stitch(render(bytes), {width: WIDTH})),
       );
     });
   });
@@ -851,7 +1027,7 @@ describe('StarPrntRenderer', function() {
 
         assert.isTrue(split.every((item) => item.type !== 'image' || item.height <= 41));
         assert.isAtLeast(split.length, whole.length);
-        assert.equal(dots(stitch(split, WIDTH)), dots(stitch(whole, WIDTH)));
+        assert.equal(dots(stitch(split, {width: WIDTH})), dots(stitch(whole, {width: WIDTH})));
       });
     }
   });

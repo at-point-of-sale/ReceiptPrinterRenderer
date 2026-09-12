@@ -233,6 +233,52 @@ class Bitmap {
   }
 
   /**
+     * Scale a bitmap by repeating its dots, the way a printer scales a
+     * character or an image that is printed at double width or double height
+     *
+     * @param  {Bitmap}   bitmap   The bitmap to scale
+     * @param  {number}   x        Horizontal multiplier
+     * @param  {number}   y        Vertical multiplier
+     * @return {Bitmap}            The scaled bitmap, or the bitmap itself when both multipliers are one
+     */
+  static scale(bitmap, x, y) {
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 1 || y < 1) {
+      throw new Error('Multipliers must be positive integers');
+    }
+
+    if (x === 1 && y === 1) {
+      return bitmap;
+    }
+
+    const result = Bitmap.create(bitmap.width * x, bitmap.height * y);
+    const rowBytes = Bitmap.rowBytes(result.width);
+
+    for (let row = 0; row < bitmap.height; row++) {
+      const offset = row * y * rowBytes;
+
+      for (let column = 0; column < bitmap.width; column++) {
+        if (!Bitmap.getPixel(bitmap, column, row)) {
+          continue;
+        }
+
+        for (let repeat = 0; repeat < x; repeat++) {
+          const dot = column * x + repeat;
+
+          result.data[offset + (dot >> 3)] |= 0x80 >> (dot & 7);
+        }
+      }
+
+      /* The other rows of this dot are a copy of the one just drawn */
+
+      for (let repeat = 1; repeat < y; repeat++) {
+        result.data.copyWithin(offset + repeat * rowBytes, offset, offset + rowBytes);
+      }
+    }
+
+    return result;
+  }
+
+  /**
      * The bytes of one row without the white bytes at its right edge, which is
      * what printers that trim their rows need. An all white row is one byte, so
      * that a row is never empty. A bitmap without width has no rows at all, and

@@ -1,6 +1,7 @@
 import EscPosRenderer from '../src/renderers/esc-pos.js';
 import StarPrntRenderer from '../src/renderers/star-prnt.js';
-import {stitch, commands} from './helpers/stitch.js';
+import {stitch} from '../src/formats/stitch.js';
+import {commands} from './helpers/items.js';
 import {names, fixture} from './helpers/fixtures.js';
 import {diff} from './helpers/ascii.js';
 import {assert} from 'chai';
@@ -20,9 +21,10 @@ import {assert} from 'chai';
     9 by 17 against 9 by 24, so both renders use the same profile. That is what
     the design's Testing section prescribes.
 
-    There are no exceptions. The differences the encoder does produce between
-    the two languages are avoided by the fixture receipts, and each of them is
-    listed below with the reason:
+    There is one exception, the hri fixture, which the EXCEPTIONS table below
+    names with its reason. Every other difference the encoder produces between
+    the two languages is avoided by the fixture receipts, and each of those is
+    listed here with the reason:
 
     - Italic. The encoder emits ESC 4 n for ESC/POS and nothing for StarPRNT.
       No difference on paper: Epson hardware does not italicize either and the
@@ -41,9 +43,32 @@ import {assert} from 'chai';
       test/star-prnt.js.
 
     - Code 128 code set selection. The encoder strips the {A, {B and {C prefix
-      for StarPRNT and passes it through for ESC/POS. No fixture in this
-      section prints a barcode, the block fixtures of section 4 have to take
-      this up again.
+      for StarPRNT and passes it through for ESC/POS, where the printer picks
+      the code sets itself. The code128 fixture uses two values that both
+      encodings agree on, {BABC-123 and {C1234, so the bars are the same.
+
+    - The module width of a barcode. The encoder writes its width option, 1 to
+      3, as n3 on StarPRNT and as GS w n on ESC/POS, where n is the option plus
+      one for most symbologies, twice the option for ITF and the option itself
+      for GS1-128 and the GS1 DataBar family. The renderer reads a Star n3 of
+      1, 2 or 3 as 2, 3 or 4 dots, so the two languages draw the same barcode
+      for every symbology but those, and the ITF fixture uses width 1, where
+      twice the option and the option plus one are both two dots. GS1-128 is
+      addressed by its number instead of by its name, which is what the encoder
+      needs anyway for a printer it knows nothing about, and the number takes
+      the same path as the other symbologies.
+
+    - The human readable text of a barcode. ESC/POS has GS f to choose the font
+      of it and StarPRNT does not, a Star printer always draws it in font A.
+      The hri fixture prints the same barcode with the text in font A and in
+      font B, so it is the one fixture where the two languages differ, see the
+      exceptions below.
+
+    - Images. The encoder has a raster mode and a column mode for ESC/POS and
+      only a column mode for StarPRNT, where the imageMode option is ignored.
+      The image-raster fixture is therefore a GS v 0 raster image on ESC/POS and
+      the same ESC X strips as the image-column fixture on StarPRNT. Both print
+      the same dots on the same rows, so parity holds without an exception.
 
     - Character sizes of seven and eight. The encoder accepts size(1..8) for
       every language, but it only fits on ESC/POS: GS ! carries multipliers of
@@ -69,6 +94,16 @@ const COMMANDS = ['cut', 'pulse', 'feed'];
 
 const OPTIONS = {width: WIDTH, profile: 'epson', commands: COMMANDS};
 
+/*
+    The fixtures whose two renders are not the same, with the reason. Every one
+    of them is a difference the encoder or the printer makes, not the renderer,
+    and there is exactly one.
+*/
+
+const EXCEPTIONS = {
+  'hri': 'the third barcode prints its human readable text in font B, which only ESC/POS can select',
+};
+
 /**
  * The dots of a bitmap, as a string, so that two renders can be compared
  *
@@ -86,14 +121,21 @@ describe('parity between the renderers', function() {
 
   for (const name of names('esc-pos')) {
     describe(name, function() {
-      it('should render the same paper in both languages', function() {
+      it(EXCEPTIONS[name] ?
+        `should differ in the two languages, because ${EXCEPTIONS[name]}` :
+        'should render the same paper in both languages', function() {
         const left = new EscPosRenderer(OPTIONS).render(fixture('esc-pos', name).bytes);
         const right = new StarPrntRenderer(OPTIONS).render(fixture('star-prnt', name).bytes);
 
         const paper = {
-          'esc-pos': stitch(left, WIDTH),
-          'star-prnt': stitch(right, WIDTH),
+          'esc-pos': stitch(left, {width: WIDTH}),
+          'star-prnt': stitch(right, {width: WIDTH}),
         };
+
+        if (EXCEPTIONS[name]) {
+          assert.notEqual(dots(paper['esc-pos']), dots(paper['star-prnt']));
+          return;
+        }
 
         if (dots(paper['esc-pos']) !== dots(paper['star-prnt'])) {
           assert.fail(

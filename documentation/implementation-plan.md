@@ -261,3 +261,231 @@ Fixtures:
 - `test/tools/make-fixtures.js` runs the same thirteen receipts through both languages and writes `test/fixtures/<language>/<name>.{bin,pbm,items.json}`. The StarPRNT renders use the defaults of the renderer, the `star` profile with 32 dot line spacing and a 9 by 24 font B, so the golden images are what a Star printer would produce, while the parity test is the one that normalises the profile.
 - The `codepages` receipt keeps its candidates, `cp437`, `cp858`, `windows1252` and `cp866`, because all four are in the `star` mapping as well, so both languages switch at the same place to the same codepage with a different number.
 - Every StarPRNT image was reviewed by eye as ASCII art: both boxes closed with the eight dot gap of the 32 dot line spacing at every line boundary, the rules straight over the full width and over twenty columns, the table columns aligned left, centre and right, font B in its 24 dot Star cell with connected box drawing characters, the size multipliers up to three, the alignment offsets, the wrap at 48 columns, and the codepage lines decoding to `Café über Straße`, `Prijs: € 12,50` and `Привет мир` with real glyphs.
+
+### Section 4
+
+Choices made where the design and this plan were silent, and the corrections the
+section made to [design.md](design.md).
+
+Symbologies:
+
+- **One module per file in `src/symbologies`**, with `pattern.js` for the three
+  shapes a symbology is described in, a pattern of modules, the module widths
+  the painter draws, and the narrow and wide elements of Code 39 and ITF, and
+  `index.js` as the registry that turns a symbology name into a generator. A
+  generator returns `{bars, text}`, the module widths starting with a bar and
+  the text a printer prints below them, or `null` when the data is not valid for
+  the symbology, which the painter answers by printing nothing at all.
+- **Wide elements are three modules** in Code 39 and ITF and two in Codabar,
+  which is the ratio the reference encoder of the tests uses and the one the
+  specifications call the common case. The ratio is not on the wire, so no
+  fixture could settle it.
+- **A trailing space is not part of a symbol.** Code 39 and Codabar end with a
+  space between the last character and the quiet zone; `toBars()` drops it, so a
+  centred barcode is centred on its bars.
+- **The human readable text** is the data of the barcode, as it is printed: the
+  check digit that was computed is in it, UPC-A prints twelve digits and not the
+  thirteen of the EAN-13 it is, Codabar prints its start and stop character, and
+  Code 128 prints the characters without the escapes of the code set selection.
+- **UPC-E** takes six digits, seven with the number system in front of them or
+  eight with the check digit behind them as well. The check digit is the one of
+  the UPC-A the symbol expands to, and the number system, 0 or 1, decides which
+  parity pattern the six digits are drawn in.
+- **Code 128 auto** follows the rule the design describes, code set C for a run
+  of four digits or more and for a value that starts with two, and code set A
+  only when the value needs the control characters. It is the rule the reference
+  encoder implements, so every value can be checked against it. The selection
+  never uses SHIFT, which only saves a symbol when one character of the other
+  code set stands between two characters of this one.
+- **Code set C ends where the digits end.** A character that is not a digit, or
+  a digit without a partner, switches to code set B, which is the only thing a
+  printer can do with data that says `{C` and then does not hold digit pairs.
+- **GS1-128** is a Code 128 with the code sets picked for the data and FNC1
+  behind the start symbol.
+
+Blocks:
+
+- **`painter.barcode()` and `painter.qrcode()`** take the request the parsers
+  build, draw the block and commit it through `block()`, so barcodes, QR codes
+  and raster images all go through one path and are aligned the same way. A
+  request the generators refuse draws nothing and does not advance the paper.
+- **The human readable text** is one line of cells of the HRI font, drawn
+  without any style, centred over the bars, and the block is as wide as the
+  wider of the two. `Painter` grew a `#textBitmap()` for it and `#cell()` took a
+  font and a style argument, so that the text of a barcode is not drawn in the
+  style of the text around it.
+- **The HRI font is A by default**, not B. The design's table said font B; the
+  ESC/POS reference of `GS f` gives font A as the default of the printer, and
+  the encoder never sends `GS f`, so every barcode of a receipt from the encoder
+  has its text in font A. The design's ESC/POS table is corrected and `GS f` is
+  in it.
+- **Star module widths.** `ESC b` carries `n3` of 1 to 3, which the Star
+  documentation describes in narrow and wide element widths per symbology rather
+  than in dots. The renderer reads 1, 2 and 3 as 2, 3 and 4 dots. That is the
+  reading that makes a Star barcode the same size as the ESC/POS barcode the
+  encoder produces from the same receipt, where `GS w n` is the width option
+  plus one, and it is written down as an assumption in design.md. No hardware
+  check settled it.
+- **Star Code 128 is the automatic variant.** The encoder strips the `{A`, `{B`
+  and `{C` selection for StarPRNT, so the data that arrives has no code sets in
+  it and the printer picks them, which is exactly what ESC/POS symbology 79 is.
+- **`GS w n` accepts 1 to 6.** The specification defines 2 to 6, the encoder
+  sends the width option itself for GS1-128 and the GS1 DataBar family, which is
+  1 to 3, so a printer that refused 1 could not print those at all.
+- **Images.** `ESC *` renders all four modes, the eight dot modes as strips of
+  eight rows and the 24 dot ones as strips of 24, with the single density modes
+  printing every column twice. `GS v 0` renders the four `m` values by repeating
+  dots. `ESC K` and `ESC L` of Star Line Mode render as eight dot strips, `ESC k`
+  is left unknown: its quadruple density has no obvious horizontal scale and the
+  encoder emits none of the three. `Bitmap.scale()` is the one addition the
+  bitmap module needed, and the QR codes use it as well.
+- **PDF417 and GS1 DataBar.** The parameters and the data are parsed and
+  dropped, and the command that prints the symbol reports an `unknown` item with
+  its bytes: `GS ( k 48 81 48` and `ESC GS x P` for PDF417, and the whole
+  `GS k m` or `ESC b n1 ..` command for the DataBar symbologies, since those
+  print in one command. Nothing lands on the paper.
+- **QR codes through lean-qr**, in the byte mode of the specification, with the
+  version left to the library, which picks the smallest one the data fits in.
+  The error correction level is pinned with both `minCorrectionLevel` and
+  `maxCorrectionLevel`, so that the symbol is the one the receipt asked for and
+  not a higher one that happened to fit. Data that does not fit in the largest
+  symbol prints nothing. The stored data survives until the next store, so two
+  print commands print the same symbol twice, as the specification says.
+- **QR code defaults**, for a stream that prints a symbol without setting
+  everything first: model 2, three dot modules and error correction level L,
+  which are the defaults of the ESC/POS specification. The barcode defaults are
+  162 dots of height, three dot modules, no human readable text and font A.
+
+Helpers:
+
+- **`toPng()`** writes one IDAT chunk with every scanline unfiltered, compressed
+  with `CompressionStream('deflate')`, which produces the zlib framing PNG asks
+  for. The image is one bit greyscale, where a set bit is white, so the rows are
+  inverted, which also makes the bits that pad a row to a whole byte white. The
+  CRC32 is exported next to it, because the test needs it to check the chunks.
+- **`stitch(items, options)`** replaces the helper of section 2, which is gone;
+  `test/helpers/items.js` keeps the command extraction the fixtures need. The
+  options are `cutMarker`, off by default, `feed`, on by default, and `width`,
+  for a stream that has no image item to take it from. A cut is two rows of
+  eight dot dashes. The fixtures pass `{width}` and nothing else, so the golden
+  images of sections 2 and 3 did not change.
+
+Fixtures:
+
+- **The image** is a 200 by 96 checkerboard in two greys with a filled black
+  circle over it, dithered by the encoder with the Atkinson algorithm, so that
+  the fixture holds a real dither pattern and not a flat area. Both dimensions
+  are a multiple of eight, which the encoder requires, and the height is a
+  multiple of 24, so that the column mode encoding fills its strips exactly.
+- **`image-raster` is a StarPRNT column image.** The encoder has a raster mode
+  only for ESC/POS, `imageMode` is ignored for StarPRNT, so the StarPRNT half of
+  that fixture is the same `ESC X` strips as `image-column`. Both print the same
+  dots on the same rows, so parity holds and no exception was needed. It is
+  written down in the comment at the top of `test/parity.js`.
+- **Barcode widths.** Every barcode fixture uses width 2, which is three dots in
+  both languages, except ITF, which uses width 1: the encoder doubles the width
+  option for ITF on ESC/POS, and one is the only value where twice the option
+  and the option plus one are the same.
+- **`gs1-128` and `code128-auto` are addressed by the number of the symbology**,
+  74 and 79 on ESC/POS and 9 and 6 on StarPRNT, because the encoder does not
+  list either name in the capabilities of a printer it knows nothing about. The
+  number also takes the same width path as the other symbologies, so the module
+  width of GS1-128 is the same in both languages; with the name, ESC/POS would
+  draw it one dot narrower than StarPRNT, which is a difference of the encoder.
+- **The `code128` fixture prints `{BABC-123` and `{C1234`**, two values the
+  automatic selection encodes exactly the way the code set selection asks for,
+  so the fixture covers the escapes on ESC/POS and still has parity with the
+  StarPRNT encoding, where the encoder strips them.
+- **The `hri` fixture** prints the same barcode without text, with the text in
+  font A and with the text in font B. The encoder never emits `GS f`, so the
+  font is selected with `raw()` on the caption line in front of the barcode,
+  where it costs no extra line, and only for ESC/POS. It is the one fixture in
+  the exception list of the parity test.
+- **The `receipt` fixture** is a shop receipt: a header, a table of items, a
+  rule, a total in bold, an EAN-13 with its text, a QR code, a line of thanks, a
+  partial cut and a drawer pulse.
+- **Every fixture was reviewed by eye as ASCII art**: the bars of every
+  symbology with the human readable text under them readable as the value that
+  was encoded, the finder patterns and the module size of the QR codes, the
+  dither of the image with the circle in the middle, the font B text of the
+  `hri` fixture against the font A text above it, and the whole receipt.
+
+Tests:
+
+- **`test/symbologies.js`** checks every symbology against JsBarcode, which is a
+  dev dependency for that file alone: its encoder classes return the modules as
+  a string without a canvas or a DOM. Code 93 is checked against JsBarcode as
+  well and against the published pattern of `TEST93`, written out symbol by
+  symbol with the two check characters computed by hand. The same file reads the
+  bars back from the paper of every barcode fixture, in both languages, and
+  compares them with the reference, which covers the whole way from the bytes of
+  the encoder to the dots on the paper.
+- **`test/qrcode.js`** reads the rendered symbols back with jsQR, in both
+  languages, for three values at three sizes and three error correction levels,
+  and for the `qrcode` and `receipt` fixtures. The reader needs a quiet zone,
+  which the printer does not print, so the test adds a white margin. jsQR
+  decodes the bytes of a symbol as UTF-8, so a value that is not valid UTF-8 is
+  checked as bytes instead of as text.
+- **`test/formats.js`** inflates the IDAT chunk with `node:zlib` and compares
+  the scanlines, checks the CRC of every chunk against the exported `crc32()`,
+  and checks that `stitch()` joins, expands feeds, draws cut markers and ignores
+  the commands that do not move the paper.
+
+Parity:
+
+- **Parity holds for all twenty nine fixtures but one.** `hri` prints its third
+  barcode with the human readable text in font B, which only ESC/POS can select,
+  and it is in the exception list at the top of `test/parity.js` with that
+  reason. The commands of the two renders are the same for every fixture,
+  including `hri`.
+
+#### Review follow-up
+
+The review of the section asked for ten changes, which are in the code and in
+the tests:
+
+- **Code 93 carries 47 symbol patterns**, not 43. The four shift characters of
+  the full ASCII variant are never data, the symbol table stops at 43, but a
+  check character does land on one of them, which drew nonsense for about one
+  value in seven. A property test encodes four hundred generated values and
+  checks that every one of them is `9 * (n + 4) + 1` modules of ones and zeroes
+  and equal to the reference, and `F`, whose second check character is one of
+  the four, is written out by hand.
+- **Code 128 refuses a byte no code set can carry.** A byte above 127 made the
+  automatic selection recurse forever, so a receipt with one in a Code 128 or a
+  GS1-128 threw instead of printing. The symbologies now return null for it and
+  the block is skipped, in both languages.
+- **The QR error correction level of lean-qr is a number and L is zero**, so the
+  lookup fell through to M for every symbol that asked for L. The level is
+  looked up by name now. The `qrcode` fixtures of both languages were
+  regenerated, they are the only fixtures this changed.
+- **An empty QR storage prints nothing**, before any store command, after
+  `ESC @` and in a second `render()` on the same renderer, which is what a
+  printer does with a print command that has nothing to print.
+- **`GS v 0 m` accepts the ASCII digits** of the mode as well, and a `GS v` that
+  is not `GS v 0` reports an unknown command instead of drawing whatever
+  follows it.
+- **`GS ( k` with a selector that is not the QR code or PDF417 one** reports an
+  unknown command, so Maxicode, the two dimensional GS1 DataBar and the
+  composite symbologies are visible to a driver instead of disappearing.
+- **A block that is wider than the print area is skipped**, for barcodes and for
+  QR codes, which is what an Epson does: it prints nothing rather than a symbol
+  no reader can read. The rule is on the bars and on the symbol; the human
+  readable text is centred under the bars and clipped, as it is not part of the
+  symbol.
+- **UPC-E also takes a UPC-A**, eleven or twelve digits, and compresses it with
+  the four rules of the specification when it has a zero suppressed form. The
+  candidate is expanded again and compared with the number it came from, so a
+  number without such a form is refused instead of drawing a different article.
+  The reference encoder does not accept a UPC-A for a UPC-E, so the test uses
+  hand checked pairs, `042100005264` to `425261` among them.
+- **`stitch()` draws image items instead of copying their rows**, so that an
+  item narrower than the paper, which a driver that renders in pieces can
+  produce, lands on the left of the paper instead of being read with the wrong
+  number of bytes per row. **`toPng()`** refuses an image without dots with an
+  error that says so.
+- **Comments.** `ESC K` and `ESC L` say what the Star Line Mode specification
+  calls them, the normal density image whose dots are twice as wide as the dots
+  of the print head and the fine density image of one dot per column; the QR
+  code defaults say three dot modules, which is what they are; and the header of
+  the parity test names the one exception instead of claiming there is none.

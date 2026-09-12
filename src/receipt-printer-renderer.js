@@ -1,5 +1,7 @@
 import {toPbm} from './formats/pbm.js';
+import {toPng} from './formats/png.js';
 import {toImageData} from './formats/image-data.js';
+import {stitch} from './formats/stitch.js';
 import EscPosRenderer from './renderers/esc-pos.js';
 import StarPrntRenderer from './renderers/star-prnt.js';
 
@@ -73,4 +75,4 @@ import StarPrntRenderer from './renderers/star-prnt.js';
  * @property {object} [font]                 Font data, in the packed format of the built in fonts
  */
 
-export {EscPosRenderer, StarPrntRenderer, toPbm, toImageData};
+export {EscPosRenderer, StarPrntRenderer, toPbm, toPng, toImageData, stitch};

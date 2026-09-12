@@ -1,4 +1,5 @@
 import CodepageEncoder from '@point-of-sale/codepage-encoder';
+import Bitmap from '../bitmap.js';
 import Painter from '../painter.js';
 import codepageMappings from '../../generated/mapping.js';
 import printerProfiles from '../../generated/profiles.js';
@@ -65,6 +66,46 @@ const SIZE = Object.assign(Object.create(null), {
   0: 1, 1: 2, 2: 3, 3: 4, 4: 5, 5: 6,
   48: 1, 49: 2, 50: 3, 51: 4, 52: 5, 53: 6,
 });
+
+/* The symbologies of ESC b n1, by the value of n1. The ones that are not in
+   this table are the GS1 DataBar family, 10 to 13, which version 1 does not
+   render.
+
+   StarPRNT has no way to select a Code 128 code set, the encoder strips the
+   selection, so a Star Code 128 is encoded the way the automatic variant of
+   ESC/POS is: the printer picks the code sets */
+
+const SYMBOLOGIES = Object.assign(Object.create(null), {
+  0: 'upce',
+  1: 'upca',
+  2: 'ean8',
+  3: 'ean13',
+  4: 'code39',
+  5: 'itf',
+  6: 'code128-auto',
+  7: 'code93',
+  8: 'codabar',
+  9: 'gs1-128',
+});
+
+/* The width of the narrowest bar in dots, by the value of n3 of ESC b.
+
+   The Star documentation describes the three widths per symbology in tables of
+   narrow and wide element widths instead of in dots. Two, three and four dots
+   is the reading that makes a Star barcode the same size as the ESC/POS barcode
+   the encoder produces from the same receipt: the encoder writes its own width
+   option, 1 to 3, as n3 here and as GS w n plus one on ESC/POS */
+
+const MODULE_WIDTHS = Object.assign(Object.create(null), {1: 2, 2: 3, 3: 4});
+
+/* The error correction levels of the QR code commands */
+
+const ERROR_LEVELS = Object.assign(Object.create(null), {0: 'L', 1: 'M', 2: 'Q', 3: 'H'});
+
+/* What a printer starts a QR code with: model 2, three dot modules and the
+   lowest error correction level */
+
+const QRCODE_DEFAULTS = {model: 2, moduleSize: 3, errorLevel: 'L'};
 
 /* Pulse width of the drawer commands that do not carry one, in milliseconds.
    ESC BEL n1 n2 sets the width of BEL and FS, SUB and EM are fixed */
@@ -311,8 +352,6 @@ const UNKNOWN_ARGUMENTS = {
     0x2a: rasterArguments, /* raster mode group */
     0x31: 0, /* select 1/8 inch line spacing, legacy */
     0x44: nulTerminated, /* horizontal tab positions */
-    0x4b: bitImageArguments, /* bit image, single density */
-    0x4c: bitImageArguments, /* bit image, double density */
     0x51: 1, /* right margin */
     0x52: 1, /* international character set */
     0x57: 1, /* character expansion */
@@ -364,6 +403,7 @@ class StarPrntRenderer {
   #codepointCache;
   #pulse;
   #text;
+  #qrcode;
 
   /**
      * Create a renderer
@@ -468,6 +508,7 @@ class StarPrntRenderer {
   #initialize() {
     this.#painter.reset();
     this.#text = [];
+    this.#qrcode = Object.assign({data: new Uint8Array(0)}, QRCODE_DEFAULTS);
     this.#selectCodepage(null);
   }
 
@@ -638,9 +679,11 @@ class StarPrntRenderer {
         0x46: {args: 0, run: () => this.#painter.style({bold: false})},
         0x49: {args: 1, run: (a) => this.#painter.feed(a[0])}, /* feed n eighths of a millimetre, one dot each */
         0x4a: {args: 1, run: (a) => this.#painter.feed(a[0] * 2)}, /* feed n quarters of a millimetre, two dots each */
-        0x58: {args: columnImageArguments, run: null}, /* TODO column image, section 4 */
+        0x4b: {args: bitImageArguments, run: (a) => this.#bitImage(a, 2)}, /* bit image, normal density */
+        0x4c: {args: bitImageArguments, run: (a) => this.#bitImage(a, 1)}, /* bit image, fine density */
+        0x58: {args: columnImageArguments, run: (a) => this.#columnImage(a)},
         0x61: {args: 1, run: (a) => this.#painter.lineFeed(a[0])},
-        0x62: {args: barcodeArguments, run: null}, /* TODO barcode, section 4 */
+        0x62: {args: barcodeArguments, run: (a, consumed) => this.#drawBarcode(a, consumed)},
         0x64: {args: 1, run: (a) => this.#cut(a[0])},
         0x69: {args: 2, run: (a) => this.#size(a[0], a[1])},
         0x7a: {args: 1, run: (a) => this.#lineSpacing(a[0])},
@@ -650,8 +693,8 @@ class StarPrntRenderer {
         0x50: {args: 1, run: null}, /* print mode, the encoder flushes with it, no effect on paper */
         0x61: {args: 1, run: (a) => this.#align(a[0])},
         0x74: {args: 1, run: (a) => this.#selectCodepage(a[0])},
-        0x78: {args: pdf417Arguments, run: null}, /* TODO PDF417, section 4 */
-        0x79: {args: qrcodeArguments, run: null}, /* TODO QR code, section 4 */
+        0x78: {args: pdf417Arguments, run: (a, consumed) => this.#pdf417(a, consumed)},
+        0x79: {args: qrcodeArguments, run: (a) => this.#symbol(a)},
       },
 
       [GROUP_RS]: {
@@ -667,6 +710,162 @@ class StarPrntRenderer {
      */
   #unknown(consumed) {
     this.#painter.command({type: 'unknown', data: consumed.slice()});
+  }
+
+  /**
+     * ESC b n1 n2 n3 n4 d.. RS, a barcode. The GS1 DataBar symbologies are not
+     * rendered in version 1 and report an unknown command.
+     *
+     * @param  {Uint8Array}   args       The arguments of the command
+     * @param  {Uint8Array}   consumed   The whole command, for the unknown item
+     */
+  #drawBarcode(args, consumed) {
+    const symbology = SYMBOLOGIES[args[0]];
+
+    if (!symbology) {
+      this.#unknown(consumed);
+      return;
+    }
+
+    /* n2 is 1 for a barcode without text and 2 for one with the text below it,
+       which a Star printer draws in font A */
+
+    this.#painter.barcode({
+      symbology,
+      data: this.#ascii(args.subarray(4, args.length - 1)),
+      moduleWidth: MODULE_WIDTHS[args[2]] || MODULE_WIDTHS[1],
+      height: args[3] || 1,
+      hri: {position: args[1] === 2 || args[1] === 0x32 ? 'below' : 'none', font: 'A'},
+    });
+  }
+
+  /**
+     * ESC GS y .., the QR code group: S 0 n is the model, S 1 n the error
+     * correction level, S 2 n the size of a module in dots, D 1 m nL nH d..
+     * stores the data of the next symbol, and P prints it.
+     *
+     * The data stays stored until the next store, so printing twice prints the
+     * same symbol twice.
+     *
+     * @param  {Uint8Array}   args   The arguments of the command
+     */
+  #symbol(args) {
+    if (args[0] === 0x53 && args.length >= 3) {
+      if (args[1] === 0x30) {
+        this.#qrcode.model = args[2] === 1 ? 1 : 2;
+      }
+
+      if (args[1] === 0x31 && ERROR_LEVELS[args[2]]) {
+        this.#qrcode.errorLevel = ERROR_LEVELS[args[2]];
+      }
+
+      if (args[1] === 0x32) {
+        this.#qrcode.moduleSize = Math.min(8, Math.max(1, args[2]));
+      }
+
+      return;
+    }
+
+    if (args[0] === 0x44 && args.length >= 5) {
+      this.#qrcode.data = args.slice(5, 5 + args[3] + args[4] * 256);
+      return;
+    }
+
+    if (args[0] === 0x50) {
+      this.#painter.qrcode({
+        data: this.#qrcode.data,
+        moduleSize: this.#qrcode.moduleSize,
+        errorLevel: this.#qrcode.errorLevel,
+      });
+    }
+  }
+
+  /**
+     * ESC GS x .., the PDF417 group. Version 1 does not render PDF417: the
+     * parameters and the data are parsed and dropped, and the command that
+     * prints the symbol reports an unknown command, so that the driver knows
+     * something was left out.
+     *
+     * @param  {Uint8Array}   args       The arguments of the command
+     * @param  {Uint8Array}   consumed   The whole command, for the unknown item
+     */
+  #pdf417(args, consumed) {
+    if (args[0] === 0x50) {
+      this.#unknown(consumed);
+    }
+  }
+
+  /**
+     * ESC X nL nH d.., a column mode image: one strip of twenty four rows,
+     * three bytes per column, the most significant bit of the first byte at the
+     * top. The strip goes into the line that is being composed, and the LF CR
+     * behind the command commits it. The encoder sets the line spacing to the
+     * height of a strip with ESC 0, so that the strips of an image join up.
+     *
+     * @param  {Uint8Array}   args   The arguments of the command
+     */
+  #columnImage(args) {
+    this.#painter.strip(this.#strip(args.subarray(2), args[0] + args[1] * 256, 3));
+  }
+
+  /**
+     * ESC K and ESC L, the eight dot bit images of Star Line Mode: one byte per
+     * column, the most significant bit at the top, and the length of the data
+     * in two bytes. The single density image prints every column twice, so that
+     * it keeps its proportions at half the resolution.
+     *
+     * The encoder emits neither command, it uses ESC X for every image.
+     *
+     * @param  {Uint8Array}   args    The arguments of the command
+     * @param  {number}       repeat  How often a column is printed
+     */
+  #bitImage(args, repeat) {
+    const columns = args[0] + args[1] * 256;
+    const strip = this.#strip(args.subarray(2), columns, 1);
+
+    this.#painter.strip(Bitmap.scale(strip, repeat, 1));
+  }
+
+  /**
+     * A strip of a column mode image
+     *
+     * @param  {Uint8Array}   data      The columns
+     * @param  {number}       columns   Number of columns
+     * @param  {number}       bytes     Number of bytes per column
+     * @return {object}                 The strip, eight rows per byte
+     */
+  #strip(data, columns, bytes) {
+    const strip = Bitmap.create(columns, bytes * 8);
+
+    for (let column = 0; column < columns; column++) {
+      for (let byte = 0; byte < bytes; byte++) {
+        const value = data[column * bytes + byte];
+
+        for (let bit = 0; bit < 8; bit++) {
+          if (value & (0x80 >> bit)) {
+            Bitmap.setPixel(strip, column, byte * 8 + bit, 1);
+          }
+        }
+      }
+    }
+
+    return strip;
+  }
+
+  /**
+     * Decode the bytes of a barcode, which a printer reads as ASCII
+     *
+     * @param  {Uint8Array}   bytes   The bytes
+     * @return {string}               The text
+     */
+  #ascii(bytes) {
+    let result = '';
+
+    for (const byte of bytes) {
+      result += String.fromCharCode(byte);
+    }
+
+    return result;
   }
 
   /**

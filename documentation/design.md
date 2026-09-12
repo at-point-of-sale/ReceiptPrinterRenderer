@@ -108,10 +108,12 @@ src/
   bitmap.js                     the 1-bit image type: create, blit, pack rows, split
   font.js                       glyph lookup, fallback glyph, scaling
   symbologies/
+    index.js                    the registry, symbology name to generator
+    pattern.js                  modules, module widths and narrow and wide elements
     qrcode.js                   wrapper around lean-qr
     code128.js ean.js upc.js code39.js itf.js codabar.js code93.js
   formats/
-    image-data.js pbm.js png.js
+    image-data.js pbm.js png.js stitch.js
 data/
   fonts/                        BDF sources and their licence
   mappings/                     codepage mappings per language, copied from ReceiptPrinterEncoder
@@ -253,21 +255,22 @@ This is the complete set of commands ReceiptPrinterEncoder version 3 emits for t
 
 | Bytes | Command | Rendering |
 |---|---|---|
-| `GS h n` | barcode height | Stored for the next barcode. |
-| `GS w n` | barcode module width | Stored, 2 to 6, one module is `n` dots. |
-| `GS H n` | HRI position | 0 none, 2 below. Text is drawn in font B under the bars. |
-| `GS k m n d1..dn` | barcode, function B | Symbology `m`, `n` data bytes. See the symbology table below. |
+| `GS h n` | barcode height | Stored for the next barcode, the height of the bars in dots. |
+| `GS w n` | barcode module width | Stored, one module is `n` dots. The specification defines 2 to 6, the encoder sends 1 for the GS1 symbologies, so 1 to 6 is accepted. |
+| `GS H n` | HRI position | 0 none, 1 above, 2 below, 3 both. The encoder sends 0 or 2. |
+| `GS f n` | HRI font | 0 font A, 1 font B. The default is font A, which is what the ESC/POS reference says and what a printer does; the encoder never sends this command. |
+| `GS k m n d1..dn` | barcode, function B | Symbology `m`, `n` data bytes. See the symbology table below. Bars that are wider than the print area are not printed at all, as Epson firmware does. |
 | `GS k m d1..dk NUL` | barcode, function A | Same, NUL terminated. The encoder uses function A for `m` < 65. |
 | `GS ( k pL pH 49 65 n1 n2` | QR model | 49 model 1, 50 model 2. Model 1 is rendered as model 2. |
 | `GS ( k pL pH 49 67 n` | QR module size | `n` dots per module. |
 | `GS ( k pL pH 49 69 n` | QR error correction | 48 L, 49 M, 50 Q, 51 H. |
 | `GS ( k pL pH 49 80 48 d..` | QR store data | Data for the next print. |
-| `GS ( k pL pH 49 81 48` | QR print | Draw the symbol as a block, centred according to the alignment. |
+| `GS ( k pL pH 49 81 48` | QR print | Draw the symbol as a block, centred according to the alignment. Nothing is printed when no data was stored or when the symbol is wider than the print area. |
 | `GS ( k pL pH 48 65..70 ..` | PDF417 parameters | Parsed and stored. |
 | `GS ( k pL pH 48 80 48 d..` | PDF417 store data | Parsed. |
-| `GS ( k pL pH 48 81 48` | PDF417 print | Not rendered in version 1. Produces an `unknown` item, when supported, and nothing on paper. |
-| `ESC * 33 nL nH d..` | column image, 24 dot double density | One strip of 24 rows, three bytes per column, followed by `LF` in the stream. Blitted at the current position. With line spacing at 24 dots the strips join seamlessly. |
-| `GS v 0 m xL xH yL yH d..` | raster image | `xL + xH * 256` bytes per row, `yL + yH * 256` rows. Blitted as a block, centred according to the alignment. |
+| `GS ( k pL pH 48 81 48` | PDF417 print | Not rendered in version 1. Produces an `unknown` item, when supported, and nothing on paper. The other selectors of the group, Maxicode, the two dimensional GS1 DataBar and the composite symbologies, do the same. |
+| `ESC * m nL nH d..` | column image | `m` is 0 and 1 for the eight dot modes, one byte per column, and 32 and 33 for the 24 dot modes, three bytes per column, the most significant bit of the first byte at the top. The single density modes, 0 and 32, print every column twice. `nL + nH * 256` columns, followed by `LF` in the stream. Blitted at the current position, with line spacing at 24 dots the strips join seamlessly. The encoder only emits `ESC * 33`. |
+| `GS v 0 m xL xH yL yH d..` | raster image | `xL + xH * 256` bytes per row, `yL + yH * 256` rows. `m` is 0 normal, 1 double width, 2 double height and 3 both, by repeating dots. Blitted as a block, aligned according to the alignment. |
 | `GS V n` | cut | 0 full, 1 partial. Also accepts 65 and 66 with a feed argument, as a common variant. |
 | `ESC p m t1 t2` | pulse | Drawer `m`, on `t1 * 2` ms, off `t2 * 2` ms. |
 
@@ -278,7 +281,7 @@ The values the encoder can emit and what the renderer does with them.
 | Value | Symbology | Version 1 |
 |---|---|---|
 | 0 | UPC-A | rendered |
-| 1 | UPC-E | rendered |
+| 1 | UPC-E | rendered, from six digits, from the number system and the check digit around them, or from the eleven or twelve digits of a UPC-A that has a zero suppressed form |
 | 2 | EAN-13 | rendered |
 | 3 | EAN-8 | rendered |
 | 4 | Code 39 | rendered |
@@ -290,7 +293,11 @@ The values the encoder can emit and what the renderer does with them.
 | 75 to 78 | GS1 DataBar | not rendered, `unknown` item |
 | 79 | Code 128 auto | rendered, the renderer picks the code sets |
 
+Function A, `m` below 65, and function B, `m` of 65 to 71, select the same symbology and render the same.
+
 Check digits are computed when the data lacks them, and validated when present, the way Epson firmware does. Invalid data prints nothing, which also matches the firmware.
+
+The human readable text is one line of cells of the HRI font, centred over the bars, and the block is the bars plus that line, or two of them when the text is printed above and below. Barcodes carry no quiet zone, a printer does not add one either.
 
 <br>
 
@@ -329,16 +336,17 @@ The encoder emits nothing for italic on StarPRNT, so there is nothing to ignore.
 
 | Bytes | Command | Rendering |
 |---|---|---|
-| `ESC b n1 n2 n3 n4 d.. RS` | barcode | Symbology `n1`, HRI `n2`, module width `n3` 1 to 3, height `n4`. Star symbology numbers differ from ESC/POS and map onto the same generators. |
+| `ESC b n1 n2 n3 n4 d.. RS` | barcode | Symbology `n1`, HRI `n2`, 1 without text and 2 with the text below the bars in font A, module width `n3` 1 to 3, which is 2, 3 and 4 dots, height `n4` in dots. Star symbology numbers differ from ESC/POS and map onto the same generators, and Star Code 128 has no code set selection, so it is drawn the way ESC/POS symbology 79 is. |
 | `ESC GS y S 0 n` | QR model | 1 or 2, rendered as model 2. |
 | `ESC GS y S 2 n` | QR module size | `n` dots per module. |
 | `ESC GS y S 1 n` | QR error correction | 0 L, 1 M, 2 Q, 3 H. |
 | `ESC GS y D 1 NUL nL nH d..` | QR store data | Data for the next print. |
-| `ESC GS y P` | QR print | Draw the symbol as a block. |
+| `ESC GS y P` | QR print | Draw the symbol as a block, under the same rules as the ESC/POS one. |
 | `ESC GS x S 0 ..`, `S 1`, `S 2`, `S 3` | PDF417 parameters | Parsed and stored. |
 | `ESC GS x D nL nH d..` | PDF417 store data | Parsed. No function byte, unlike the QR command. |
 | `ESC GS x P` | PDF417 print | Not rendered in version 1, see the ESC/POS table. |
 | `ESC X nL nH d.. LF CR` | column image, 24 dots | One strip of 24 rows, three bytes per column, with the line spacing at 24 dots the strips join. |
+| `ESC K nL nH d..`, `ESC L nL nH d..` | bit image, eight dots | One strip of eight rows, one byte per column. The single density image of `ESC K` prints every column twice. The encoder emits neither, it uses `ESC X` for every image. |
 | `ESC d n` | cut | 0 full, 1 partial, 2 full with feed, 3 partial with feed. |
 | `ESC BEL n1 n2` then `BEL` or `SUB` | pulse | `n1` on time and `n2` off time in units of 10 ms, for the first drawer only. `BEL` and `FS` pulse drawer 1 with that width, `SUB` and `EM` pulse drawer 2 for the fixed 200 ms on and 200 ms off of the specification. |
 
@@ -396,7 +404,8 @@ Separate named exports, so that a driver that only needs the items does not pull
 - **Fixtures.** Byte streams produced by the encoder's own commands, stored next to the expected PBM image. PBM is plain enough to diff, and a test that fails prints the actual and expected rows as ASCII art in the report.
 - **Coverage.** One fixture per encoder feature: every style, sizes, fonts, alignment, tables, boxes, rules, both image modes, every rendered barcode symbology, QR codes at every size and error level, cut and pulse, and the fallbacks.
 - **Hardware truth.** A handful of fixtures are checked against real printouts once, on an Epson printer that is available for this, so that the renderer and the encoder cannot share a wrong reading of the specification. Those are marked in the fixture directory.
-- **Parity.** Every fixture receipt is encoded in both languages. The two renderings must be identical, except for the known differences in line spacing and font B cell height, which the test normalises by using the same profile for both. This is the main reason to build both renderers together.
+- **Parity.** Every fixture receipt is encoded in both languages. The two renderings must be identical, except for the known differences in line spacing and font B cell height, which the test normalises by using the same profile for both. This is the main reason to build both renderers together. Where a receipt cannot be identical, because the encoder or the printer makes a difference the renderer has to be faithful to, the fixture is in the exception list at the top of the parity test with its reason.
+- **References.** The one dimensional symbologies are checked against JsBarcode, a dev dependency, which encodes the same symbologies to the same modules without a canvas, and the QR codes are read back with jsQR, which decodes the rendered paper the way a phone reads it. Both are dev dependencies of the test suite alone.
 - **No canvas.** Nothing in the test suite needs the native canvas module.
 
 <br>
