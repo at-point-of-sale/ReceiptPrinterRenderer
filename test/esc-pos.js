@@ -787,17 +787,89 @@ describe('EscPosRenderer', function() {
       assert.deepEqual(Array.from(items[0].data), [GS, 0x28, 0x6b, 3, 0, 50, 80, 48]);
     });
 
-    it('should report the print command of a PDF417 as unknown', function() {
+    it('should draw a PDF417 as a block', function() {
       const items = render(stream(
           ESC, '@',
-          GS, '(', 'k', [4, 0], [48, 65, 0, 3],
-          GS, '(', 'k', [3, 0], [48, 67, 3],
-          GS, '(', 'k', [7, 0], [48, 80, 48], 'test',
+          GS, '(', 'k', [3, 0], [48, 65, 3], /* three data columns */
+          GS, '(', 'k', [3, 0], [48, 66, 0], /* the rows follow from the data */
+          GS, '(', 'k', [3, 0], [48, 67, 3], /* three dot modules */
+          GS, '(', 'k', [3, 0], [48, 68, 3], /* rows of three modules */
+          GS, '(', 'k', [4, 0], [48, 69, 48, 50], /* error correction level 2 */
+          GS, '(', 'k', [14, 0], [48, 80, 48], 'HELLO WORLD',
           GS, '(', 'k', [3, 0], [48, 81, 48],
-      ), {commands: ['unknown']});
+      ));
 
-      assert.deepEqual(items.map((item) => item.type), ['unknown']);
-      assert.deepEqual(Array.from(items[0].data), [GS, 0x28, 0x6b, 3, 0, 48, 81, 48]);
+      /* Twelve codewords at level 2 fill five rows of three columns, and a row
+         is the start pattern, both row indicators, the data and the stop
+         pattern, 120 modules of three dots */
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 5 * 3 * 3);
+
+      const paper = stitch(items, {width: WIDTH});
+
+      assert.equal(ink(paper, 0, items[0].height).max - ink(paper, 0, items[0].height).min + 1, 120 * 3);
+    });
+
+    it('should draw the truncated form without the stop pattern', function() {
+      const symbol = (truncated) => render(stream(
+          ESC, '@',
+          GS, '(', 'k', [3, 0], [48, 65, 3],
+          GS, '(', 'k', [3, 0], [48, 67, 3],
+          GS, '(', 'k', [3, 0], [48, 70, truncated],
+          GS, '(', 'k', [14, 0], [48, 80, 48], 'HELLO WORLD',
+          GS, '(', 'k', [3, 0], [48, 81, 48],
+      ));
+
+      const width = (items) => {
+        const paper = stitch(items, {width: WIDTH});
+        const bars = ink(paper, 0, items[0].height);
+
+        return bars.max - bars.min + 1;
+      };
+
+      /* The truncated symbol loses the right row indicator and the stop
+         pattern, and keeps the single bar that closes the row */
+
+      assert.equal(width(symbol(0)), 120 * 3);
+      assert.equal(width(symbol(1)), 86 * 3);
+    });
+
+    it('should print nothing when a PDF417 has no data', function() {
+      const items = render(stream(
+          ESC, '@',
+          GS, '(', 'k', [3, 0], [48, 67, 3],
+          GS, '(', 'k', [3, 0], [48, 81, 48],
+      ));
+
+      assert.deepEqual(items, []);
+    });
+
+    it('should keep the data of a PDF417 until the next store', function() {
+      const items = render(stream(
+          ESC, '@',
+          GS, '(', 'k', [3, 0], [48, 65, 3],
+          GS, '(', 'k', [3, 0], [48, 67, 3],
+          GS, '(', 'k', [4, 0], [48, 69, 48, 50],
+          GS, '(', 'k', [14, 0], [48, 80, 48], 'HELLO WORLD',
+          GS, '(', 'k', [3, 0], [48, 81, 48],
+          GS, '(', 'k', [3, 0], [48, 81, 48],
+      ));
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 5 * 3 * 3 * 2);
+    });
+
+    it('should print nothing when a PDF417 is wider than the paper', function() {
+      const items = render(stream(
+          ESC, '@',
+          GS, '(', 'k', [3, 0], [48, 65, 8],
+          GS, '(', 'k', [3, 0], [48, 67, 8],
+          GS, '(', 'k', [14, 0], [48, 80, 48], 'HELLO WORLD',
+          GS, '(', 'k', [3, 0], [48, 81, 48],
+      ), {width: 384});
+
+      assert.deepEqual(items, []);
     });
 
     it('should draw a column image as a strip in the line', function() {

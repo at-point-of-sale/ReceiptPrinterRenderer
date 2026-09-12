@@ -444,6 +444,81 @@ describe('Painter', function() {
 
       assert.deepEqual(paper.end(), []);
     });
+
+    it('should draw a PDF417 as a block of its own', function() {
+      const paper = painter();
+
+      paper.pdf417({
+        data: new TextEncoder().encode('RENDER'),
+        columns: 1,
+        moduleWidth: 1,
+        rowHeight: 3,
+        errorLevel: 2,
+      });
+
+      const items = paper.end();
+
+      /* Twelve codewords in one column, and a row is three modules of one dot */
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 12 * 3);
+    });
+
+    it('should align a PDF417 the way the current alignment says', function() {
+      const symbol = (align) => {
+        const paper = painter();
+
+        paper.align(align);
+        paper.pdf417({
+          data: new TextEncoder().encode('RENDER'),
+          columns: 1,
+          moduleWidth: 1,
+          rowHeight: 3,
+          errorLevel: 2,
+          truncated: true,
+        });
+
+        return stitch(paper.end(), {width: WIDTH});
+      };
+
+      /* A truncated symbol of one column is 17 * 3 + 1 dots wide and every row
+         of it starts with the eight bars of the start pattern */
+
+      assert.equal(Bitmap.getPixel(symbol('left'), 0, 0), 1);
+      assert.equal(Bitmap.getPixel(symbol('right'), 0, 0), 0);
+      assert.equal(Bitmap.getPixel(symbol('right'), WIDTH - 52, 0), 1);
+      assert.equal(Bitmap.getPixel(symbol('center'), (WIDTH - 52) >> 1, 0), 1);
+    });
+
+    it('should draw nothing for a PDF417 that is wider than the print area', function() {
+      const paper = painter();
+
+      paper.pdf417({data: new TextEncoder().encode('RENDER'), columns: 4, moduleWidth: 2, rowHeight: 3});
+
+      assert.deepEqual(paper.end(), []);
+    });
+
+    it('should draw nothing when there is no data for a PDF417', function() {
+      const paper = painter();
+
+      paper.pdf417({data: new Uint8Array(0), moduleWidth: 1, rowHeight: 3});
+
+      assert.deepEqual(paper.end(), []);
+    });
+
+    it('should draw nothing for data that does not fit in a PDF417', function() {
+      const paper = painter();
+
+      paper.pdf417({
+        data: new Uint8Array(4000).fill(0x41),
+        columns: 1,
+        moduleWidth: 1,
+        rowHeight: 3,
+        errorLevel: 2,
+      });
+
+      assert.deepEqual(paper.end(), []);
+    });
   });
 
   describe('blank rows', function() {

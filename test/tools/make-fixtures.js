@@ -284,6 +284,26 @@ const receipts = {
       .qrcode('https://example.com/order/9912', {model: 2, size: 6, errorlevel: 'h'})
       .align('left'),
 
+  /* PDF417, at a size the printer picks and at a fixed number of columns and
+     error correction level. Both languages carry the same parameters, so both
+     print the same symbol */
+
+  'pdf417': (encoder) => encoder
+      .align('center')
+      .pdf417('https://example.com/order/9912', {width: 3, height: 3, columns: 0, rows: 0, errorlevel: 2})
+      .pdf417('RENDER 9912', {width: 3, height: 3, columns: 4, rows: 0, errorlevel: 4})
+      .align('left'),
+
+  /* The truncated form of a PDF417, which drops the right row indicator and the
+     stop pattern. Only ESC/POS can ask for it, the StarPRNT command set has no
+     command for the form of the symbol, so the two languages differ here, see
+     the exceptions of test/parity.js */
+
+  'pdf417-truncated': (encoder) => encoder
+      .align('center')
+      .pdf417('RENDER 9912', {width: 3, height: 3, columns: 4, rows: 0, errorlevel: 2, truncated: true})
+      .align('left'),
+
   /* One receipt per symbology. The width of a module is two on both languages
      for every symbology but ITF, where the ESC/POS encoding doubles it, so that
      one uses width one and comes out at the same size */

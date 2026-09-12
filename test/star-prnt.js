@@ -828,21 +828,91 @@ describe('StarPrntRenderer', function() {
       assert.equal(items[0].height, 21 * 3 * 2);
     });
 
-    it('should report the print command of a PDF417 as unknown', function() {
+    it('should draw a PDF417 as a block', function() {
       const items = render(stream(
           ESC, '@',
-          ESC, GS, 'xS', [0x30, 0x01, 0, 0],
-          ESC, GS, 'xS', [0x32, 0x03],
-          ESC, GS, 'xD', [4, 0], 'test',
+          ESC, GS, 'xS', [0x30, 0x01, 0x00, 0x03], /* the rows follow, three columns */
+          ESC, GS, 'xS', [0x31, 0x02], /* error correction level 2 */
+          ESC, GS, 'xS', [0x32, 0x03], /* three dot modules */
+          ESC, GS, 'xS', [0x33, 0x03], /* rows of three modules */
+          ESC, GS, 'xD', [11, 0], 'HELLO WORLD',
           ESC, GS, 'xP',
-      ), {commands: ['unknown']});
+      ));
 
-      assert.deepEqual(
-          items.map((item) => item.type),
-          ['unknown'],
-      );
+      /* The same symbol the ESC/POS commands print: five rows of three columns,
+         120 modules of three dots wide */
 
-      assert.deepEqual(Array.from(items[0].data), [ESC, GS, 0x78, 0x50]);
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 5 * 3 * 3);
+
+      const paper = stitch(items, {width: WIDTH});
+
+      assert.equal(ink(paper, 0, items[0].height).max - ink(paper, 0, items[0].height).min + 1, 120 * 3);
+    });
+
+    it('should leave the size to the printer when the size command says so', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, GS, 'xS', [0x30, 0x00, 0x0c, 0x06], /* the rows and columns behind it are not used */
+          ESC, GS, 'xS', [0x31, 0x02],
+          ESC, GS, 'xS', [0x32, 0x03],
+          ESC, GS, 'xS', [0x33, 0x03],
+          ESC, GS, 'xD', [11, 0], 'HELLO WORLD',
+          ESC, GS, 'xP',
+      ));
+
+      /* Fifteen codewords in the shape the automatic size picks, which is one
+         column of fifteen rows */
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 15 * 3 * 3);
+    });
+
+    it('should leave the size alone when the size command does not carry one', function() {
+      const symbol = (n1) => render(stream(
+          ESC, '@',
+          ESC, GS, 'xS', [0x30, 0x01, 0x00, 0x03], /* three columns */
+          ESC, GS, 'xS', [0x30, n1, 0x00, 0x06], /* six columns, if n1 is a value of the command */
+          ESC, GS, 'xS', [0x31, 0x02],
+          ESC, GS, 'xS', [0x32, 0x03],
+          ESC, GS, 'xS', [0x33, 0x03],
+          ESC, GS, 'xD', [11, 0], 'HELLO WORLD',
+          ESC, GS, 'xP',
+      ));
+
+      /* Fifteen codewords are three rows of six columns and five rows of three,
+         so the height says which size the printer used. Only 0 and 1 are values
+         of n1, anything else leaves the size as it was. */
+
+      assert.equal(symbol(1)[0].height, 3 * 3 * 3);
+      assert.equal(symbol(2)[0].height, 5 * 3 * 3);
+      assert.equal(symbol(0xff)[0].height, 5 * 3 * 3);
+    });
+
+    it('should print nothing when a PDF417 has no data', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, GS, 'xS', [0x32, 0x03],
+          ESC, GS, 'xP',
+      ));
+
+      assert.deepEqual(items, []);
+    });
+
+    it('should keep the data of a PDF417 until the next store', function() {
+      const items = render(stream(
+          ESC, '@',
+          ESC, GS, 'xS', [0x30, 0x01, 0x00, 0x03],
+          ESC, GS, 'xS', [0x31, 0x02],
+          ESC, GS, 'xS', [0x32, 0x03],
+          ESC, GS, 'xS', [0x33, 0x03],
+          ESC, GS, 'xD', [11, 0], 'HELLO WORLD',
+          ESC, GS, 'xP',
+          ESC, GS, 'xP',
+      ));
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 5 * 3 * 3 * 2);
     });
 
     it('should draw a column image as a strip in the line', function() {

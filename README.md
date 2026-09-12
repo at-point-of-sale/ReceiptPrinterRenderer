@@ -49,7 +49,7 @@ And there are four helpers to do something with the images:
 - `toImageData(bitmap)` returns an `ImageData`, for drawing on a canvas.
 - `stitch(items, options)` joins the items of a render into one bitmap, for previews.
 
-Text is drawn with a built in bitmap font, [Iosevka](https://github.com/be5invis/Iosevka) Medium rasterized into the 12 by 24 cell of font A and the 8 by 16 cell of font B, with the box drawing characters drawn on the dot grid so that boxes and rules close.
+Text is drawn with a built in bitmap font, [Iosevka](https://github.com/be5invis/Iosevka) Medium rasterized into the 12 by 24 cell of font A and the 8 by 16 cell of font B, with the box drawing characters drawn on the dot grid so that boxes and rules close. Barcodes are drawn by this library as well: the one-dimensional symbologies, QR codes and PDF417, including its truncated form.
 
 The renderer is normally not used directly, but constructed by a printer driver such as [WebUSBReceiptPrinter](https://github.com/NielsLeenheer/WebUSBReceiptPrinter), which knows the language, the width and the commands of the printer and passes the images on in the format the printer expects. The application hands the driver the class, or a function that imports it when a graphics printer turns up. Applications keep using ReceiptPrinterEncoder exactly as they do for printers with native ESC/POS support.
 

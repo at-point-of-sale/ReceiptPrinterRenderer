@@ -74,6 +74,22 @@ const BARCODE_DEFAULTS = {height: 162, moduleWidth: 3, position: 'none', font: '
 
 const QRCODE_DEFAULTS = {model: 2, moduleSize: 3, errorLevel: 'L'};
 
+/* And for a PDF417: a size the printer picks, three dot modules, rows of three
+   modules, the error correction of the ratio mode at one check codeword per ten
+   data codewords, and the standard rather than the truncated form, which are
+   the defaults of the ESC/POS reference. The encoder sets every one of them
+   before it prints, so these are only reached by hand written streams */
+
+const PDF417_DEFAULTS = {
+  columns: 0,
+  rows: 0,
+  moduleWidth: 3,
+  rowHeight: 3,
+  errorLevel: 'auto',
+  errorRatio: 1,
+  truncated: false,
+};
+
 /**
  * The 256 entry table of a codepage, or null when the codepage encoder does not
  * implement it. Some of the mappings name codepages it does not have.
@@ -373,6 +389,7 @@ class EscPosRenderer {
   #text;
   #barcode;
   #qrcode;
+  #pdf417;
 
   /**
      * Create a renderer
@@ -471,6 +488,7 @@ class EscPosRenderer {
     this.#text = [];
     this.#barcode = Object.assign({}, BARCODE_DEFAULTS);
     this.#qrcode = Object.assign({data: new Uint8Array(0)}, QRCODE_DEFAULTS);
+    this.#pdf417 = Object.assign({data: new Uint8Array(0)}, PDF417_DEFAULTS);
     this.#selectCodepage(null);
   }
 
@@ -657,10 +675,6 @@ class EscPosRenderer {
      * 49 for QR codes and 48 for PDF417, and the second one which command of
      * that symbology it is.
      *
-     * PDF417 is not rendered in version 1: its parameters and its data are
-     * parsed and dropped, and the command that prints the symbol reports an
-     * unknown command, so that the driver knows something was left out.
-     *
      * @param  {Uint8Array}   args       The arguments behind the length bytes
      * @param  {Uint8Array}   consumed   The whole command, for the unknown item
      */
@@ -673,12 +687,7 @@ class EscPosRenderer {
     const [type, command] = args;
 
     if (type === 0x30) {
-      /* PDF417: 65 to 70 are the parameters, 80 stores the data and 81 prints */
-
-      if (command === 0x51) {
-        this.#unknown(consumed);
-      }
-
+      this.#pdf417Symbol(command, args);
       return;
     }
 
@@ -716,6 +725,84 @@ class EscPosRenderer {
         data: this.#qrcode.data,
         moduleSize: this.#qrcode.moduleSize,
         errorLevel: this.#qrcode.errorLevel,
+      });
+    }
+  }
+
+  /**
+     * GS ( k with the PDF417 selector, 48: 65 to 70 set the parameters of the
+     * next symbol, 80 stores its data and 81 prints it.
+     *
+     * A parameter outside the range of its command is ignored and leaves the
+     * value as it was, the way an unknown font or alignment does.
+     *
+     * @param  {number}       command   The function byte of the command
+     * @param  {Uint8Array}   args      The arguments behind the length bytes
+     */
+  #pdf417Symbol(command, args) {
+    /* fn 65, the number of data columns, 1 to 30, or 0 for a number the printer
+       picks, and fn 66, the number of rows, 3 to 90, or 0 for the same */
+
+    if (command === 0x41 && args.length >= 3 && (args[2] === 0 || (args[2] >= 1 && args[2] <= 30))) {
+      this.#pdf417.columns = args[2];
+    }
+
+    if (command === 0x42 && args.length >= 3 && (args[2] === 0 || (args[2] >= 3 && args[2] <= 90))) {
+      this.#pdf417.rows = args[2];
+    }
+
+    /* fn 67, the width of a module in dots, and fn 68, the height of a row as
+       a multiple of that width */
+
+    if (command === 0x43 && args.length >= 3 && args[2] >= 2 && args[2] <= 8) {
+      this.#pdf417.moduleWidth = args[2];
+    }
+
+    if (command === 0x44 && args.length >= 3 && args[2] >= 2 && args[2] <= 8) {
+      this.#pdf417.rowHeight = args[2];
+    }
+
+    /* fn 69, the error correction. With m of 48 the level is the digit behind
+       it, 0 to 8. With m of 49 the command asks for a ratio of check codewords
+       to data codewords instead, n tenths of the data, and the level that comes
+       closest to it can only be picked once the number of codewords is known,
+       so the ratio is passed on and the symbology resolves it. */
+
+    if (command === 0x45 && args.length >= 4) {
+      if (args[2] === 0x30 && args[3] >= 0x30 && args[3] <= 0x38) {
+        this.#pdf417.errorLevel = args[3] - 0x30;
+        this.#pdf417.errorRatio = 0;
+      }
+
+      if (args[2] === 0x31 && args[3] >= 1 && args[3] <= 40) {
+        this.#pdf417.errorLevel = 'auto';
+        this.#pdf417.errorRatio = args[3];
+      }
+    }
+
+    /* fn 70, the form of the symbol: 0 standard, 1 truncated */
+
+    if (command === 0x46 && args.length >= 3 && (args[2] === 0 || args[2] === 1)) {
+      this.#pdf417.truncated = args[2] === 1;
+    }
+
+    /* The data of the next symbol, which stays stored until the next store, so
+       printing twice prints the same symbol twice */
+
+    if (command === 0x50 && args.length >= 3) {
+      this.#pdf417.data = args.slice(3);
+    }
+
+    if (command === 0x51) {
+      this.#painter.pdf417({
+        data: this.#pdf417.data,
+        columns: this.#pdf417.columns,
+        rows: this.#pdf417.rows,
+        moduleWidth: this.#pdf417.moduleWidth,
+        rowHeight: this.#pdf417.rowHeight,
+        errorLevel: this.#pdf417.errorLevel,
+        errorRatio: this.#pdf417.errorRatio,
+        truncated: this.#pdf417.truncated,
       });
     }
   }

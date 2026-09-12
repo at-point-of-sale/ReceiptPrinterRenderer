@@ -219,6 +219,35 @@ Acceptance:
 - The existing renderers, their options and their static `language` property are unchanged.
 - Version 0.2.0.
 
+## Section 11: PDF417
+
+The renderers parsed the PDF417 commands of both languages and reported the
+print command as an `unknown` item. This section renders the symbology.
+
+Deliverables:
+
+- `src/symbologies/pdf417.js`: the complete symbology of ISO/IEC 15438. The
+  three compaction modes with automatic mode selection, Reed-Solomon check
+  codewords for levels 0 to 8 over GF(929), the length descriptor and the
+  padding, the columns and rows, the row indicators, and the symbol characters
+  of the three clusters. `encode(data, options)` returns the modules of the
+  symbol, or null when the data does not fit.
+- The symbol characters in `data/pdf417/clusters.txt`, packed into
+  `generated/pdf417.js` by `tools/generate.js`.
+- The parameters, the data and the print command in both parsers, and
+  `painter.pdf417()`, which draws the symbol as a block, aligned.
+- `test/pdf417.js`: the symbols are read back with the PDF417 reader of ZXing
+  and compared module for module with bwip-js, both new dev dependencies.
+- Fixtures `pdf417` and `pdf417-truncated` in both languages, the parity test
+  extended, and the design document, the usage document and the README follow.
+
+Acceptance:
+
+- `npm test` passes, `npm run build` is clean, `npm run test:types` passes.
+- Every data set decodes back to what was encoded, at several error correction
+  levels, fixed and automatic sizes, and in the truncated form.
+- Version 0.3.0.
+
 ## Notes per section
 
 Filled in during implementation.
@@ -381,7 +410,8 @@ Blocks:
   dropped, and the command that prints the symbol reports an `unknown` item with
   its bytes: `GS ( k 48 81 48` and `ESC GS x P` for PDF417, and the whole
   `GS k m` or `ESC b n1 ..` command for the DataBar symbologies, since those
-  print in one command. Nothing lands on the paper.
+  print in one command. Nothing lands on the paper. PDF417 is rendered from
+  [section 11](#section-11-pdf417) on, the DataBar family still is not.
 - **QR codes through lean-qr**, in the byte mode of the specification, with the
   version left to the library, which picks the smallest one the data fits in.
   The error correction level is pinned with both `minCorrectionLevel` and
@@ -1280,3 +1310,138 @@ Acceptance:
 
 - `npm test` 750 passing, `npm run build` clean, `npm run test:types` and
   `npm run test:umd` pass. Version 0.2.0, nothing published, nothing committed.
+
+
+### Section 11
+
+Implemented on 2026-09-12. Files: `src/symbologies/pdf417.js`,
+`data/pdf417/clusters.txt`, `generated/pdf417.js`, `tools/generate.js`,
+`src/painter.js`, `src/renderers/esc-pos.js`, `src/renderers/star-prnt.js`,
+`test/pdf417.js`, `test/painter.js`, `test/esc-pos.js`, `test/star-prnt.js`,
+`test/parity.js`, `test/tools/make-fixtures.js`, the `pdf417` and
+`pdf417-truncated` fixtures in both languages, `documentation/design.md`,
+`documentation/usage.md`, `README.md`, `package.json`.
+
+The symbology:
+
+- **The symbol characters are data, everything else is computed.** The 2787
+  patterns of the three clusters are a table of the specification that no
+  formula produces, so they live in `data/pdf417/clusters.txt` and
+  `tools/generate.js` packs them into `generated/pdf417.js`, the way the
+  codepage mappings and the profiles are packed. The copy came from BWIPP, which
+  is MIT licensed, and `test/pdf417.js` checks every entry against the
+  structural rules of the specification, that they are unique, and that each
+  sits in the cluster its position in the table claims. The generator
+  polynomials of the error correction are not pasted: they are the product of
+  `(x - 3^i)` over GF(929) and are computed the first time a level is used,
+  which is a dozen lines instead of nine tables.
+- **Compaction.** A run of thirteen digits or more is numeric compaction, a run
+  of five characters or more that the text tables hold is text compaction, and
+  everything else is byte compaction, which is the rule of the reference
+  encoders. A symbol starts in text compaction in the alpha sub mode, so text
+  needs no latch in front of it. Byte compaction uses the two latches the
+  specification defines, 924 for a run that is a whole number of six byte
+  groups and 901 for one that is not, and no byte shift, 913: a single byte run
+  therefore costs one codeword more than it could, and every decoder reads it
+  the same.
+- **Sub modes.** The latch and shift tables are the ones of the specification.
+  A character that the current sub mode does not have is shifted in when the
+  character behind it is back in the current sub mode, and latched to otherwise,
+  picking the cheapest latch of the sub modes that hold the character. That is a
+  heuristic, not an optimum: for text that is heavy with punctuation bwip-js
+  finds a sequence one codeword shorter now and then. The symbols are the same
+  size in every other case that was compared.
+- **Leftover capacity is padding.** Where the data does not fill the symbol the
+  encoder pads with 900, as the specification and the reference encoders do.
+  bwip-js spends the room on check codewords beyond the level instead, which is
+  why the module for module comparison in the test uses sizes that the data
+  fills exactly; the readers accept both.
+- **A symbol never has fewer than three data codewords.** One codeword of data
+  and the length descriptor fill the data area exactly, with no room for the
+  padding codeword the examples of the specification always leave, and readers
+  refuse the result: ZXing finds no symbol at all in one, at any size and any
+  error correction level, and bwip-js never produces one. One codeword is one or
+  two characters, which a receipt does print, so the sizing asks for three data
+  codewords and the padding fills the third. The review of this section found
+  this, it is not in the specification as a rule.
+- **The capacity is 925 codewords of data.** The largest symbol holds 928
+  codewords, of which one is the length descriptor and two are the check
+  codewords of level 0, so the cap is on what the high level encoder produces
+  and not on the data area that holds it. 1850 characters of text therefore
+  still encode, in 16 columns of 58 rows with a length descriptor of 926, which
+  the first version of this section refused. The recommendation table of the
+  automatic level stops at 863 data codewords, as the specification says, so
+  more data than that only fits at a level the receipt names itself.
+- **The automatic size** is the number of columns whose symbol comes closest to
+  three times as wide as it is tall, and of two equally good shapes the smaller
+  symbol. The width is the whole row in modules, the start pattern, the row
+  indicators and the stop pattern included, and the height is the rows times the
+  row height, which the painter passes on, so the shape is the shape on paper
+  and not of the data area. Small data therefore lands on one column of many
+  rows, which is what makes a receipt symbol scannable; the smallest symbol
+  would be a wide flat block of three rows. With only the columns or only the
+  rows given the other follows from the number of codewords that has to fit.
+- **The automatic error correction level** is the recommendation of the
+  specification, level 2 up to 40 data codewords, 3 up to 160, 4 up to 320 and 5
+  above that. The ratio mode of `GS ( k 48 69 49 n`, which asks for `n` tenths
+  of the data as check codewords, cannot be resolved in the parser, because the
+  number of codewords is only known once the data is compacted; the parser
+  passes the ratio on and the symbology picks the level whose number of check
+  codewords comes closest to it.
+
+The parsers and the painter:
+
+- **`painter.pdf417()`** takes the request the parsers build and draws it
+  through `block()`, so PDF417, QR codes, barcodes and raster images are all
+  aligned by the same code. A module is `moduleWidth` dots wide and a row is
+  `rowHeight` modules tall, which is `rowHeight * moduleWidth` dots, the reading
+  both languages describe. Nothing is printed when there is no data, when the
+  data does not fit the requested size, or when the symbol is wider than the
+  print area, the three rules the QR code already followed.
+- **ESC/POS defaults** are the ones of the reference: an automatic size, three
+  dot modules, rows of three modules, the ratio mode at one tenth, and the
+  standard form. **Star defaults** are an automatic size, two dot modules, rows
+  of two modules and level 0. Both are only reachable from hand written streams,
+  the encoder sets every parameter before it prints.
+- **`ESC GS x S 0 n1 n2 n3`** is read as: `n1` of 0 leaves the size to the
+  printer and 1 takes the rows of `n2` and the columns of `n3`, where a zero is
+  automatic for that one alone. The encoder always sends 1. No hardware check
+  settled this, it is the reading that makes the Star receipt print the symbol
+  the ESC/POS receipt prints. Those two are the only values of `n1`: any other
+  one leaves the size as it was, the way every other out of range parameter of
+  both parsers does.
+- A parameter outside the range of its command is ignored and leaves the value
+  as it was, which is what the other parameter commands of both parsers do.
+
+Testing:
+
+- **ZXing reads the paper.** `@zxing/library` has a PDF417 reader but no
+  encoder, so it is an independent check of the whole symbol. Its luminance
+  source takes one byte per pixel, not the four of an `ImageData`, which is the
+  one thing that has to be right; a symbol of one dot per module with a two dot
+  margin already decodes, and the test uses sixteen. Five data sets, a short
+  text, mixed case with punctuation, a long run of digits, bytes that are not
+  text and two hundred characters of a boarding pass, at levels 0, 2 and 4, at
+  an automatic size, at six columns and at thirty rows, in both languages, and
+  the truncated form, all decode to what was encoded.
+- **The bytes of the binary data set are valid UTF-8.** The reader turns the
+  bytes of byte compaction into text as UTF-8 and throws on a sequence that is
+  not, which is a property of the reader and not of the symbol, so the data set
+  is the UTF-8 of a string with control characters and non-ASCII in it and the
+  test compares the strings.
+- **bwip-js checks the codewords.** Its raw output is the module matrix, so the
+  comparison covers the compaction, the length descriptor, the check codewords,
+  the row indicators and the symbol character table in one assertion, at every
+  error correction level and in the truncated form. Two of the comparisons are
+  bytes over 127, with `binarytext` so that bwip-js reads its input as bytes and
+  not through a codepage: no reader turns those back into a string, so a second
+  encoder is the only check there is on byte compaction of real binary data.
+- **The truncated fixture is a parity exception.** The encoder has no way to ask
+  a Star printer for a truncated symbol, so the StarPRNT half of that receipt is
+  the standard symbol. The `pdf417` fixture, which does not use the option, has
+  parity in both paper and commands.
+
+Acceptance:
+
+- `npm test` 1047 passing, `npm run build` clean, `npm run test:types` and
+  `npm run test:umd` pass. Version 0.3.0, nothing published, nothing committed.

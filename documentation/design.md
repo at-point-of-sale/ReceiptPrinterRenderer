@@ -81,10 +81,10 @@ Out of scope for now:
 
 - Changes to ReceiptPrinterEncoder. In particular no UTF-8 mode, text is decoded with the same codepage mapping the encoder used.
 - ESC/POS and StarPRNT commands the encoder does not emit. The parsers are written so that more commands can be added, and they must skip unknown commands safely, but rendering them is not a goal.
-- PDF417 and the GS1 DataBar symbologies. They are parsed so that the stream stays in sync, but not rendered, see below.
+- The GS1 DataBar symbologies. They are parsed so that the stream stays in sync, but not rendered, see below.
 - Dithering, resizing and other image processing. Images arrive in the byte stream already dithered by the encoder.
 
-Dependencies are kept to a minimum. Runtime dependencies are `@point-of-sale/codepage-encoder` for the codepage tables and `lean-qr` for QR codes, which is MIT licensed, has no dependencies and is under 4 kB compressed. No canvas, no image libraries, no barcode library. One-dimensional barcodes are implemented in this package.
+Dependencies are kept to a minimum. Runtime dependencies are `@point-of-sale/codepage-encoder` for the codepage tables and `lean-qr` for QR codes, which is MIT licensed, has no dependencies and is under 4 kB compressed. No canvas, no image libraries, no barcode library. The one-dimensional barcodes and PDF417 are implemented in this package.
 
 <br>
 
@@ -286,9 +286,14 @@ This is the complete set of commands ReceiptPrinterEncoder version 3 emits for t
 | `GS ( k pL pH 49 69 n` | QR error correction | 48 L, 49 M, 50 Q, 51 H. |
 | `GS ( k pL pH 49 80 48 d..` | QR store data | Data for the next print. |
 | `GS ( k pL pH 49 81 48` | QR print | Draw the symbol as a block, centred according to the alignment. Nothing is printed when no data was stored or when the symbol is wider than the print area. |
-| `GS ( k pL pH 48 65..70 ..` | PDF417 parameters | Parsed and stored. |
-| `GS ( k pL pH 48 80 48 d..` | PDF417 store data | Parsed. |
-| `GS ( k pL pH 48 81 48` | PDF417 print | Not rendered in version 1. Produces an `unknown` item, when supported, and nothing on paper. The other selectors of the group, Maxicode, the two dimensional GS1 DataBar and the composite symbologies, do the same. |
+| `GS ( k pL pH 48 65 n` | PDF417 columns | Number of data columns, 1 to 30, and 0 for a number the printer picks. |
+| `GS ( k pL pH 48 66 n` | PDF417 rows | Number of rows, 3 to 90, and 0 for a number the printer picks. |
+| `GS ( k pL pH 48 67 n` | PDF417 module width | `n` dots per module, 2 to 8. |
+| `GS ( k pL pH 48 68 n` | PDF417 row height | The height of a row as a multiple of the module width, 2 to 8. |
+| `GS ( k pL pH 48 69 m n` | PDF417 error correction | `m` of 48 gives the level as a digit, 48 to 56 for level 0 to 8. `m` of 49 asks for a ratio instead, `n` tenths of the data codewords as check codewords, 1 to 40, and the renderer picks the level whose number of check codewords comes closest to it. |
+| `GS ( k pL pH 48 70 n` | PDF417 options | 0 the standard symbol, 1 the truncated one, which drops the right row indicator and the stop pattern. |
+| `GS ( k pL pH 48 80 48 d..` | PDF417 store data | Data for the next print. |
+| `GS ( k pL pH 48 81 48` | PDF417 print | Draw the symbol as a block, centred according to the alignment. Nothing is printed when no data was stored, when the data does not fit in the number of columns and rows the commands ask for, or when the symbol is wider than the print area. The other selectors of the group, Maxicode, the two dimensional GS1 DataBar and the composite symbologies, are not rendered and produce an `unknown` item. |
 | `ESC * m nL nH d..` | column image | `m` is 0 and 1 for the eight dot modes, one byte per column, and 32 and 33 for the 24 dot modes, three bytes per column, the most significant bit of the first byte at the top. The single density modes, 0 and 32, print every column twice. `nL + nH * 256` columns, followed by `LF` in the stream. Blitted at the current position, with line spacing at 24 dots the strips join seamlessly. The encoder only emits `ESC * 33`. |
 | `GS v 0 m xL xH yL yH d..` | raster image | `xL + xH * 256` bytes per row, `yL + yH * 256` rows. `m` is 0 normal, 1 double width, 2 double height and 3 both, by repeating dots. Blitted as a block, aligned according to the alignment. |
 | `GS V n` | cut | 0 full, 1 partial. Also accepts 65 and 66 with a feed argument, as a common variant. |
@@ -362,9 +367,12 @@ The encoder emits nothing for italic on StarPRNT, so there is nothing to ignore.
 | `ESC GS y S 1 n` | QR error correction | 0 L, 1 M, 2 Q, 3 H. |
 | `ESC GS y D 1 NUL nL nH d..` | QR store data | Data for the next print. |
 | `ESC GS y P` | QR print | Draw the symbol as a block, under the same rules as the ESC/POS one. |
-| `ESC GS x S 0 ..`, `S 1`, `S 2`, `S 3` | PDF417 parameters | Parsed and stored. |
-| `ESC GS x D nL nH d..` | PDF417 store data | Parsed. No function byte, unlike the QR command. |
-| `ESC GS x P` | PDF417 print | Not rendered in version 1, see the ESC/POS table. |
+| `ESC GS x S 0 n1 n2 n3` | PDF417 size | `n1` of 0 leaves the size to the printer, 1 takes the `n2` rows and the `n3` columns that follow, where a zero is automatic for that one alone. The encoder always sends 1. |
+| `ESC GS x S 1 n` | PDF417 error correction | Level 0 to 8. |
+| `ESC GS x S 2 n` | PDF417 module width | `n` dots per module, 2 to 8. |
+| `ESC GS x S 3 n` | PDF417 row height | The height of a row as a multiple of the module width, 2 to 8. |
+| `ESC GS x D nL nH d..` | PDF417 store data | Data for the next print. No function byte, unlike the QR command. |
+| `ESC GS x P` | PDF417 print | Draw the symbol as a block, under the same rules as the ESC/POS one. The StarPRNT command set has no command for the form of the symbol, so a Star printer always prints the standard one, never the truncated one. |
 | `ESC X nL nH d.. LF CR` | column image, 24 dots | One strip of 24 rows, three bytes per column, with the line spacing at 24 dots the strips join. |
 | `ESC K nL nH d..`, `ESC L nL nH d..` | bit image, eight dots | One strip of eight rows, one byte per column. The single density image of `ESC K` prints every column twice. The encoder emits neither, it uses `ESC X` for every image. |
 | `ESC d n` | cut | 0 full, 1 partial, 2 full with feed, 3 partial with feed. |
@@ -408,6 +416,12 @@ Decoding a byte is a lookup in the 256 entry codepoint table that `CodepageEncod
 
 Small JSON files in `data/profiles` with the defaults per printer family: line spacing, font B cell size, and the vertical motion unit. There are two, `epson` with 30 dot line spacing and a 9x17 font B, and `star` with 32 dot line spacing and a 9x24 font B. Each renderer picks its own by default. Drivers do not usually need to touch this.
 
+### PDF417 symbol characters
+
+The 2787 symbol characters of ISO/IEC 15438, three clusters of 929, in `data/pdf417/clusters.txt` as one seventeen bit number per character. They are a table of the specification and cannot be computed, the rest of PDF417 can: the compaction, the length descriptor, the Reed-Solomon check codewords over GF(929), whose generator polynomials are the product of `(x - 3^i)` and are computed the first time a level is used, the row indicators and the start and stop patterns are all in `src/symbologies/pdf417.js`.
+
+The copy of the table was taken from [Barcode Writer in Pure PostScript](https://github.com/bwipp/postscriptbarcode), MIT licensed, and `test/pdf417.js` checks every entry against the structural rules of the specification: seventeen modules, four bars and four spaces of one to six modules, and the cluster of the position it has in the table.
+
 <br>
 
 ## Image format helpers
@@ -429,7 +443,7 @@ Separate named exports, so that a driver that only needs the items does not pull
 - **Coverage.** One fixture per encoder feature: every style, sizes, fonts, alignment, tables, boxes, rules, both image modes, every rendered barcode symbology, QR codes at every size and error level, cut and pulse, and the fallbacks.
 - **Hardware truth.** A handful of fixtures are checked against real printouts once, on an Epson printer that is available for this, so that the renderer and the encoder cannot share a wrong reading of the specification. Those are marked in the fixture directory.
 - **Parity.** Every fixture receipt is encoded in both languages. The two renderings must be identical, except for the known differences in line spacing and font B cell height, which the test normalises by using the same profile for both. This is the main reason to build both renderers together. Where a receipt cannot be identical, because the encoder or the printer makes a difference the renderer has to be faithful to, the fixture is in the exception list at the top of the parity test with its reason.
-- **References.** The one dimensional symbologies are checked against JsBarcode, a dev dependency, which encodes the same symbologies to the same modules without a canvas, and the QR codes are read back with jsQR, which decodes the rendered paper the way a phone reads it. Both are dev dependencies of the test suite alone.
+- **References.** The one dimensional symbologies are checked against JsBarcode, which encodes the same symbologies to the same modules without a canvas, the QR codes are read back with jsQR, which decodes the rendered paper the way a phone reads it, and the PDF417 symbols are read back with the PDF417 reader of ZXing and compared module for module with the ones bwip-js encodes. All four are dev dependencies of the test suite alone.
 - **No canvas.** Nothing in the test suite needs the native canvas module.
 - **The builds.** Two checks need a build and are therefore scripts of their own, run before a release: `npm run test:types` compiles the TypeScript smoke test against the bundled declarations, and `npm run test:umd` evaluates the UMD bundle in a context without a module system, the way a script tag loads it, and asserts that the global is the class, that the renderers and the helpers are attached to it and that it renders in all three languages.
 
@@ -609,7 +623,8 @@ The TSP100LAN, TSP143IIILAN and TSP143IIIW speak the same raster protocol over a
 3. **WebUSBReceiptPrinter, branch tsp100.** Option contract, raster wrapper, verified on a TSP100.
 4. **WebBluetoothReceiptPrinter, branch meow.** Option contract, profile graphics section, cat printer wrapper, verified on a GB and a GT model.
 5. **NetworkReceiptPrinter.** Same option and wrapper as the USB branch.
-6. **Later.** The TSP100 profile moves to the StarPRNT renderer, a UTF-8 mode in the encoder for Unicode text on graphics printers, GS1 DataBar and PDF417 if there is demand, fonts for non-Latin codepages, incremental `write` and `end`.
+6. **PDF417.** The complete symbology in this package, in both languages, read back with a barcode reader in the tests.
+7. **Later.** The TSP100 profile moves to the StarPRNT renderer, a UTF-8 mode in the encoder for Unicode text on graphics printers, GS1 DataBar if there is demand, fonts for non-Latin codepages, incremental `write` and `end`.
 
 <br>
 

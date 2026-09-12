@@ -2,6 +2,7 @@ import Bitmap from './bitmap.js';
 import Font from './font.js';
 import {barcode as encodeBarcode} from './symbologies/index.js';
 import {qrcode as encodeQrcode} from './symbologies/qrcode.js';
+import {pdf417 as encodePdf417} from './symbologies/pdf417.js';
 
 /**
  * @typedef {import('./types.js').Bitmap} Bitmap
@@ -63,6 +64,20 @@ import {qrcode as encodeQrcode} from './symbologies/qrcode.js';
  * @property {Uint8Array} data     The bytes to encode
  * @property {number} moduleSize   Size of one module in dots
  * @property {string} errorLevel   Error correction level, 'L', 'M', 'Q' or 'H'
+ */
+
+/**
+ * A PDF417 symbol, as a parser asks the painter to draw it
+ *
+ * @typedef {object} Pdf417Request
+ * @property {Uint8Array} data              The bytes to encode
+ * @property {number} [columns]             Data columns, 1 to 30, 0 for automatic
+ * @property {number} [rows]                Rows, 3 to 90, 0 for automatic
+ * @property {number} moduleWidth           Width of a module in dots
+ * @property {number} rowHeight             Height of a row in modules
+ * @property {number|string} [errorLevel]   Error correction level, 0 to 8, or 'auto'
+ * @property {number} [errorRatio]          Check codewords per ten data codewords, for 'auto'
+ * @property {boolean} [truncated]          Draw the truncated form of the symbol
  */
 
 /**
@@ -469,6 +484,68 @@ class Painter {
     }
 
     this.block(Bitmap.scale(symbol, moduleSize, moduleSize));
+  }
+
+  /**
+     * Draw a PDF417 symbol as a block. Nothing is printed when there is no data
+     * to encode, when the data does not fit in the number of columns and rows
+     * the commands ask for, or when the symbol would be wider than the print
+     * area, the same three rules the QR code follows.
+     *
+     * A module is `moduleWidth` dots wide and a row is `rowHeight` modules
+     * tall, so a row is `rowHeight * moduleWidth` dots, which is how both
+     * printer languages describe the height of a row. The symbol carries no
+     * quiet zone, as a printer draws none.
+     *
+     * @param  {Pdf417Request}   request   The symbol to draw
+     */
+  pdf417(request) {
+    if (!request.data || request.data.length === 0) {
+      return;
+    }
+
+    const moduleWidth = Math.max(1, request.moduleWidth || 1);
+    const rowHeight = Math.max(1, request.rowHeight || 1);
+
+    const symbol = encodePdf417(request.data, {
+      columns: request.columns,
+      rows: request.rows,
+      errorLevel: request.errorLevel,
+      errorRatio: request.errorRatio,
+      truncated: request.truncated,
+      rowHeight,
+    });
+
+    if (symbol === null) {
+      return;
+    }
+
+    const width = symbol.modules[0].length * moduleWidth;
+
+    if (width > this.#width) {
+      return;
+    }
+
+    const height = rowHeight * moduleWidth;
+    const bitmap = Bitmap.create(width, symbol.rows * height);
+
+    for (let row = 0; row < symbol.rows; row++) {
+      const modules = symbol.modules[row];
+
+      for (let module = 0; module < modules.length; module++) {
+        if (modules[module] === 0) {
+          continue;
+        }
+
+        for (let x = module * moduleWidth; x < (module + 1) * moduleWidth; x++) {
+          for (let y = row * height; y < (row + 1) * height; y++) {
+            Bitmap.setPixel(bitmap, x, y, 1);
+          }
+        }
+      }
+    }
+
+    this.block(bitmap);
   }
 
   /**

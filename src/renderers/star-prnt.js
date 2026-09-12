@@ -97,6 +97,14 @@ const ERROR_LEVELS = Object.assign(Object.create(null), {0: 'L', 1: 'M', 2: 'Q',
 
 const QRCODE_DEFAULTS = {model: 2, moduleSize: 3, errorLevel: 'L'};
 
+/* And for a PDF417: a size the printer picks, two dot modules, rows of two
+   modules and the lowest error correction level. The encoder sets all four
+   before it prints, so these are only reached by hand written streams. The
+   StarPRNT command set has no truncated form, unlike the ESC/POS one, so a
+   Star symbol is always the standard one. */
+
+const PDF417_DEFAULTS = {columns: 0, rows: 0, moduleWidth: 2, rowHeight: 2, errorLevel: 0};
+
 /* Pulse width of the drawer commands that do not carry one, in milliseconds.
    ESC BEL n1 n2 sets the width of BEL and FS, SUB and EM are fixed */
 
@@ -394,6 +402,7 @@ class StarPrntRenderer {
   #pulse;
   #text;
   #qrcode;
+  #pdf417;
 
   /**
      * Create a renderer
@@ -500,6 +509,7 @@ class StarPrntRenderer {
     this.#painter.reset();
     this.#text = [];
     this.#qrcode = Object.assign({data: new Uint8Array(0)}, QRCODE_DEFAULTS);
+    this.#pdf417 = Object.assign({data: new Uint8Array(0)}, PDF417_DEFAULTS);
     this.#selectCodepage(null);
   }
 
@@ -684,7 +694,7 @@ class StarPrntRenderer {
         0x50: {args: 1, run: null}, /* print mode, the encoder flushes with it, no effect on paper */
         0x61: {args: 1, run: (a) => this.#align(a[0])},
         0x74: {args: 1, run: (a) => this.#selectCodepage(a[0])},
-        0x78: {args: pdf417Arguments, run: (a, consumed) => this.#pdf417(a, consumed)},
+        0x78: {args: pdf417Arguments, run: (a) => this.#pdf417Symbol(a)},
         0x79: {args: qrcodeArguments, run: (a) => this.#symbol(a)},
       },
 
@@ -772,17 +782,66 @@ class StarPrntRenderer {
   }
 
   /**
-     * ESC GS x .., the PDF417 group. Version 1 does not render PDF417: the
-     * parameters and the data are parsed and dropped, and the command that
-     * prints the symbol reports an unknown command, so that the driver knows
-     * something was left out.
+     * ESC GS x .., the PDF417 group: S 0 n1 n2 n3 is the size, S 1 n the error
+     * correction level, S 2 n the width of a module in dots, S 3 n the height
+     * of a row as a multiple of that width, D nL nH d.. stores the data of the
+     * next symbol, and P prints it.
      *
-     * @param  {Uint8Array}   args       The arguments of the command
-     * @param  {Uint8Array}   consumed   The whole command, for the unknown item
+     * The size command carries the rows and the columns behind a byte that says
+     * whether they are used at all: 0 leaves both to the printer, 1 takes the
+     * two that follow, where a zero is automatic for that one alone. The
+     * encoder always sends 1, with the numbers of the receipt. Anything else is
+     * not a value of the command and leaves the size as it was.
+     *
+     * The data stays stored until the next store, so printing twice prints the
+     * same symbol twice.
+     *
+     * @param  {Uint8Array}   args   The arguments of the command
      */
-  #pdf417(args, consumed) {
+  #pdf417Symbol(args) {
+    if (args[0] === 0x53 && args.length >= 3) {
+      if (args[1] === 0x30 && args.length >= 5 && (args[2] === 0 || args[2] === 1)) {
+        const rows = args[2] === 1 ? args[3] : 0;
+        const columns = args[2] === 1 ? args[4] : 0;
+
+        if (rows === 0 || (rows >= 3 && rows <= 90)) {
+          this.#pdf417.rows = rows;
+        }
+
+        if (columns === 0 || (columns >= 1 && columns <= 30)) {
+          this.#pdf417.columns = columns;
+        }
+      }
+
+      if (args[1] === 0x31 && args[2] <= 8) {
+        this.#pdf417.errorLevel = args[2];
+      }
+
+      if (args[1] === 0x32 && args[2] >= 2 && args[2] <= 8) {
+        this.#pdf417.moduleWidth = args[2];
+      }
+
+      if (args[1] === 0x33 && args[2] >= 2 && args[2] <= 8) {
+        this.#pdf417.rowHeight = args[2];
+      }
+
+      return;
+    }
+
+    if (args[0] === 0x44 && args.length >= 3) {
+      this.#pdf417.data = args.slice(3, 3 + args[1] + args[2] * 256);
+      return;
+    }
+
     if (args[0] === 0x50) {
-      this.#unknown(consumed);
+      this.#painter.pdf417({
+        data: this.#pdf417.data,
+        columns: this.#pdf417.columns,
+        rows: this.#pdf417.rows,
+        moduleWidth: this.#pdf417.moduleWidth,
+        rowHeight: this.#pdf417.rowHeight,
+        errorLevel: this.#pdf417.errorLevel,
+      });
     }
   }
 

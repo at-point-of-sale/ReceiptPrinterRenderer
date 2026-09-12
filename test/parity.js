@@ -21,10 +21,10 @@ import {assert} from 'chai';
     9 by 17 against 9 by 24, so both renders use the same profile. That is what
     the design's Testing section prescribes.
 
-    There is one exception, the hri fixture, which the EXCEPTIONS table below
-    names with its reason. Every other difference the encoder produces between
-    the two languages is avoided by the fixture receipts, and each of those is
-    listed here with the reason:
+    There are two exceptions, the hri and the pdf417-truncated fixture, which
+    the EXCEPTIONS table below names with their reason. Every other difference
+    the encoder produces between the two languages is avoided by the fixture
+    receipts, and each of those is listed here with the reason:
 
     - Italic. The encoder emits ESC 4 n for ESC/POS and nothing for StarPRNT.
       No difference on paper: Epson hardware does not italicize either and the
@@ -57,6 +57,12 @@ import {assert} from 'chai';
       addressed by its number instead of by its name, which is what the encoder
       needs anyway for a printer it knows nothing about, and the number takes
       the same path as the other symbologies.
+
+    - The truncated form of a PDF417. ESC/POS asks for it with GS ( k 48 70 1,
+      and the StarPRNT command set has no command for the form of the symbol at
+      all, so the encoder drops the option there and a Star printer prints the
+      standard symbol. The pdf417 fixture, which does not use the option, has
+      parity; the pdf417-truncated one is in the exceptions below.
 
     - The human readable text of a barcode. ESC/POS has GS f to choose the font
       of it and StarPRNT does not, a Star printer always draws it in font A.
@@ -96,12 +102,12 @@ const OPTIONS = {width: WIDTH, profile: 'epson', commands: COMMANDS};
 
 /*
     The fixtures whose two renders are not the same, with the reason. Every one
-    of them is a difference the encoder or the printer makes, not the renderer,
-    and there is exactly one.
+    of them is a difference the encoder or the printer makes, not the renderer.
 */
 
 const EXCEPTIONS = {
   'hri': 'the third barcode prints its human readable text in font B, which only ESC/POS can select',
+  'pdf417-truncated': 'the truncated form of a PDF417 is an ESC/POS option, StarPRNT has no command for it',
 };
 
 /**
