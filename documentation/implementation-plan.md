@@ -719,3 +719,237 @@ module without a `navigator.usb` reference, so the tests need no browser.
 Not verified on hardware yet. The two things to confirm on a TSP100 are that
 `ESC FF NUL` before `ESC * r D` really empties the buffer in time for the drawer
 command, and that `ESC * r Y` moves the paper the way the CUPS driver expects.
+
+### Section 7
+
+Implemented on branch `meow` of
+`/Users/salonhub/Projects/Dependencies/WebBluetoothReceiptPrinter`, not committed.
+Files: `src/wrappers/meow.js`, `src/main.js`, `src/callback-queue.js`,
+`test/meow.js`, `test/callback-queue.js`, `package.json`, `README.md`.
+
+The option contract, the `#resolve()` rule, the `graphics` section keyed by
+language, the `Wrappers` and `CodepageMappings` tables, the driver values
+winning over `rendererOptions`, the connected event and the error for a
+graphics printer without a renderer are the ones of section 6, byte for byte
+the same shape. The notes below are only what this driver does differently.
+
+Driver:
+
+- **The profile keeps the language `meow`**, and that string is the key of its
+  graphics section, exactly as section 6 designed it for a profile with a plain
+  string language. Nothing in `#open()` special cases it.
+- **The wrapper returns a list of packets**, not one buffer. The Bluetooth link
+  needs pacing, the driver already sends one write per queue entry with
+  `sleepAfterCommand` between them, so each packet is its own entry and the
+  existing `messageSize` chunking is never reached: a packet is at most 56 bytes,
+  well under the 200 of the profile. The chunking path is untouched for every
+  other printer.
+- **`print()` takes the graphics path whenever the graphics section is set.**
+  There is no fallthrough to raw bytes for such a printer, raw ESC/POS would
+  print garbage. Everything the application passed in one `print()` call is
+  joined into one buffer first, because a renderer takes a job as one buffer and
+  a job is one job however the application chopped it up.
+- **The renderer is constructed with `maxHeight` from the profile** as well as
+  `width` and `commands`, because the cat printer profile is the first one that
+  sets it. The three are the driver's, `rendererOptions` is merged underneath.
+- **The notify characteristic is a third entry in `#characteristics`**, next to
+  `print` and `status`. The cat printer profile already had a `notify` function
+  which nothing read; `#open()` now resolves it for every profile that has one.
+  Subscribing goes through `#subscribe(name)`, which is guarded by a
+  `#subscribed` flag per characteristic, so the subscription that `#open()` makes
+  for a graphics printer is not repeated when the application calls `listen()`.
+  `listen()` now subscribes to both and returns whether there is any
+  subscription, so it keeps working for the printers that have a status
+  characteristic.
+- **Notifications go through one `#handle()`**, which answers the flow control
+  packets and then emits the `data` event as before, so an application that
+  listens to the notify characteristic still sees every packet.
+- **A dedicated `RendererError`.** `connect()` keeps swallowing an ordinary
+  failure with a `console.log`, which is the behaviour applications rely on when
+  the user closes the device dialog, and rethrows only a missing renderer, a bad
+  renderer option or an unknown wrapper name. Those are programming errors that
+  would otherwise leave a printer connected that prints nothing. The README
+  documents that `connect()` rejects in that case.
+- **A failed graphics setup takes the connection down.** The profile is only
+  known after the GATT connection is up, so the graphics block is a try/catch
+  that calls `#reset()`, which disconnects GATT and clears the device, the
+  profile, the characteristics, the subscriptions, the graphics fields and any
+  pause on the queue, and then rethrows. `disconnect()` uses the same `#reset()`.
+- **An unknown wrapper name throws an error that names it**, rather than leaving
+  `#wrapper` undefined until the first print.
+- **`#resolve()` wraps the loader call in a try/catch** and rethrows the clear
+  error, so a class without a static `language`, which is called as a function by
+  the loader rule, surfaces as the message about the option instead of a raw
+  `TypeError: Class constructor cannot be invoked without 'new'`.
+
+Flow control:
+
+- **The queue grew a gate**, `pause()`, `resume()` and a `paused` getter. The
+  runner awaits the gate before it shifts the next callback, so a pause stops the
+  job before the next write and loses nothing. It is four lines in
+  `src/callback-queue.js` and it is plain promises, so `test/callback-queue.js`
+  tests it without a browser: pause before anything is added, pause from inside a
+  callback, a double pause, a resume that is not paused, and the ordering and
+  `sleep()` behaviour that was already there.
+- **No polling.** The design describes the reference implementation polling every
+  200 ms while paused. The driver does not poll: the printer sends the resume
+  packet on the same characteristic, and the pause packet is matched on all nine
+  of its bytes, as is the resume packet. If a printer turns out to send a pause
+  without ever sending a resume, a timeout is the place to add.
+
+Wrapper, `src/wrappers/meow.js`:
+
+- **Exports `wrap`, `packet`, `crc8`, `reverseBits`, `Commands` and
+  `FlowControl`.** The driver imports `wrap` and `FlowControl`, the rest is for
+  the tests and for anyone reading the protocol.
+- **Two generated tables at module load**, the 256 entry CRC8 table for
+  polynomial 0x07 with initial value 0, and the 256 entry byte reversal table.
+  The renderer's rows are most significant bit first, the printer takes the least
+  significant bit as the leftmost dot.
+- **Rows are padded, never truncated silently.** A row is `width / 8` bytes, 48
+  at 384 dots; an image item narrower than the print head is copied into a zeroed
+  row, a wider one is clipped to the print head.
+- **Every value that goes on the wire is clamped.** `clamp()` falls back to the
+  default when the value is not a finite number and clamps a finite one into the
+  field: speed to one byte, energy and the feeds to two bytes, and a feed item
+  without a height becomes a feed of zero rows rather than a packet with a
+  garbage length. A zero feed packet is emitted rather than skipped, so that the
+  packet count of a job is a function of the items alone.
+- **Speed, energy and the final feed are options** of the graphics section, with
+  the defaults of the design: speed `0x20`, energy `0x2ee0`, final feed 96 rows.
+  Nothing in the profile sets them today, which is deliberate, they are the two
+  values that still have to be settled on hardware.
+- **`cut` and `pulse` are ignored defensively.** They are not in the `commands`
+  of the profile, so the renderer never emits them, but a caller that builds its
+  own item list does not get a broken job. `unknown` items are ignored the same
+  way.
+
+Packet table, all checked against the protocol section of design.md:
+
+| Command | Bytes | Meaning |
+|---|---|---|
+| framing | `51 78 cmd 00 lenL lenH payload crc8 ff` | one command per packet, CRC8 over the payload only |
+| get device state | `51 78 a3 00 01 00 00 00 ff` | opens a job |
+| set dpi | `51 78 a4 00 01 00 32 9e ff` | 200 dpi |
+| set speed | `51 78 bd 00 01 00 20 e0 ff` | one byte, default `0x20` |
+| set energy | `51 78 af 00 02 00 e0 2e 89 ff` | two bytes little endian, default `0x2ee0` |
+| apply energy | `51 78 be 00 01 00 01 07 ff` | |
+| update device | `51 78 a9 00 01 00 00 00 ff` | |
+| lattice start | `51 78 a6 00 0b 00 aa 55 17 38 44 5f 5f 5f 44 38 2c a1 ff` | begins a print |
+| bitmap row | `51 78 a2 00 30 00 <48 bytes> crc ff` | one packet per row, bits reversed |
+| feed | `51 78 a1 00 02 00 lo hi crc ff` | dot rows, little endian |
+| lattice end | `51 78 a6 00 0b 00 aa 55 17 00 00 00 00 00 00 00 17 11 ff` | finishes a print |
+| final feed | `51 78 a1 00 02 00 60 00 f5 ff` | 96 rows, so the paper leaves the head |
+| pause | `51 78 ae 01 01 00 10 70 ff` | from the printer, stop writing |
+| resume | `51 78 ae 01 01 00 00 00 ff` | from the printer, continue |
+
+Tests: `npm test` runs mocha over `test/meow.js` and `test/callback-queue.js`,
+37 cases, all passing. The CRC8 is checked against three values computed by hand
+in the header of the test file, `00` for `[00]`, `07` for `[01]` and `c0` for
+`'A'`, and against the two lattice payloads. The job sequence for a 384 by 2
+image with a known row pattern, a feed item, a feed item without a height, the
+padding of a narrow row, the option defaults and the clamping, and that cut and
+pulse items produce exactly the empty job, are all literal byte arrays. The
+wrapper and the queue are modules without a `navigator.bluetooth` reference, so
+the tests need no browser. `npm run build` succeeds and the wrapper is in both
+bundles.
+
+The driver itself was exercised outside the test suite with a mock of the Web
+Bluetooth API: a cat printer without a renderer rejects and leaves GATT
+disconnected, a class without a static `language` rejects with the option
+message, a loader function resolves, the connected event carries `esc-pos`,
+`epson` and 32 columns, `rendererOptions` are merged underneath the driver's
+values, the notify characteristic is subscribed once during open and not again
+by `listen()`, a print produces eleven packets in the order of the table above,
+and the pause packet stops the writes until the resume packet arrives. The same
+mock confirms that a generic ESC/POS printer still reports no `columns`, still
+chunks a 250 byte job into 100, 100 and 50, and still emits `data` events.
+
+Version: 3.0.0, a major bump, because the passthrough of the `meow` language is
+gone. Optional peer dependency on `@point-of-sale/receipt-printer-renderer`
+`^0.1.0`.
+
+Not verified on hardware. What has to be confirmed on a GB and a GT model is
+everything the protocol section of design.md marks as unconfirmed: that the job
+sequence is accepted as it stands, that speed `0x20` and energy `0x2ee0` give
+readable output, that the flow control packets are exactly those nine bytes and
+that a pause is always followed by a resume, and that 96 rows of final feed is
+enough for the paper to clear the print head. The run length encoded row command
+is not used, and whether it is worth using is still open.
+
+### Section 8
+
+Implemented on branch `tsp100` of `/Users/salonhub/Projects/Dependencies/NetworkReceiptPrinter`,
+not committed. Files: `src/wrappers/star-raster.js`, `test/star-raster.js`,
+`src/main.js`, `test/network.js`, `package.json`, `README.md`.
+
+Choices made where the design and section 6 were silent:
+
+- **`src/wrappers/star-raster.js` and `test/star-raster.js` are copies of the
+  section 6 files**, byte for byte, with one comment block added at the top of
+  each saying that the file is shared with WebUSBReceiptPrinter and that the two
+  copies must be kept identical. The alternative, a package that both drivers
+  depend on, would put a runtime dependency on a driver that has none today and
+  would have to be published and versioned for two hundred lines of byte
+  building. The comment is the cheapest thing that keeps the copies honest, and
+  the tests are copied along with the wrapper, so a divergence fails a build.
+- **The application states the language, there is no device database.** A socket
+  carries no vendor id, no product id and no product name, so the constructor
+  takes a `language` option, and the `Graphics` table in `src/main.js` is keyed
+  by language exactly as the `graphics` section of a profile is in the USB
+  driver. `star-graphics` is its one entry today: width 576, commands cut, pulse
+  and feed, wrapper `star-raster`. Any other language, including none at all, is
+  the passthrough the driver has always been.
+- **`tearBar` is a constructor option, not a function of the device.** The USB
+  driver derives it from the product name; over a socket there is no name to
+  test, so the application says so. It defaults to `false`, which is the cutter
+  models, and it is merged into the graphics section before the section is given
+  to the wrapper, so the wrapper sees the same object shape in both drivers.
+- **`#resolve()` and `RendererError` are the section 6 code**, including both
+  error messages, so an application that moves from USB to network gets the same
+  diagnostics. Only the message about a wrapper that does not exist can no longer
+  be triggered from outside, the wrapper name is not an option here, but it is
+  kept so that the two drivers stay comparable.
+- **Renderer and wrapper are resolved before the socket is opened**, the same
+  rule as the USB driver's "before the device is opened". `connect()` is `async`
+  and returns before the socket is actually connected, so the resolution is
+  simply the first thing it awaits: a missing or invalid renderer rejects the
+  promise and no connection attempt is made at all.
+- **`connect()` keeps its old behaviour for everything else.** A host that is not
+  there or a printer that does not answer still emits `error` and `timeout`
+  events and does not reject, exactly as in 2.0. Only a `RendererError` rejects,
+  because that is a mistake in the application.
+- **The connected event only grows for a graphics printer.** For every other
+  printer it stays `{ type: 'network' }`, because the driver knows nothing about
+  what is on the other end of the socket, and a guessed language or column count
+  would be indistinguishable from knowledge. A test asserts the object is deep
+  equal to `{ type: 'network' }` so that this cannot regress.
+- **`codepageMapping` falls back to `null`**, not to a profile mapping as in the
+  USB driver, because there is no profile to fall back to. A renderer whose
+  language is not in the `CodepageMappings` table therefore reports a language
+  and no mapping, rather than a mapping that belongs to another language.
+- **`print()` renders and wraps and then goes through the existing 1024-byte
+  chunk loop**, unchanged. The USB driver sends its job in one `transferOut()`;
+  a socket needs the pacing the loop already provides, and a raster job of a few
+  hundred kilobytes is exactly what that loop was written for.
+- **The version goes to 2.1.0**, the same minor bump as the USB driver, since the
+  change is additive: a driver without the `language` option behaves as before.
+
+Tests: `npm test` runs mocha over both files, 27 cases, all passing. The fourteen
+wrapper cases are the ones section 6 froze, unchanged. `test/network.js` adds
+thirteen cases that drive the driver against a `net.Server` started by the test,
+on an ephemeral port on 127.0.0.1, with a fake renderer class whose static
+language is `esc-pos` and whose `render()` returns a fixed image, feed and cut:
+the four fields of the connected event, the options the renderer is constructed
+with, the bytes on the wire being byte for byte `wrap()` of those items, the same
+through an async renderer loader and with `tearBar` set, the rejection without a
+renderer and with a renderer that is not one, a plain connect reporting nothing
+but the type and sending its bytes unchanged, and a job of 2600 bytes arriving
+unchanged through the chunk loop. `npm run build` succeeds and the wrapper is in
+both the cjs and the mjs bundle.
+
+Not verified on hardware. No TSP100LAN, TSP143IIILAN or TSP143IIIW was available,
+and the README says so in the limitations of the new section. What is verified is
+that the driver puts the same bytes on the socket that section 6 puts on the USB
+endpoint, so the open questions are the ones section 6 already listed, plus
+whether the printer's socket tolerates the 1024-byte chunking of a raster job.
