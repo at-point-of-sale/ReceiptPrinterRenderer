@@ -248,6 +248,117 @@ Acceptance:
   levels, fixed and automatic sizes, and in the truncated form.
 - Version 0.3.0.
 
+## Sections 12 to 14: beyond the encoder's subset
+
+The renderers cover exactly the commands ReceiptPrinterEncoder emits. Other producers, the Epson and Star SDKs, the Python and Node ESC/POS libraries and hand written POS software, use a wider set. These three sections add the most common of those commands, in the order of how often they occur on real receipts. Each section runs through the working method above: implementation, bug-check, orchestrator review, commit.
+
+Rules that apply to all three:
+
+- The encoder cannot produce these commands, so the fixtures are hand assembled byte streams in `test/tools/make-fixtures.js`, one per command group, in both languages where the command exists in both. Expected images are reviewed as ASCII art before they are frozen, as always.
+- Every new command gets a row in the tables of design.md, with the same "Rendering" column. Commands that stay unrendered keep their `unknown` behaviour and are listed as such.
+- Parsing must stay in sync for every command, rendered or not. A command added here must have its argument length verified against the Epson ESC/POS or Star specification, and a test for the truncated stream.
+- No new runtime dependencies.
+
+### Painter additions
+
+The painter interface gains, in Section 12:
+
+```js
+painter.position(dots)                     // absolute position from the left margin, for HT, ESC $ and ESC \
+painter.margins({ left, width })           // left margin and print area width in dots, applied at the next line start
+painter.spacing(dots)                      // extra dots after every cell, scaled with the width multiplier
+painter.tabs([columns])                    // tab stops in character widths of the current font, [] restores every 8
+painter.style({ upperline, upsideDown })   // upperline is 0, 1 or 2 like underline; upsideDown rotates committed lines by 180 degrees
+painter.placeholder(cells)                 // a fallback glyph cell repeated, for multibyte text without a font
+```
+
+In Section 13:
+
+```js
+painter.define(key, bitmap)                // keep an image for later, keys are strings such as 'nv:3' or 'dl:kc1kc2'
+painter.print(key, { scale })              // draw a kept image as a block, nothing plus an unknown item when the key is absent
+```
+
+<br>
+
+## Section 12: text layout commands
+
+Deliverables, ESC/POS:
+
+- `ESC ! n` print mode: bit 0 font B, bit 3 bold, bit 4 double height, bit 5 double width, bit 7 underline. Sets the same painter state as the individual commands; a later `GS !` overrides the size.
+- `ESC G n` double strike, rendered as bold. `ESC i` and `ESC m`, the legacy full and partial cuts.
+- `ESC R n` international character set: the twelve code points 0x23, 0x24, 0x40, 0x5B, 0x5C, 0x5D, 0x5E, 0x60, 0x7B, 0x7C, 0x7D, 0x7E are replaced per set, table from the Epson specification for sets 0 to 17. Applied after codepage decoding, only for those twelve bytes.
+- `ESC { n` upside-down printing: every committed line box, blocks included, is rotated by 180 degrees. Feed order is unchanged.
+- `ESC SP n` right side character spacing, in horizontal motion units, multiplied by the width multiplier. Lines wrap by dots, which they already do.
+- `HT` and `ESC D n1..nk NUL` tab stops: positions in character widths of the current font, default every eight characters, at most 32 stops, `ESC D NUL` clears them. A tab past the last stop is ignored, as on the printer.
+- `ESC $ nL nH` absolute and `ESC \ nL nH` relative print position, in horizontal motion units. The horizontal unit follows `GS P x`, one dot by default, `dpi / x` dots when set. A position beyond the print width is ignored.
+- `GS L nL nH` left margin and `GS W nL nH` print area width, in horizontal motion units, applied at the start of the next line. Alignment and centring work inside the print area. A width that exceeds the paper is clamped.
+- Multibyte text: `FS &` and `FS .` switch Kanji mode, `FS C n` selects the code system (Shift JIS or JIS, and UTF-8 on the models that have it), `FS !`, `FS -`, `FS S` and `FS W` are parsed. In Kanji mode a lead byte and its trail byte are consumed as one character and drawn as a double width placeholder cell, so the layout stays right without a CJK font. UTF-8 with `FS C` is decoded properly and drawn from the built in font, with the placeholder for characters the font lacks.
+- `DLE EOT n`, `DLE ENQ n` and `DLE DC4 fn ...` real time commands with their exact lengths, skipped.
+
+Deliverables, StarPRNT and Star Line:
+
+- `ESC W n` double width and `ESC h n` double height, `ESC i` unchanged. `ESC _ n` upperline, drawn along the top rows of the cell like underline along the bottom.
+- `ESC l n` left margin and `ESC Q n` right margin, in characters of the current font.
+- `ESC R n` international character set, Star's table, and `ESC SP n`... only if Star defines character spacing, check the Star Line specification and document the result.
+- The Star raster mode as a renderable input: `ESC * r A` and `ESC * r R` reset a raster state, `b n1 n2 data` is one row with a feed, `k n1 n2 data` a row without, `ESC * r Y n NUL` feeds n rows, `ESC * r E n NUL` and `ESC * r F n NUL` store the modes, `ESC FF NUL` and `ESC FF EOT` flush and, when the stored mode cuts, emit a cut item, `ESC * r D n NUL` emits a pulse item, `ESC * r P`, `Q`, `T`, `m l`, `m r`, `K` are parsed and stored, `ESC * r B` leaves raster mode. With this the renderer reproduces what a TSP100 prints from the USB driver's wrapper.
+- Buzzer commands `ESC GS BEL`, `ESC GS EM DC1` and `DC2` parsed and reported as `unknown`.
+
+Fixtures: print-mode, international, upside-down, spacing, tabs, positions, margins, multibyte, star-raster, in the languages that have them. Parity for the commands that exist in both languages: double width and height, margins, international sets where the tables agree.
+
+Acceptance:
+
+- A receipt laid out with tabs and absolute positions, as the Python ESC/POS library writes it, renders with straight columns.
+- `ESC ! n` and the individual commands render identically for the same state.
+- The upside-down fixture is the normal fixture rotated by 180 degrees line by line, checked in the test by rotating the bitmap.
+- A hand assembled Star raster job with a cut and a drawer pulse renders to the same paper and items as the receipt it was made from.
+- The bug-check verifies every argument length against the specifications and the truncated stream behaviour of every new command.
+
+<br>
+
+## Section 13: image commands
+
+Deliverables, ESC/POS:
+
+- `GS ( L` and `GS 8 L` graphics: function 112 stores raster graphics in the print buffer with the `bx` and `by` scaling and the colour parameter, function 113 stores column format graphics, function 50 prints the buffer as a block aligned per the current alignment. Functions 67 and 69 define and print NV graphics by key code, 83 and 85 define and print download graphics by key code; a definition in the stream is kept by `painter.define` for the rest of the renderer instance, a print of an undefined key produces an `unknown` item and nothing on paper. The transmit and capacity functions 48, 49, 51, 52, 64, 65, 66, 68, 80, 81, 82, 84 are parsed and skipped with their lengths. Function 52 sets the reference dot density and is honoured for scaling when the printer dpi differs.
+- `GS * x y data` defines the downloaded bit image, `GS / m` prints it in modes 0 to 3, the same doubling as `GS v 0`.
+- `FS q n [xL xH yL yH data]...` defines NV bit images in the stream, `FS p n m` prints one; the same keep and print rules as the graphics functions.
+- The `ESC *` and `GS v 0` handling is unchanged.
+
+Deliverables, StarPRNT and Star Line:
+
+- `ESC GS S 1 n1 n2 n3 n4 NUL data`, the StarPRNT raster image command the Star SDKs use, rendered as a block.
+- `ESC k n1 n2 data` quadruple density bit image, and any other bit image density Star Line defines, checked against the specification.
+- `ESC FS p n m` prints an NV logo, which the printer holds and the renderer cannot draw: an `unknown` item and nothing on paper, like the ESC/POS NV images without a definition.
+
+Fixtures: graphics-raster, graphics-column, graphics-download, graphics-nv, download-bit-image, nv-bit-image, star-raster-image, in the languages that have them. Parity between `GS ( L` function 112 and `GS v 0` for the same pixels, and between the Star raster image and `ESC X`.
+
+Acceptance:
+
+- The same picture sent through `ESC *`, `GS v 0`, `GS ( L` 112 and 113, `GS *` with `GS /`, and `FS q` with `FS p` renders to identical dots.
+- Scaling modes and `bx`/`by` match the doubling of `GS v 0`.
+- A print of an undefined key or logo leaves the paper untouched and the stream in sync.
+
+<br>
+
+## Section 14: GS1 DataBar
+
+Deliverables:
+
+- `src/symbologies/databar.js`: GS1 DataBar Omnidirectional and Truncated (the 14 digit RSS-14 encoding with its check digit, 96 modules, truncated at 13 rows), Limited (79 modules, 14 digits with a leading 0 or 1), and Expanded (the general encoding of a GS1 element string with the numeric, alphanumeric and ISO 646 compaction methods and the special methods for the common weight and date element strings, variable width in symbol character pairs). Encoder, ESC/POS symbologies 75 to 78 and the Star equivalents, module width from the existing barcode parameters, height from the barcode height for Omnidirectional and Expanded and fixed for Truncated and Limited as the printers do. Data validation as the printers do it: wrong length or characters print nothing.
+- Human readable text below the symbol as for the other barcodes, when the HRI position asks for it.
+- Verification: decode rendered symbols with the ZXing readers for RSS-14 and RSS Expanded, and compare module patterns with bwip-js for all four variants, including Expanded with weight and date element strings.
+
+Fixtures: databar-omni, databar-truncated, databar-limited, databar-expanded, in both languages, plus a coupon style receipt combining a DataBar with text. Parity between the languages.
+
+Acceptance:
+
+- Every fixture decodes with ZXing to the original element string, and matches bwip-js module for module.
+- The Section 4 barcode tests and the parity test are unchanged.
+- The `unknown` items for these symbologies are gone from the design tables.
+
+<br>
+
 ## Notes per section
 
 Filled in during implementation.
