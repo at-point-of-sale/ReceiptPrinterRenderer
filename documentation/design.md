@@ -505,7 +505,7 @@ The device database already identifies the graphics models: the Star profile res
 
 The wrapper is the package [StarGraphicsPrinterEncoder](https://github.com/NielsLeenheer/StarGraphicsPrinterEncoder), `@point-of-sale/star-graphics-printer-encoder`, a regular dependency of the driver. `new StarGraphicsPrinterEncoder({tearBar, quality, pageLength}).encode(items)` returns the whole job as one `Uint8Array`, and the driver takes the options from the graphics section of the profile. What it does is described below, and in more detail in the README of that package.
 
-The commands below come from Star's STAR Graphic Mode Command Specifications, Rev. 2.32, a copy of which is in [star-graphics-mode.md](star-graphics-mode.md), cross-checked with what Star's CUPS driver `rastertostar` sends. The specification covers every TSP100 model: U, PU, IIU, GT, LAN, IIIW, IIILAN, IIIBI and IIIU. Digits are ASCII characters, `NUL` is `0x00`.
+The commands below come from Star's STAR Graphic Mode Command Specifications, Rev. 2.32, see [Sources](#sources), cross-checked with what Star's CUPS driver `rastertostar` sends. The specification covers every TSP100 model: U, PU, IIU, GT, LAN, IIIW, IIILAN, IIIBI and IIIU. Digits are ASCII characters, `NUL` is `0x00`.
 
 One rule of raster mode shapes the whole wrapper: the mode setting commands, EOT mode, FF mode, page length, quality and the drawer command, are ignored while raster data is in the image buffer. So a cut type cannot be chosen at the moment of the cut. The wrapper looks ahead instead: every command item ends a segment, and the FF mode for that segment is set before the first row of the segment is sent, while the buffer is still empty.
 
@@ -659,7 +659,7 @@ Still open:
 
 ## Sources
 
-- Star Micronics, [STAR Graphic Mode Command Specifications Rev. 2.32](https://starmicronics.com/support/Mannualfolder/star_graphic_cm_en.pdf), the raster mode command reference for the TSP100 family. A text conversion is in [star-graphics-mode.md](star-graphics-mode.md).
+- Star Micronics, [STAR Graphic Mode Command Specifications Rev. 2.32](https://starmicronics.com/support/Mannualfolder/star_graphic_cm_en.pdf), the raster mode command reference for the TSP100 family. The specification is Star's document and is not part of this repository.
 - Star Micronics CUPS driver source, [rastertostar.c](https://github.com/drobban/starcupsdrv/blob/master/src/rastertostar.c), the byte sequences in the Star raster wrapper.
 - NaitLee, [Cat-Printer](https://github.com/NaitLee/Cat-Printer), `printer_lib/commander.py` and `printer.py`, the cat printer protocol, CRC, bit order and flow control.
 - rbaron, [catprinter](https://github.com/rbaron/catprinter), `catprinter/cmds.py`, the run length encoded rows of the cat printers.

@@ -932,7 +932,7 @@ Choices made where the design was silent:
 - **`ESC * r D n NUL` takes `1` for device 0 and `2` for device 1**, any other
   device value falls back to drawer 1.
 
-Byte sequences, all checked against star-graphics-mode.md:
+Byte sequences, all checked against Star's STAR Graphic Mode Command Specifications Rev. 2.32:
 
 | Command | Bytes | Spec |
 |---|---|---|

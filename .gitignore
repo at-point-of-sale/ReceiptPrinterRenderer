@@ -3,3 +3,6 @@ node_modules
 dist
 examples/package-lock.json
 examples/_*
+
+# Star specification text, a local working reference that may not be redistributed
+documentation/star-graphics-mode.md
