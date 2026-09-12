@@ -34,7 +34,7 @@ Contents
 Some receipt printers have no fonts and no barcode engine, they only print images:
 
 - The Star TSP100, TSP100ECO, TSP100GT, TSP100II and TSP100III. Star's SDKs call this Star Graphic mode. The Windows driver, futurePRNT, renders receipts to raster images before sending them, and the futurePRNT virtual serial port emulates ESC/POS and Star Line on top of that. Without the Windows driver, on macOS, ChromeOS and Linux, the printer only accepts raster commands. The TSP100IV is not part of this group, it supports StarPRNT natively.
-- The cheap Bluetooth Low Energy "cat" printers sold as Meow printers, model names such as GB01, GB02, GB03, GT01, MX05 and MX06. They print 384 dots wide and only accept bitmap rows.
+- The cheap Bluetooth Low Energy "cat" printers sold as Meow printers, model names such as GB01, GB02, GB03, GT01, MX05, MX06 and MX10. They print 384 dots wide and only accept bitmap rows.
 
 Applications use ReceiptPrinterEncoder to create receipts. They should not need to know that a printer cannot print text. ReceiptPrinterRenderer takes the ESC/POS bytes the encoder produces, interprets them the way a printer would, and produces images. The printer drivers wrap the images in whatever the printer understands.
 
@@ -614,7 +614,7 @@ Settled on 2026-09-11:
 
 Still open:
 
-- Cat printer: the energy and speed values that give readable output, the exact behaviour of the flow control packets, and whether the run length encoded row command is worth using.
+- Cat printer, partly settled on 2026-09-12 with an MX10 (firmware 1.0.11): it exposes the AE30 service with AE01 as write-without-response only, so the driver writes without response when the characteristic demands it; it does not advertise AE30, so the profile also accepts the known model names in the picker; it answers the state and info requests and sends the resume packet after every job, no pause was seen on a 64-row job. Still open: the energy and speed values that give the best output, and whether the run length encoded row command is worth using.
 
 <br>
 
