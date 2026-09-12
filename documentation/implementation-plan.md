@@ -202,6 +202,23 @@ Acceptance:
 - Only `.pbm` fixtures change, apart from the feed heights that move with the depth of the ink.
 - The letter A, a box corner and the full receipt are reviewed by eye.
 
+## Section 10: the unified renderer
+
+The package exported a renderer class per language and nothing else, so an application that encodes with `language: 'star-prnt'` had to know which class belongs to that string, and the UMD global was an object of names instead of a class. This section adds `ReceiptPrinterRenderer`, which takes the language as an option and delegates, mirroring ReceiptPrinterEncoder.
+
+Deliverables:
+
+- `ReceiptPrinterRenderer` in `src/receipt-printer-renderer.js`: the options of a renderer plus `language`, one of `esc-pos`, `star-prnt` and `star-line`, defaulting to `esc-pos`, an unknown one throwing. `static get languages()`, a `language` getter that reports the language it was asked for, a `columns` getter and `render(bytes)`, which delegates. Both Star languages are rendered by `StarPrntRenderer`.
+- The export shape: the class as the default and as a named export, the two renderers and the four helpers as named exports, and the same six as static properties of the class. A UMD entry, `src/umd.js`, exporting the class alone, so that the UMD global is the class.
+- Tests for the unified class, the TypeScript smoke test extended, and `npm run test:umd`, which loads the UMD bundle the way a script tag does.
+- `documentation/usage.md`, the README and the design document follow: the unified class is the primary way, the renderers of one language are secondary, and the Driver integration section describes the new contract, including passthrough for a driver without a renderer.
+
+Acceptance:
+
+- `npm test` passes, `npm run build` is clean, `npm run test:types` and `npm run test:umd` pass.
+- The existing renderers, their options and their static `language` property are unchanged.
+- Version 0.2.0.
+
 ## Notes per section
 
 Filled in during implementation.
@@ -1142,3 +1159,124 @@ Fixtures and tests:
 Documentation:
 
 - `documentation/design.md` names the font, the fitting rule, the threshold, the box drawing decision, the licence and the coverage in its Resources section, lists the new tools in the file tree, answers the open question with Iosevka, and credits Iosevka and opentype.js in its sources. The README and `documentation/usage.md` say what the built in font is. The keywords of `package.json` are about what the library does, not about which face it draws with, so they are unchanged.
+
+### Section 10
+
+Implemented on 2026-09-12. Files: `src/receipt-printer-renderer.js`, `src/umd.js`,
+`src/types.js`, `rollup.config.js`, `package.json`,
+`test/receipt-printer-renderer.js`, `test/umd/check.js`, `test/types/smoke.ts`,
+`examples/preview.html`, `documentation/usage.md`, `documentation/design.md`,
+`README.md`.
+
+The class:
+
+- **`ReceiptPrinterRenderer` is a delegate, not a base class.** It resolves the
+  language to one of the two renderers, constructs it with the options it was
+  given, and forwards `render()` and `columns`. The renderers know nothing about
+  it, their constructors, their options and their static `language` property are
+  untouched, so a driver or an application that was written against
+  `EscPosRenderer` keeps working.
+- **The `language` getter reports the language that was asked for, not the
+  renderer that serves it.** A renderer created for `star-line` renders with
+  `StarPrntRenderer` and reports `star-line`, because that is the language the
+  encoder that produced the commands was configured with, and it is what the
+  driver puts in its connected event. The static `language` of `StarPrntRenderer`
+  stays `star-prnt`: it names the class, not the receipt.
+- **`languages` is a static getter over the keys of the table**, so it is one
+  list, it cannot fall out of step with what the constructor accepts, and a
+  caller that changes the array it gets back changes nothing.
+- The unknown language error names the three that work,
+  `Unknown language meow, must be one of esc-pos, star-prnt, star-line`, because
+  the mistake is almost always a language of the encoder that the renderer does
+  not have.
+- `language` is the only option the class reads, everything else is handed to
+  the renderer untouched, so the width, mapping and profile checks, and their
+  error messages, are the ones that were already there.
+- `src/types.js` gained `RenderLanguage` and
+  `ReceiptPrinterRendererOptions`, which is `RendererOptions` intersected with an
+  optional `language`, so that the two option types cannot drift apart.
+
+The UMD decision:
+
+- **A UMD bundle cannot carry a default and named exports at the same time.**
+  With both, rollup falls back to `exports: 'named'` and the global becomes an
+  object with a `default` property, so `new ReceiptPrinterRenderer(...)` from a
+  script tag would break, and the alternative, documenting the global as an
+  object, is exactly what this section set out to remove.
+- **So the UMD build has its own entry, `src/umd.js`**, which imports the class
+  from the package entry and exports it alone, with `exports: 'default'` on the
+  output. The global is the class itself, the same as the encoder's. The other
+  three builds keep the package entry and are explicit about `exports: 'named'`,
+  which also silences rollup's mixed exports warning.
+- **The renderers and the four helpers are static properties of the class**, set
+  as static fields in the class body so that tsc puts them in the declarations,
+  and they are named exports as well. That is what makes the single-export UMD
+  entry possible without losing anything: from a script tag the helpers are
+  `ReceiptPrinterRenderer.stitch`, `ReceiptPrinterRenderer.toImageData` and so
+  on, which is what the browser bundle already looked like, and
+  `ReceiptPrinterRenderer.EscPosRenderer` still resolves for pages written
+  against the old global.
+- The `require` of the cjs build now returns the namespace, `{default,
+  ReceiptPrinterRenderer, EscPosRenderer, ...}`, so CommonJS destructures, which
+  is what the documentation shows.
+
+Tests:
+
+- `test/receipt-printer-renderer.js` has 21 tests: the export shape and the
+  statics, the language list and that it cannot be changed from outside, the
+  default language, the three languages reported back, the unknown language
+  error, the options and the per language defaults and checks, and delegation.
+  Delegation is checked against the renderers themselves over every fixture of
+  both languages, image bytes and all, and `star-line` against the StarPRNT
+  renderer over the StarPRNT fixtures, which is the whole point of that language
+  being in the list.
+- **`npm run test:umd`** evaluates `dist/receipt-printer-renderer.umd.js` in a
+  `node:vm` context that has no `exports`, no `module` and no `define`, which is
+  what a script tag gives it, and asserts that the global is a function, that the
+  statics are there and that it renders in all three languages. It needs a build,
+  so it is a script of its own next to `test:types`, and mocha does not see it
+  because it runs `test/` without recursion. It lives in `test/umd/` and is
+  linted like everything else.
+- The arrays that come out of the bundle have the `Array` prototype of its own
+  context, so the check compares the language list as text instead of with
+  `deepEqual`.
+- The smoke test constructs the unified renderer from a
+  `ReceiptPrinterRendererOptions` object, reads `languages`, `language` and
+  `columns`, renders, and names the class as a type, which is what proves the
+  default export is declared as a class and not as a value.
+
+Documentation and example:
+
+- `documentation/usage.md` leads with the unified class everywhere, from the
+  installation snippets to the preview, and the renderers of one language moved
+  into a section of their own, `The renderer of one language`, with their static
+  property and the `star-line` note.
+- **The Driver integration section of the design document was rewritten** around
+  the new contract: the application passes the class or a loader returning it,
+  the driver constructs it with the language, width, commands and codepage
+  mapping of the profile, and reports the renderer's language and mapping in the
+  connected event.
+- **The decision that a driver without a renderer throws is reversed**, recorded
+  as such in the Decisions section and applied to the two branch sections.
+  Without a renderer a driver reports the raw protocol name, `star-graphics` or
+  `meow`, and passes the bytes through unchanged. Throwing would break every
+  application that already speaks those protocols, which is what the cat printer
+  driver required until now, and it would make the renderer a condition for
+  connecting to a printer an application may only want to talk to directly. The
+  meow branch is a minor version of that driver again, not a major one, because
+  nothing is taken away.
+- The profile's `graphics` section now names the language as well, which is what
+  lets a driver construct the renderer without a table of classes and makes
+  moving the TSP100 to StarPRNT a one line change.
+- `examples/preview.html` uses the unified class, offers Star Line Mode as a
+  third option, and takes the languages of the select from
+  `ReceiptPrinterRenderer.languages`. Verified in `chrome-headless-shell`: all
+  three languages render, 576 by 895 dots of paper for ESC/POS and 576 by 939 for
+  both Star languages, and the page needed the class check to change from
+  `typeof !== 'object'` to `typeof !== 'function'`, which is the whole UMD change
+  in one line.
+
+Acceptance:
+
+- `npm test` 750 passing, `npm run build` clean, `npm run test:types` and
+  `npm run test:umd` pass. Version 0.2.0, nothing published, nothing committed.

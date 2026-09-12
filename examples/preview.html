@@ -111,6 +111,7 @@
             <select id="language">
                 <option value="esc-pos" selected>ESC/POS</option>
                 <option value="star-prnt">StarPRNT</option>
+                <option value="star-line">Star Line Mode</option>
             </select>
         </div>
 
@@ -150,7 +151,7 @@ Table 12, two guests</textarea>
      * Encode a small receipt: a header, the text from the textarea, a table, a
      * barcode, a QR code and a cut
      *
-     * @param  {string}       name   The printer language, 'esc-pos' or 'star-prnt'
+     * @param  {string}       name   The printer language, 'esc-pos', 'star-prnt' or 'star-line'
      * @param  {string}       text   The text to put on the receipt
      * @return {Uint8Array}          The commands
      */
@@ -224,14 +225,11 @@ Table 12, two guests</textarea>
             const bytes = encode(name, message.value);
 
             /* The driver normally does this part. It knows the printer, so it
-               knows the width, the codepage mapping the encoder used and which
-               commands the printer still understands */
+               knows the language, the width, the codepage mapping the encoder
+               used and which commands the printer still understands */
 
-            const Renderer = name === 'esc-pos' ?
-                ReceiptPrinterRenderer.EscPosRenderer :
-                ReceiptPrinterRenderer.StarPrntRenderer;
-
-            const renderer = new Renderer({
+            const renderer = new ReceiptPrinterRenderer({
+                language: name,
                 width: WIDTH,
                 codepageMapping: name === 'esc-pos' ? 'epson' : 'star',
                 commands: [ 'cut' ],
@@ -253,7 +251,7 @@ Table 12, two guests</textarea>
             const images = items.filter((item) => item.type === 'image').length;
 
             status.className = '';
-            status.textContent = `${Renderer.language}: ${bytes.length} bytes encoded, ` +
+            status.textContent = `${renderer.language}: ${bytes.length} bytes encoded, ` +
                 `${items.length} items, ${images} of them images, ` +
                 `${paper.width} by ${paper.height} dots of paper`;
 
@@ -270,7 +268,7 @@ Table 12, two guests</textarea>
         status.className = 'error';
         status.textContent = 'ReceiptPrinterEncoder did not load, this page needs the CDN.';
         document.body.dataset.ready = 'no';
-    } else if (typeof ReceiptPrinterRenderer !== 'object') {
+    } else if (typeof ReceiptPrinterRenderer !== 'function') {
         status.className = 'error';
         status.textContent = 'ReceiptPrinterRenderer did not load, run npm run build first.';
         document.body.dataset.ready = 'no';
@@ -280,7 +278,7 @@ Table 12, two guests</textarea>
 
         const requested = new URLSearchParams(location.search).get('language');
 
-        if (requested === 'esc-pos' || requested === 'star-prnt') {
+        if (ReceiptPrinterRenderer.languages.includes(requested)) {
             language.value = requested;
         }
 

@@ -7,7 +7,8 @@
     write an application against it.
 */
 
-import {
+import ReceiptPrinterRenderer, {
+  ReceiptPrinterRenderer as NamedReceiptPrinterRenderer,
   EscPosRenderer,
   StarPrntRenderer,
   toPbm,
@@ -25,13 +26,19 @@ import type {
   FeedItem,
   UnknownItem,
   RenderCommand,
+  RenderLanguage,
   RendererOptions,
+  ReceiptPrinterRendererOptions,
   StitchOptions,
 } from '@point-of-sale/receipt-printer-renderer';
 
 /* The static language property, which drivers report in their connected event */
 
 const languages: string[] = [EscPosRenderer.language, StarPrntRenderer.language];
+
+/* And the languages of the unified renderer */
+
+const supported: RenderLanguage[] = ReceiptPrinterRenderer.languages;
 
 /* Constructing a renderer */
 
@@ -50,16 +57,40 @@ const star = new StarPrntRenderer({width: 576, codepageMapping: 'star', commands
 
 const columns: number = escpos.columns + star.columns;
 
+/* The unified renderer, which takes the same options plus the language, the
+   way a driver constructs it */
+
+const rendererOptions: ReceiptPrinterRendererOptions = {
+  language: 'star-line',
+  width: 576,
+  codepageMapping: 'star',
+  commands,
+};
+
+const renderer: ReceiptPrinterRenderer = new ReceiptPrinterRenderer(rendererOptions);
+const fallback = new NamedReceiptPrinterRenderer({width: 384});
+
+const language: RenderLanguage = renderer.language;
+const total: number = renderer.columns + fallback.columns;
+
 /* Rendering, from a Uint8Array and from an array of numbers */
 
 const items: RenderItem[] = escpos.render(new Uint8Array([0x1b, 0x40, 0x41, 0x0a]));
 const more: RenderItem[] = star.render([0x1b, 0x40, 0x41, 0x0a]);
+const unified: RenderItem[] = renderer.render(new Uint8Array([0x1b, 0x40, 0x41, 0x0a]));
+
+/* The renderers and the helpers are static properties as well, which is how
+   the UMD global reaches them */
+
+const attached: typeof EscPosRenderer = ReceiptPrinterRenderer.EscPosRenderer;
+const attachedStar: typeof StarPrntRenderer = ReceiptPrinterRenderer.StarPrntRenderer;
+const attachedStitch: typeof stitch = ReceiptPrinterRenderer.stitch;
 
 /* Narrowing the items by their type */
 
 const images: ImageItem[] = [];
 
-for (const item of items.concat(more)) {
+for (const item of items.concat(more).concat(unified)) {
   switch (item.type) {
     case 'image': {
       const image: ImageItem = item;
@@ -118,7 +149,13 @@ const pixels: ImageData = toImageData(paper);
 const withConstructor: ImageData = toImageData(first, ImageData);
 
 void languages;
+void supported;
 void columns;
+void language;
+void total;
+void attached;
+void attachedStar;
+void attachedStitch;
 void plain;
 void pbm;
 void png;

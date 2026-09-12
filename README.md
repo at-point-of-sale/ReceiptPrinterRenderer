@@ -17,9 +17,10 @@ Render the ESC/POS and StarPRNT commands created by [ReceiptPrinterEncoder](http
 Some receipt printers have no fonts and no barcode engine. They only accept images. This library takes the bytes produced by ReceiptPrinterEncoder, interprets them the way a real printer would, and produces a stream of image segments and the few commands the target printer still understands, such as cut and pulse.
 
 ```js
-import { EscPosRenderer } from '@point-of-sale/receipt-printer-renderer';
+import ReceiptPrinterRenderer from '@point-of-sale/receipt-printer-renderer';
 
-const renderer = new EscPosRenderer({
+const renderer = new ReceiptPrinterRenderer({
+    language: 'esc-pos',
     width: 576,
     codepageMapping: 'epson',
     commands: ['cut', 'pulse', 'feed'],
@@ -36,7 +37,7 @@ const items = renderer.render(bytes);
 */
 ```
 
-There are two renderers, sharing the same painter and output format:
+`ReceiptPrinterRenderer` takes the language as an option, the way ReceiptPrinterEncoder does: `esc-pos`, `star-prnt` or `star-line`. Underneath are two renderers, sharing the same painter and output format, which are named exports for code that only ever needs one language:
 
 - `EscPosRenderer` renders the commands the encoder emits for the `esc-pos` language.
 - `StarPrntRenderer` renders the commands the encoder emits for the `star-prnt` and `star-line` languages.
@@ -50,7 +51,7 @@ And there are four helpers to do something with the images:
 
 Text is drawn with a built in bitmap font, [Iosevka](https://github.com/be5invis/Iosevka) Medium rasterized into the 12 by 24 cell of font A and the 8 by 16 cell of font B, with the box drawing characters drawn on the dot grid so that boxes and rules close.
 
-The renderer is normally not used directly, but constructed by a printer driver such as [WebUSBReceiptPrinter](https://github.com/NielsLeenheer/WebUSBReceiptPrinter), which passes the images on to the printer in the format the printer expects. Applications keep using ReceiptPrinterEncoder exactly as they do for printers with native ESC/POS support.
+The renderer is normally not used directly, but constructed by a printer driver such as [WebUSBReceiptPrinter](https://github.com/NielsLeenheer/WebUSBReceiptPrinter), which knows the language, the width and the commands of the printer and passes the images on in the format the printer expects. The application hands the driver the class, or a function that imports it when a graphics printer turns up. Applications keep using ReceiptPrinterEncoder exactly as they do for printers with native ESC/POS support.
 
 See [Usage and installation](documentation/usage.md) for the options, the item stream and a preview example, and the [design document](documentation/design.md) for the architecture, the output contract and the plan for driver support.
 

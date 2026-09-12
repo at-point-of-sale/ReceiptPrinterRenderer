@@ -8,6 +8,7 @@ Render the ESC/POS and StarPRNT commands created by [ReceiptPrinterEncoder](http
 - [Usage and installation](usage.md)
   - [Installation](#installation)
   - [Creating a renderer](#creating-a-renderer)
+  - [The renderer of one language](#the-renderer-of-one-language)
   - [The item stream](#the-item-stream)
   - [Commands the printer supports](#commands-the-printer-supports)
   - [Feed items and maximum height](#feed-items-and-maximum-height)
@@ -31,34 +32,42 @@ Install the package using npm:
 
     npm install @point-of-sale/receipt-printer-renderer --save
 
-The entry point uses named exports, because there are several renderers and helpers:
+The default export is `ReceiptPrinterRenderer`, which renders every language the encoder speaks:
 
 ```js
-import { EscPosRenderer, StarPrntRenderer, stitch, toImageData, toPbm, toPng } from '@point-of-sale/receipt-printer-renderer';
+import ReceiptPrinterRenderer from '@point-of-sale/receipt-printer-renderer';
+```
+
+The same class, the renderer of one language and the image format helpers are named exports as well:
+
+```js
+import { ReceiptPrinterRenderer, EscPosRenderer, StarPrntRenderer, stitch, toImageData, toPbm, toPng } from '@point-of-sale/receipt-printer-renderer';
 ```
 
 Or the CommonJS way:
 
 ```js
-const { EscPosRenderer } = require('@point-of-sale/receipt-printer-renderer');
+const { ReceiptPrinterRenderer } = require('@point-of-sale/receipt-printer-renderer');
 ```
 
-The `dist` folder contains bundles that can be directly used in the browser. Load the `receipt-printer-renderer.umd.js` file and use the `ReceiptPrinterRenderer` global, which holds the same names.
+The `dist` folder contains bundles that can be directly used in the browser. Load the `receipt-printer-renderer.umd.js` file and use the `ReceiptPrinterRenderer` global, which is the class itself.
 
 ```html
 <script src='dist/receipt-printer-renderer.umd.js'></script>
 
 <script>
 
-    let renderer = new ReceiptPrinterRenderer.EscPosRenderer({ width: 576 });
+    let renderer = new ReceiptPrinterRenderer({ language: 'esc-pos', width: 576 });
 
 </script>
 ```
 
+In the browser bundle the renderer of one language and the four helpers are properties of the global, `ReceiptPrinterRenderer.EscPosRenderer`, `ReceiptPrinterRenderer.stitch` and so on, because a script tag has nowhere else to put them.
+
 There is also a modern ES6 module, `receipt-printer-renderer.esm.js`, in the same folder.
 
 ```js
-import { EscPosRenderer } from 'receipt-printer-renderer.esm.js';
+import ReceiptPrinterRenderer from 'receipt-printer-renderer.esm.js';
 ```
 
 The browser bundles contain everything, the Node and bundler builds keep `@point-of-sale/codepage-encoder` and `lean-qr` external.
@@ -67,10 +76,11 @@ The browser bundles contain everything, the Node and bundler builds keep `@point
 
 ### Creating a renderer
 
-There is one renderer per printer language: `EscPosRenderer` for ESC/POS and `StarPrntRenderer` for StarPRNT and Star Line Mode. Both take the same options and produce the same kind of output.
+`ReceiptPrinterRenderer` takes the language of the commands as an option, the way ReceiptPrinterEncoder does, so a receipt is rendered with the language it was encoded with:
 
 ```js
-let renderer = new EscPosRenderer({
+let renderer = new ReceiptPrinterRenderer({
+    language: 'esc-pos',
     width: 576,
     codepageMapping: 'epson',
     commands: [ 'cut', 'pulse' ],
@@ -86,6 +96,7 @@ These are the options:
 
 | Option | Default | Meaning |
 |---|---|---|
+| `language` | `esc-pos` | The language the commands are in: `esc-pos`, `star-prnt` or `star-line`. Anything else throws. |
 | `width` | required | Width of the print area in dots. Must be a multiple of 8. |
 | `codepageMapping` | `epson` for ESC/POS, `star` for StarPRNT | The mapping the encoder used, so that the codepage selection command can be turned back into a codepage. The same names as the encoder's mappings for that language. |
 | `commands` | `[]` | Command types that may appear in the output: `cut`, `pulse`, `feed` and `unknown`. Everything else falls back, see [Commands the printer supports](#commands-the-printer-supports). |
@@ -103,11 +114,38 @@ The width and the number of columns you configure the encoder with must agree. F
 console.log(renderer.columns);       //  48
 ```
 
-Every renderer class has a static `language` property, `esc-pos` for `EscPosRenderer` and `star-prnt` for `StarPrntRenderer`. Drivers report it in their connected event, so an application that switches renderer changes one import and nothing else.
+It also reports the language it was created for, which is what a driver puts in its connected event, and the class knows which languages there are:
+
+```js
+console.log(renderer.language);                  //  esc-pos
+console.log(ReceiptPrinterRenderer.languages);   //  [ 'esc-pos', 'star-prnt', 'star-line' ]
+```
+
+<br>
+
+### The renderer of one language
+
+StarPRNT and Star Line Mode are the same set of commands, so there are two renderers underneath: `EscPosRenderer` for ESC/POS and `StarPrntRenderer` for both Star languages. They are named exports, they take the same options without `language`, and they produce exactly the same items. Use them when the language is fixed anyway, or when you want to bundle one language only.
+
+```js
+import { EscPosRenderer, StarPrntRenderer } from '@point-of-sale/receipt-printer-renderer';
+
+let renderer = new EscPosRenderer({ width: 576, codepageMapping: 'epson', commands: [ 'cut', 'pulse' ] });
+```
+
+Both classes have a static `language` property, for code that is handed a class instead of a language:
 
 ```js
 console.log(EscPosRenderer.language);    //  esc-pos
 console.log(StarPrntRenderer.language);  //  star-prnt
+```
+
+A `ReceiptPrinterRenderer` created for `star-line` renders with `StarPrntRenderer`, but reports `star-line`, because that is the language the encoder that produced the commands was configured with:
+
+```js
+let renderer = new ReceiptPrinterRenderer({ language: 'star-line', width: 576, codepageMapping: 'star' });
+
+console.log(renderer.language);    //  star-line
 ```
 
 <br>
@@ -127,7 +165,7 @@ let bytes = encoder
     .pulse(0, 100, 500)
     .encode();
 
-let renderer = new EscPosRenderer({ width: 576, commands: [ 'cut', 'pulse' ] });
+let renderer = new ReceiptPrinterRenderer({ width: 576, commands: [ 'cut', 'pulse' ] });
 
 let items = renderer.render(bytes);
 
@@ -177,7 +215,7 @@ With the default of `[]` the whole receipt comes out as image items and nothing 
 Receipts contain many blank rows, especially the feed before a cut, and in an image a blank row costs as many bytes as a printed one. When `feed` is in `commands`, a run of blank rows at least `feedThreshold` dots tall becomes a feed item instead of white rows, and the image is split around it. Printers with a feed command, such as the Bluetooth cat printers, waste no bandwidth on white paper.
 
 ```js
-let renderer = new EscPosRenderer({
+let renderer = new ReceiptPrinterRenderer({
     width: 384,
     commands: [ 'feed' ],
     feedThreshold: 24,
@@ -187,7 +225,7 @@ let renderer = new EscPosRenderer({
 `maxHeight` splits image items that grow taller than the limit. The split is on a row boundary, the pieces are consecutive image items, and nothing is lost. Use it for printers with a maximum raster height per command, and for flow control over slow links.
 
 ```js
-let renderer = new EscPosRenderer({ width: 576, maxHeight: 256 });
+let renderer = new ReceiptPrinterRenderer({ width: 576, maxHeight: 256 });
 ```
 
 <br>
@@ -246,7 +284,7 @@ Encoding, rendering and drawing the result on a canvas is the whole preview. The
 
 ```js
 import ReceiptPrinterEncoder from '@point-of-sale/receipt-printer-encoder';
-import { EscPosRenderer, stitch, toImageData } from '@point-of-sale/receipt-printer-renderer';
+import ReceiptPrinterRenderer, { stitch, toImageData } from '@point-of-sale/receipt-printer-renderer';
 
 let encoder = new ReceiptPrinterEncoder({ language: 'esc-pos', columns: 48 });
 
@@ -270,7 +308,7 @@ let bytes = encoder
 
 /* Render the receipt the way a printer would print it */
 
-let renderer = new EscPosRenderer({ width: 576, commands: [ 'cut' ] });
+let renderer = new ReceiptPrinterRenderer({ language: 'esc-pos', width: 576, commands: [ 'cut' ] });
 let items = renderer.render(bytes);
 
 /* And put the paper on the canvas */
@@ -285,7 +323,7 @@ canvas.height = paper.height;
 canvas.getContext('2d').putImageData(image, 0, 0);
 ```
 
-To preview the same receipt for a Star printer, encode it with `language: 'star-prnt'` and render it with `StarPrntRenderer`. Nothing else changes.
+To preview the same receipt for a Star printer, encode it with `language: 'star-prnt'` and render it with the same language and `codepageMapping: 'star'`. Nothing else changes.
 
 <br>
 
@@ -294,20 +332,22 @@ To preview the same receipt for a Star printer, encode it with `language: 'star-
 Normally you do not construct a renderer yourself. The driver does, because the driver knows the printer: its width, the codepage mapping and the commands it still understands. Your application passes the class:
 
 ```js
-import { EscPosRenderer } from '@point-of-sale/receipt-printer-renderer';
+import ReceiptPrinterRenderer from '@point-of-sale/receipt-printer-renderer';
 
-let printer = new WebUSBReceiptPrinter({ renderer: EscPosRenderer });
+let printer = new WebUSBReceiptPrinter({ renderer: ReceiptPrinterRenderer });
 ```
 
 The option also accepts an async function that returns the class, for applications that want to load the renderer only when a graphics printer is connected:
 
 ```js
 let printer = new WebUSBReceiptPrinter({
-    renderer: () => import('@point-of-sale/receipt-printer-renderer').then((m) => m.EscPosRenderer),
+    renderer: () => import('@point-of-sale/receipt-printer-renderer').then((m) => m.default),
 });
 ```
 
-The driver then reports `language` and `columns` in its connected event, and your application keeps using ReceiptPrinterEncoder exactly as it does for printers with native ESC/POS support. See [Driver integration](design.md#driver-integration) in the design document for the full contract.
+The driver knows which language the printer should be fed, so it constructs the renderer with that language, the width of the paper, the codepage mapping that belongs to the language and the commands the printer still understands. It then reports `language`, `codepageMapping` and `columns` in its connected event, and your application keeps using ReceiptPrinterEncoder exactly as it does for printers with native ESC/POS support.
+
+Passing a renderer is optional. Without one a driver for a printer that only prints images reports the name of the raw protocol instead, `star-graphics` for the TSP100 family and `meow` for the cat printers, and passes the bytes you give it through unchanged, for applications that build those packets themselves. See [Driver integration](design.md#driver-integration) in the design document for the full contract.
 
 <br>
 

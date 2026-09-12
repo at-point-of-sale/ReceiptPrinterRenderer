@@ -73,6 +73,8 @@
 
 /** @typedef {'cut' | 'pulse' | 'feed' | 'unknown'} RenderCommand */
 
+/** @typedef {'esc-pos' | 'star-prnt' | 'star-line'} RenderLanguage */
+
 /**
  * @typedef {object} RendererOptions
  * @property {number} width                              Width of the print area in dots, a multiple of 8
@@ -83,6 +85,13 @@
  * @property {string|Profile} [profile]                  Printer family defaults, a name or a profile, per language
  * @property {number} [feedThreshold]                    Runs of blank rows at least this tall become feed items
  * @property {Object<string, PackedFont>} [font]         Font data, in the packed format of the built in fonts
+ */
+
+/**
+ * The options of the unified renderer: the options of a renderer, plus the
+ * language of the commands it is given
+ *
+ * @typedef {RendererOptions & {language?: RenderLanguage}} ReceiptPrinterRendererOptions
  */
 
 export {};

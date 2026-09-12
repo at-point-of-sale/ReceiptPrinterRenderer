@@ -5,13 +5,15 @@ import dts from 'rollup-plugin-dts';
 
 export default [
 
-	// Browser-friendly UMD build
+	// Browser-friendly UMD build, from the entry that only has the default
+	// export, so that the global is the class itself
 	{
-		input: 'src/receipt-printer-renderer.js',
+		input: 'src/umd.js',
 		output: {
 			name: 'ReceiptPrinterRenderer',
 			file: 'dist/receipt-printer-renderer.umd.js',
 			sourcemap: true,
+			exports: 'default',
 			format: 'umd'
 		},
 		plugins: [
@@ -27,6 +29,7 @@ export default [
 		output: {
 			file: 'dist/receipt-printer-renderer.esm.js',
 			sourcemap: true,
+			exports: 'named',
 			format: 'es'
 		},
 		plugins: [
@@ -41,8 +44,8 @@ export default [
 		input: 'src/receipt-printer-renderer.js',
 		external: ['@point-of-sale/codepage-encoder', 'lean-qr'],
 		output: [
-			{ file: 'dist/receipt-printer-renderer.cjs', format: 'cjs' },
-			{ file: 'dist/receipt-printer-renderer.mjs', format: 'es' }
+			{ file: 'dist/receipt-printer-renderer.cjs', exports: 'named', format: 'cjs' },
+			{ file: 'dist/receipt-printer-renderer.mjs', exports: 'named', format: 'es' }
 		]
 	},
 

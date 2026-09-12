@@ -1,6 +1,6 @@
 {
     "name": "@point-of-sale/receipt-printer-renderer",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "Render ESC/POS commands created by ReceiptPrinterEncoder to 1-bit images, for printers that only support graphics",
     "type": "module",
     "exports": {
@@ -22,7 +22,8 @@
         "lint": "eslint --fix src/*.js src/**/*.js test/*.js test/**/*.js tools/*.js",
         "mocha": "mocha test/",
         "test": "npm run lint && npm run mocha",
-        "test:types": "tsc -p test/types/tsconfig.json"
+        "test:types": "tsc -p test/types/tsconfig.json",
+        "test:umd": "node test/umd/check.js"
     },
     "repository": {
         "type": "git",

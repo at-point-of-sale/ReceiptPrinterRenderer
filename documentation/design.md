@@ -58,6 +58,10 @@ These alternatives were considered and rejected, so that the reasoning is not lo
 
 **Which language the TSP100 uses.** The proof of concept renders ESC/POS on the TSP100 and on the cat printers. Later the TSP100 is expected to move to StarPRNT, so that Star printers get the Star codepage mapping and Star behaviour, while the cat printers stay on ESC/POS. Nothing in the drivers depends on this choice: the driver reports the language of whatever renderer it was given.
 
+**One renderer class per language as the only public API.** Reversed on 2026-09-12. There is now a unified `ReceiptPrinterRenderer` that takes the language as an option and delegates, the way `ReceiptPrinterEncoder` takes the language and picks its implementation. An application that encodes with `language: 'star-prnt'` renders with the same string instead of having to know which class belongs to it, a driver constructs the renderer from the language its profile resolved without a table of classes, and the package gets the default export and the UMD global the encoder has. The two renderers stay named exports, because a driver that only ever sees one language can still be handed the class.
+
+**A driver without a renderer throwing on a graphics printer.** Reversed on 2026-09-12. A driver that is given no renderer reports the raw protocol name, `star-graphics` or `meow`, and passes the bytes of `print()` through unchanged, exactly as it did before it could render. Throwing would break every application that already speaks those protocols itself, which is what the cat printer driver required until now, and it makes the renderer a hard requirement for connecting to a printer that an application may only want to talk to directly. An application that wants rendering passes a renderer and gets `esc-pos`, `star-prnt` or `star-line` in the connected event; one that does not gets the protocol name and knows it is on its own.
+
 **A separate WebBluetoothMeowPrinter driver for the cat printers.** Rejected. WebBluetoothReceiptPrinter already has the cat printer profile with its service and characteristics, a write queue and chunk pacing. A separate project would duplicate all of that. The existing driver gets the same renderer option as the USB driver, and the cat printer becomes one more profile that renders.
 
 <br>
@@ -68,6 +72,7 @@ In scope:
 
 - An `EscPosRenderer` that renders the commands ReceiptPrinterEncoder version 3 emits for the `esc-pos` language, with the `column` and `raster` image modes. This is the language of the proof of concept.
 - A `StarPrntRenderer` that renders the commands the encoder emits for the `star-prnt` and `star-line` languages. Built alongside the ESC/POS renderer, for parity.
+- A `ReceiptPrinterRenderer` that takes the language as an option and delegates to one of the two, the default export of the package and the global of the UMD build.
 - The shared painter, bitmap font, symbology generators and 1-bit image type.
 - Helpers to convert the output to ImageData, PBM and PNG.
 - The `tsp100` branch of WebUSBReceiptPrinter and the `meow` branch of WebBluetoothReceiptPrinter.
@@ -100,7 +105,8 @@ Repository layout, mirroring ReceiptPrinterEncoder:
 
 ```
 src/
-  receipt-printer-renderer.js   entry, exports EscPosRenderer and the helpers
+  receipt-printer-renderer.js   entry, the unified ReceiptPrinterRenderer, the renderers and the helpers
+  umd.js                        entry of the UMD build, the class as the only export
   renderers/
     esc-pos.js                  ESC/POS parser and state machine
     star-prnt.js                StarPRNT parser and state machine
@@ -130,13 +136,14 @@ documentation/
 
 Build and tooling are the same as the encoder: rollup with UMD, ESM, CJS and MJS builds, bundled type declarations from JSDoc through tsc, eslint with the Google config, mocha and chai.
 
-The entry point uses named exports, unlike the encoder, because there will be several renderers and helpers:
+The entry point has a default export, `ReceiptPrinterRenderer`, the unified renderer that takes the language as an option the way the encoder does, and named exports for the same class, the two renderers of one language and the four helpers:
 
 ```js
+import ReceiptPrinterRenderer from '@point-of-sale/receipt-printer-renderer';
 import { EscPosRenderer, StarPrntRenderer, toImageData, toPbm, toPng } from '@point-of-sale/receipt-printer-renderer';
 ```
 
-The UMD build exposes a `ReceiptPrinterRenderer` global holding the same names.
+The UMD build exposes a `ReceiptPrinterRenderer` global that is the class itself, so `new ReceiptPrinterRenderer({ ... })` works from a script tag, exactly as it does for the encoder. A UMD bundle cannot have a default and named exports at the same time, its global would be an object with a `default` property, so the UMD build has its own entry, `src/umd.js`, which exports the class alone, and the two renderers and the four helpers are static properties of the class as well as named exports.
 
 <br>
 
@@ -199,7 +206,8 @@ Emission points are supported commands and the end of the stream, so the rendere
 The driver constructs the renderer, because the driver knows the printer:
 
 ```js
-const renderer = new EscPosRenderer({
+const renderer = new ReceiptPrinterRenderer({
+  language: 'esc-pos',
   width: 576,
   codepageMapping: 'epson',
   commands: ['cut', 'pulse'],
@@ -207,8 +215,15 @@ const renderer = new EscPosRenderer({
 });
 ```
 
+`ReceiptPrinterRenderer` is the unified renderer. It takes the language as an option, mirroring the encoder, and delegates to the renderer of that language. The two renderers of one language take the same options without `language` and can be constructed directly:
+
+```js
+const renderer = new EscPosRenderer({width: 576, codepageMapping: 'epson', commands: ['cut', 'pulse']});
+```
+
 | Option | Default | Meaning |
 |---|---|---|
+| `language` | `esc-pos` | The language the commands are in, one of `esc-pos`, `star-prnt` and `star-line`. Unified renderer only. An unknown language throws. |
 | `width` | required | Width of the print area in dots. Must be a multiple of 8. |
 | `codepageMapping` | `epson` for ESC/POS, `star` for StarPRNT | The mapping the encoder used, so that the codepage selection command can be turned back into a codepage. Same names as the encoder's mappings for that language. |
 | `commands` | `[]` | Command types that may appear in the output. |
@@ -220,7 +235,9 @@ const renderer = new EscPosRenderer({
 
 `width` and the columns the driver reports must agree. Font A is 12 dots wide, so the columns in the driver's connected event are `width / 12`. 576 dots gives 48 columns, 384 dots gives 32, both exact. If they disagree, the encoder wraps text in the wrong place and the renderer cannot repair that.
 
-Every renderer class has a static `language` property, `esc-pos` for `EscPosRenderer` and `star-prnt` for `StarPrntRenderer`. Drivers report it in their connected event, so an application that switches renderer changes one import and nothing else.
+`ReceiptPrinterRenderer.languages` is the list of languages, `['esc-pos', 'star-prnt', 'star-line']`, and an instance reports the language it was created for in its `language` getter. Both Star languages are the same command set, so `StarPrntRenderer` renders both, but a renderer created for `star-line` reports `star-line`: that is the language the encoder that produced the commands was configured with, and it is what the driver reports in its connected event.
+
+The two renderers of one language keep their static `language` property, `esc-pos` for `EscPosRenderer` and `star-prnt` for `StarPrntRenderer`, for a driver or an application that was given a class instead of a language.
 
 <br>
 
@@ -414,6 +431,7 @@ Separate named exports, so that a driver that only needs the items does not pull
 - **Parity.** Every fixture receipt is encoded in both languages. The two renderings must be identical, except for the known differences in line spacing and font B cell height, which the test normalises by using the same profile for both. This is the main reason to build both renderers together. Where a receipt cannot be identical, because the encoder or the printer makes a difference the renderer has to be faithful to, the fixture is in the exception list at the top of the parity test with its reason.
 - **References.** The one dimensional symbologies are checked against JsBarcode, a dev dependency, which encodes the same symbologies to the same modules without a canvas, and the QR codes are read back with jsQR, which decodes the rendered paper the way a phone reads it. Both are dev dependencies of the test suite alone.
 - **No canvas.** Nothing in the test suite needs the native canvas module.
+- **The builds.** Two checks need a build and are therefore scripts of their own, run before a release: `npm run test:types` compiles the TypeScript smoke test against the bundled declarations, and `npm run test:umd` evaluates the UMD bundle in a context without a module system, the way a script tag loads it, and asserts that the global is the class, that the renderers and the helpers are attached to it and that it renders in all three languages.
 
 <br>
 
@@ -421,35 +439,35 @@ Separate named exports, so that a driver that only needs the items does not pull
 
 The contract between a driver and a renderer is deliberately small:
 
-- a constructor taking the options above,
+- a constructor taking the options above, including `language`,
 - a `render(bytes)` method returning items,
-- a static `language` property.
+- a `language` getter reporting the language the renderer was constructed for.
 
-Drivers accept the renderer through an option and never import the package:
+Drivers accept the renderer through an option and never import the package. The application passes the class:
 
 ```js
-import { EscPosRenderer } from '@point-of-sale/receipt-printer-renderer';
+import ReceiptPrinterRenderer from '@point-of-sale/receipt-printer-renderer';
 
-const printer = new WebUSBReceiptPrinter({ renderer: EscPosRenderer });
+const printer = new WebUSBReceiptPrinter({ renderer: ReceiptPrinterRenderer });
 ```
 
 The option also accepts an async function that returns the class, for applications that want to load the renderer only when a graphics printer is connected. With WebUSB the application cannot know beforehand which printer the user will pick:
 
 ```js
 const printer = new WebUSBReceiptPrinter({
-  renderer: () => import('@point-of-sale/receipt-printer-renderer').then((m) => m.EscPosRenderer),
+  renderer: () => import('@point-of-sale/receipt-printer-renderer').then((m) => m.default),
 });
 ```
 
 Rules for drivers:
 
-- The driver constructs the renderer with `width`, `codepageMapping` and `commands`. An optional `rendererOptions` object from the application is merged in, and the driver's own values win on conflict.
-- The connected event reports `language` from the renderer's static property and `codepageMapping` with the value given to the renderer. The mapping follows the renderer: `epson` for an ESC/POS renderer, `star` for a StarPRNT renderer, regardless of the printer. Applications that switch the TSP100 from the ESC/POS renderer to the StarPRNT renderer later change one import, and the connected event follows.
+- The driver constructs the renderer with `language`, `width`, `codepageMapping` and `commands`, all four from the profile of the printer it is connected to. The language is the one the profile's graphics section names, and the codepage mapping is the one that belongs to that language: `epson` for `esc-pos`, `star` for `star-prnt` and `star-line`. An optional `rendererOptions` object from the application is merged in, and the driver's own values win on conflict.
+- The connected event reports `language` from the renderer instance and `codepageMapping` with the value given to the renderer, so that the application configures the encoder for exactly what the renderer will parse. Moving a printer family from one language to another is a change of one line in its profile, and the connected event follows.
 - The connected event also reports `columns`, so applications can configure the encoder without a printer model.
-- When the device is a graphics printer and no renderer was passed, `connect` fails with an error that names the option and the package. Passing ESC/POS bytes to a TSP100 prints garbage and is hard to diagnose.
+- **Without a renderer nothing fails.** When the device is a graphics printer and no renderer was passed, the driver reports the raw protocol name of the printer, `star-graphics` for the TSP100 family and `meow` for the cat printers, and `print(bytes)` passes the bytes through unchanged. Applications that speak those protocols themselves keep working exactly as they did, and an application that wants text simply passes a renderer. The renderer is an option, never a requirement for connecting.
 - The renderer package is declared as an optional peer dependency, so the version range is on record without forcing an install.
-- `print(bytes)` becomes: render to items, wrap each item in the printer's format, send.
-- The wrapper belongs to the profile, not to the driver. A profile that needs rendering carries a `graphics` section with the width, the supported commands and the name of the wrapper. The driver keeps one small wrapper module per wire format, Star raster for the TSP100 and the cat printer packet protocol for the Meow printers, and picks it from the profile. A driver can therefore serve several graphics formats without special cases in its connect and print code.
+- With a renderer, `print(bytes)` becomes: render to items, wrap each item in the printer's format, send.
+- The wrapper belongs to the profile, not to the driver. A profile that can render carries a `graphics` section with the language, the width, the supported commands and the name of the wrapper. The driver keeps one small wrapper module per wire format, Star raster for the TSP100 and the cat printer packet protocol for the Meow printers, and picks it from the profile. A driver can therefore serve several graphics formats without special cases in its connect and print code.
 
 <br>
 
@@ -462,8 +480,8 @@ The device database already identifies the graphics models: the Star profile res
 ### Changes on the branch
 
 1. **Constructor option** `renderer`, class or loader, and `rendererOptions`.
-2. **Profile.** The Star profile gains a `graphics` section that applies when the language resolves to `star-graphics`: width 576, commands `['cut', 'pulse', 'feed']`, wrapper `star-raster`.
-3. **Open.** When the resolved language is `star-graphics`, load the renderer, construct it from the graphics section with the mapping that belongs to the renderer's language, and report the renderer's language, that mapping and 48 columns in the connected event. Without a renderer, throw.
+2. **Profile.** The Star profile gains a `graphics` section that applies when the language resolves to `star-graphics`: language `esc-pos` for the proof of concept, width 576, commands `['cut', 'pulse', 'feed']`, wrapper `star-raster`.
+3. **Open.** When the resolved language is `star-graphics`, load the renderer, construct it from the graphics section with the language it names and the mapping that belongs to that language, and report the renderer's language, that mapping and 48 columns in the connected event. Without a renderer, report the language `star-graphics` and pass the bytes of `print()` through unchanged, which is what an application that builds Star raster itself already expects.
 4. **Print.** Render the job, then wrap it with the Star raster wrapper below.
 5. **Status.** The status bytes the TSP100 sends back are not part of this branch.
 
@@ -513,7 +531,7 @@ Once the branch is verified, the same change moves to NetworkReceiptPrinter for 
 
 ## WebBluetoothReceiptPrinter, branch meow
 
-A branch of WebBluetoothReceiptPrinter to add rendering for the cat printers. The driver already has a cat printer profile that reports the language `meow` and passes bytes through unchanged, which requires the application to build the packets itself. On this branch the profile renders: applications encode ESC/POS as usual, the driver renders and packs. CapacitorBluetoothReceiptPrinter carries the same profile and can follow later with the same wrapper.
+A branch of WebBluetoothReceiptPrinter to add rendering for the cat printers. The driver already has a cat printer profile that reports the language `meow` and passes bytes through unchanged, which requires the application to build the packets itself. On this branch the profile can render as well: applications encode ESC/POS as usual, the driver renders and packs, and an application that passes no renderer keeps the passthrough it has today. CapacitorBluetoothReceiptPrinter carries the same profile and can follow later with the same wrapper.
 
 ### Devices
 
@@ -530,8 +548,8 @@ The MXW01 and newer models use a different protocol and are out of scope.
 ### Changes on the branch
 
 1. **Constructor option** `renderer`, class or loader, and `rendererOptions`, the same contract as the USB driver.
-2. **Profile.** The cat printer profile gains a `graphics` section: width 384, commands `['feed']`, wrapper `meow`, and a `maxHeight` that keeps a single render call from allocating large images, 256 rows is a reasonable start. The existing `messageSize` and `sleepAfterCommand` stay, they pace the packets.
-3. **Open.** When the profile has a `graphics` section and a renderer was passed, construct the renderer from it with the mapping that belongs to the renderer's language, `epson` for the ESC/POS renderer planned for these printers, and report the renderer's language, that mapping and 32 columns in the connected event. Without a renderer, `connect` throws, the same as the TSP100 in the USB driver. The old passthrough behaviour with the `meow` language is removed on this branch, which makes the branch a major version of the driver.
+2. **Profile.** The cat printer profile gains a `graphics` section: language `esc-pos`, width 384, commands `['feed']`, wrapper `meow`, and a `maxHeight` that keeps a single render call from allocating large images, 256 rows is a reasonable start. The existing `messageSize` and `sleepAfterCommand` stay, they pace the packets.
+3. **Open.** When the profile has a `graphics` section and a renderer was passed, construct the renderer from it with the language it names and the mapping that belongs to that language, `epson` for the ESC/POS renderer planned for these printers, and report the renderer's language, that mapping and 32 columns in the connected event. Without a renderer, the profile keeps the behaviour it has today: it reports the language `meow` and passes the bytes of `print()` through unchanged, so applications that build the packets themselves keep working and the branch stays a minor version of the driver.
 4. **Print.** Render the job, then wrap it with the cat printer wrapper, one packet per queue entry.
 5. **Notifications.** The notify characteristic is subscribed during open, so the wrapper can use status notifications for flow control.
 
@@ -614,7 +632,7 @@ Settled on 2026-09-11:
 
 Still open:
 
-- Cat printer, partly settled on 2026-09-12 with an MX10 (firmware 1.0.11): it exposes the AE30 service with AE01 as write-without-response only, so the driver writes without response when the characteristic demands it; it does not advertise AE30, so the profile also accepts the known model names in the picker; it answers the state and info requests and sends the resume packet after every job, no pause was seen on a 64-row job. Still open: the energy and speed values that give the best output, and whether the run length encoded row command is worth using.
+- Cat printer, partly settled on 2026-09-12 with an MX10 (firmware 1.0.11): it exposes the AE30 service with AE01 as write-without-response only, so the driver writes without response when the characteristic demands it; it does not advertise AE30, so the profile also accepts the known model names in the picker; it answers the state and info requests and sends the resume packet after every job, no pause was seen on a 64-row job. Verified on paper on 2026-09-12 with the MX10 through the playground: text, tables, images and barcodes print as intended, with run length encoded rows, 200 byte writes at 20 ms and a 30 second resume timeout; a shorter timeout corrupted dense barcode areas because the printer stays paused while it prints its backlog. Still open: the energy and speed values that give the best output.
 
 <br>
 
