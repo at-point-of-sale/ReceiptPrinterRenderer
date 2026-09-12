@@ -148,6 +148,12 @@ const HRI_GAP = 4;
  * accumulates the rows of the committed lines and cuts image items from them.
  * It is shared by the parsers of every language, so it knows nothing about
  * bytes or commands, only about text, styles and blocks.
+ *
+ * It holds the paper of the lines that were committed and not flushed yet, and
+ * a position on it, which is where the print head is: a line is committed at
+ * the position and the position moves on by its height, so the two are the same
+ * number until a reverse feed moves the position back over rows that are
+ * already on the paper, which the lines behind it are then drawn over.
  */
 class Painter {
   #width;
@@ -175,8 +181,10 @@ class Painter {
 
   #buffer;
   #rows;
+  #position;
   #capacity;
   #blankRuns;
+  #overprinted;
 
   #items;
 
@@ -550,6 +558,42 @@ class Painter {
   }
 
   /**
+     * Commit the current line and move the paper back by a number of dot rows,
+     * which is what the reverse feed commands do. The line is printed first,
+     * because a reverse feed is a print command, and the paper then moves back
+     * over the rows that are already on it, so that everything after this
+     * overprints them.
+     *
+     * The move is clamped to the rows the painter still holds: the rows of the
+     * lines that were already flushed to an image item are gone, and row 0 of
+     * the buffer is the paper the reverse feed cannot reach past. A printer
+     * clamps in the same place for its own reason, the mechanism, which is why
+     * the commands that do this have a maximum of a few lines.
+     *
+     * @param  {number}   dots   Number of dot rows to move back
+     */
+  reverseFeed(dots) {
+    this.#commit(0);
+
+    if (!Number.isInteger(dots) || dots <= 0) {
+      return;
+    }
+
+    this.#position = Math.max(0, this.#position - dots);
+  }
+
+  /**
+     * Commit the current line and move the paper back by a number of lines
+     * instead of by dot rows, which is what ESC e does. The line is the current
+     * line spacing, the same unit lineFeed() advances by.
+     *
+     * @param  {number}   [count]   Number of lines to move back
+     */
+  reverseLineFeed(count = 1) {
+    this.reverseFeed(this.#lineSpacing * count);
+  }
+
+  /**
      * Throw away the line that is being composed, without advancing the paper.
      * The Star CAN command cancels the print data of the line buffer, which is
      * this, and ESC @ does it as part of a full initialize.
@@ -873,16 +917,21 @@ class Painter {
   }
 
   /**
-     * Finish the stream: commit whatever line is pending, flush the rows, and
-     * return the items. The painter is empty and initialized afterwards, ready
-     * for another stream, with the options it was built with.
+     * Finish the stream: throw away the line that is still being composed,
+     * flush the rows and return the items. The painter is empty and initialized
+     * afterwards, ready for another stream, with the options it was built with.
+     *
+     * The unfinished line is discarded and not committed, because that is what
+     * the printer does with it: the cells sit in the line buffer and nothing
+     * prints them until a line feed, a print command or the next job arrives.
+     * A receipt that ends its last line prints in full, the line feed of that
+     * line committed it; text without its line feed stays in the buffer, the
+     * way it does on paper.
      *
      * @return {object[]}   The items of this stream, in order
      */
   end() {
-    if (this.#line.cells.length) {
-      this.lineFeed();
-    }
+    this.cancel();
 
     this.#flush();
 
@@ -912,7 +961,9 @@ class Painter {
     this.#buffer = new Uint8Array(Bitmap.rowBytes(this.#width) * INITIAL_ROWS);
     this.#capacity = INITIAL_ROWS;
     this.#rows = 0;
+    this.#position = 0;
     this.#blankRuns = [];
+    this.#overprinted = false;
   }
 
   /**
@@ -1128,8 +1179,15 @@ class Painter {
   }
 
   /**
-     * Append the rows of a bitmap of the full print width, remembering which of
-     * them are blank, so that flushing does not need a second pass
+     * Append the rows of a bitmap of the full print width at the paper
+     * position, remembering which of them are blank, so that flushing does not
+     * need a second pass.
+     *
+     * A row beyond the rows the buffer holds is written and extends the paper.
+     * A row inside them is a row a reverse feed moved the paper back over, so
+     * it is drawn over with OR, the way a second pass of the print head adds
+     * dots to the ones that are already there, and the blank runs are rescanned
+     * at the flush because a row that was blank may not be blank any more.
      *
      * @param  {Bitmap}   bitmap   The rows to append
      */
@@ -1140,11 +1198,23 @@ class Painter {
 
     const rowBytes = Bitmap.rowBytes(this.#width);
 
-    this.#reserve(this.#rows + bitmap.height);
-    this.#buffer.set(bitmap.data.subarray(0, rowBytes * bitmap.height), this.#rows * rowBytes);
+    this.#reserve(this.#position + bitmap.height);
 
     for (let y = 0; y < bitmap.height; y++) {
-      const offset = (this.#rows + y) * rowBytes;
+      const row = this.#position + y;
+      const offset = row * rowBytes;
+      const source = bitmap.data.subarray(y * rowBytes, (y + 1) * rowBytes);
+
+      if (row < this.#rows) {
+        for (let byte = 0; byte < rowBytes; byte++) {
+          this.#buffer[offset + byte] |= source[byte];
+        }
+
+        this.#overprinted = true;
+        continue;
+      }
+
+      this.#buffer.set(source, offset);
 
       let blank = true;
 
@@ -1156,16 +1226,18 @@ class Painter {
       }
 
       if (blank) {
-        this.#markBlank(this.#rows + y);
+        this.#markBlank(row);
       }
     }
 
-    this.#rows += bitmap.height;
+    this.#advance(bitmap.height);
   }
 
   /**
      * Append rows that are white by construction, an empty line or the gap
-     * below a line, without looking at them
+     * below a line, without looking at them. White over a row the paper moved
+     * back over changes nothing, so those rows are stepped over rather than
+     * cleared.
      *
      * @param  {number}   count   Number of rows to append
      */
@@ -1176,14 +1248,31 @@ class Painter {
 
     const rowBytes = Bitmap.rowBytes(this.#width);
 
-    this.#reserve(this.#rows + count);
-    this.#buffer.fill(0, this.#rows * rowBytes, (this.#rows + count) * rowBytes);
+    this.#reserve(this.#position + count);
 
     for (let y = 0; y < count; y++) {
-      this.#markBlank(this.#rows + y);
+      const row = this.#position + y;
+
+      if (row < this.#rows) {
+        continue;
+      }
+
+      this.#buffer.fill(0, row * rowBytes, (row + 1) * rowBytes);
+      this.#markBlank(row);
     }
 
-    this.#rows += count;
+    this.#advance(count);
+  }
+
+  /**
+     * Move the paper on by a number of rows, extending it when the position
+     * passes the rows the buffer holds
+     *
+     * @param  {number}   count   Number of rows the paper moved
+     */
+  #advance(count) {
+    this.#position += count;
+    this.#rows = Math.max(this.#rows, this.#position);
   }
 
   /**
@@ -1200,6 +1289,35 @@ class Painter {
     }
 
     this.#blankRuns.push({start: row, end: row + 1});
+  }
+
+  /**
+     * Work out the blank runs of the whole buffer again. A reverse feed draws
+     * ink over rows that were recorded as blank when they were appended, and
+     * the runs of those rows are the only thing the painter cannot fix up while
+     * it draws, so they are counted once, at the flush that reads them.
+     */
+  #rescan() {
+    const rowBytes = Bitmap.rowBytes(this.#width);
+
+    this.#blankRuns = [];
+
+    for (let row = 0; row < this.#rows; row++) {
+      const offset = row * rowBytes;
+
+      let blank = true;
+
+      for (let byte = 0; byte < rowBytes; byte++) {
+        if (this.#buffer[offset + byte] !== 0) {
+          blank = false;
+          break;
+        }
+      }
+
+      if (blank) {
+        this.#markBlank(row);
+      }
+    }
   }
 
   /**
@@ -1234,10 +1352,16 @@ class Painter {
   #flush() {
     if (this.#rows === 0) {
       this.#blankRuns = [];
+      this.#position = 0;
+      this.#overprinted = false;
       return;
     }
 
-    let position = 0;
+    if (this.#overprinted) {
+      this.#rescan();
+    }
+
+    let emitted = 0;
 
     if (this.#commands.has('feed')) {
       for (const run of this.#blankRuns) {
@@ -1245,17 +1369,19 @@ class Painter {
           continue;
         }
 
-        this.#emit(position, run.start);
+        this.#emit(emitted, run.start);
         this.#items.push({type: 'feed', height: run.end - run.start});
 
-        position = run.end;
+        emitted = run.end;
       }
     }
 
-    this.#emit(position, this.#rows);
+    this.#emit(emitted, this.#rows);
 
     this.#rows = 0;
+    this.#position = 0;
     this.#blankRuns = [];
+    this.#overprinted = false;
   }
 }
 

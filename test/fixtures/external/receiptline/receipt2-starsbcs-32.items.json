@@ -1,31 +1,5 @@
 [
   {
-    "type": "unknown",
-    "data": [
-      27,
-      30,
-      97,
-      0
-    ]
-  },
-  {
-    "type": "unknown",
-    "data": [
-      27,
-      32,
-      48
-    ]
-  },
-  {
-    "type": "unknown",
-    "data": [
-      27,
-      115,
-      48,
-      48
-    ]
-  },
-  {
     "type": "feed",
     "height": 36
   },
@@ -36,16 +10,5 @@
   {
     "type": "cut",
     "value": "partial"
-  },
-  {
-    "type": "unknown",
-    "data": [
-      27,
-      29,
-      3,
-      1,
-      0,
-      0
-    ]
   }
 ]

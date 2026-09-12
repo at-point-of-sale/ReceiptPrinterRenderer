@@ -59,7 +59,7 @@ painter.barcode({ symbology, data, moduleWidth, height, hri })
 painter.qrcode({ data, moduleSize, errorLevel })
 painter.command(item)                      // cut, pulse, unknown: flush per the design, then emit or fall back
 painter.reset()                            // initialize
-painter.end() → RenderItem[]               // flush everything, return the items, reset
+painter.end() → RenderItem[]               // discard the unfinished line, flush, return the items, reset
 ```
 
 ## Section 1: bootstrap, font and bitmap
@@ -931,6 +931,89 @@ Open decisions:
 
 <br>
 
+## Section 16c: the unknown items of the wild
+
+Sections 16 and 16b froze 123 streams from other libraries and counted 296
+`unknown` items in them. The tables of "unknown items in the wild" of those two
+sections are the list of everything this renderer does not show of a real
+stream, and this addendum empties it: one command is rendered that was not, one
+is read that was only reported, and the rest of the list is commands that cannot
+touch the paper at all and should never have been an item. A fourth change came
+out of the same review, of the end of a stream rather than of a command. The
+suite is unchanged otherwise: the same fixtures, the same bytes, the same three
+checks.
+
+**1. The reverse feed.** `ESC K n` prints the pending line and moves the paper
+back `n` vertical motion units, `ESC e n` does it in lines of the current line
+spacing. Both are print commands: the line is committed first and the paper then
+moves back over rows that are already on it, so everything behind them is drawn
+over those rows with OR, the way a second pass of a print head adds dots to the
+ones that are there. The painter gets a paper position of its own, next to the
+height of the rows it holds: a line committed past that height extends the
+paper, a line committed inside it draws over it, and a row that was blank and is
+drawn over is no longer blank, so the blank runs that become `feed` items are
+counted again at the flush. The move is clamped to the rows the painter still
+holds, which is all a renderer can offer: rows that went into an image item are
+gone. `ESC K` takes 0 to 48 units, 24 dots at the default unit of an Epson and
+as far as that mechanism reverses, and a larger value is out of range and
+ignored. The Star languages get no reverse feed, no command of the
+specifications available here feeds a Star printer backwards.
+
+**2. `ESC SP n` of the Star languages.** It is the right side character spacing,
+the counterpart of the ESC/POS command of the same name, and it is handed to the
+same `painter.spacing()`. The reading is receiptline's, which is the only
+producer the fixtures have, and the reference page records that and stays marked
+as a reading.
+
+**3. Reported becomes Parsed where the command cannot touch the paper.** The
+rule goes into the Statuses section of both reference pages: **Reported** means
+the command may have changed the paper of a real printer and the renderer did
+not reproduce it, so the item is a warning that this receipt could come out
+differently; a command that provably cannot touch the paper is **Parsed**,
+consumed with its length and with no item at all. Status transmissions and the
+enables of them, settings the paper cannot show and the buzzer move to Parsed;
+everything that might move a dot, fire the drawer or clear the buffer stays
+Reported.
+
+**4. The end of a stream is not a line feed.** The painter committed the line
+that was still being composed when the stream ended, and a printer does not: the
+cells sit in its line buffer until a line feed or a print command puts them on
+the paper, and the end of a job is neither. `end()` discards that line now, the
+way `CAN` and `ESC @` discard it, and flushes the committed rows as before. A
+receipt still prints in full, because the line feed of its last line committed
+it. `cafe-order-voucher` of ESCPost ends with `GS V 0` and the words "Buffered,
+not printed" on purpose, which is where this was found, and ESCPost renders it
+the same way. The design's Output contract, both reference pages and the note of
+section 2 say the new rule.
+
+Deliverables:
+
+- The paper position and the reverse feed in the painter, `ESC K` and `ESC e` in
+  the ESC/POS renderer, `ESC SP` in the Star renderer, and the reclassified
+  commands in both.
+- The Statuses rule and the moved rows on both reference pages, with "Seen in
+  the wild" and the counts brought up to date.
+- A way to render the external fixtures again without capturing them, since the
+  bytes did not change and only the render of them did.
+- The end of stream rule in the painter, in the design's Output contract, on
+  both reference pages and in the note of section 2.
+- Tests for the overprint, the clamp, the blank runs, the ranges, the character
+  spacing, the commands that no longer report and the line that is left in the
+  buffer.
+- Notes with the unknown totals per library before and after, and the reverse
+  feed semantics.
+
+Acceptance:
+
+- `npm test` passes and every external fixture passes its three checks after it
+  is rendered again.
+- `npm run contact-sheet` still builds.
+- Version stays 0.3.0, nothing committed.
+
+Effort: half a day.
+
+<br>
+
 ## Notes per section
 
 Filled in during implementation.
@@ -961,7 +1044,7 @@ Choices made where the design and this plan were silent:
 - **Cells sit at the top of the line box**, the gap of the line spacing falls below them. A consequence is that the vertical bars of the box drawing characters span their cell only, so a box has a six dot gap at every line boundary with the Epson line spacing of 30 dots and a 24 dot cell, exactly as the design's Painter section describes and as an Epson prints. Horizontal joins are seamless, because `stretch` pulls the ink out to the edges of the cell.
 - **Wrapping** happens when the cursor is not at the left edge and the cell does not fit. A cell wider than the whole line is drawn anyway and clipped, so content is never dropped silently.
 - **`strip()`** places its bitmap like a cell: it wraps the same way and makes the line as tall as itself. **`block()`** commits the pending line only when that line has content, so a block never inserts an empty line before itself.
-- **`end()`** commits a pending line as if a line feed followed it, flushes, returns the items and only then resets the state, so the same renderer can render a second stream.
+- **`end()`** commits a pending line as if a line feed followed it, flushes, returns the items and only then resets the state, so the same renderer can render a second stream. **Section 16c changed the first half of that rule**: a line without its line feed is discarded at the end of the stream instead of committed, because a printer leaves it in its line buffer and never prints it. The flush, the return and the reset are unchanged.
 - **`command()` flushes only for a command the driver supports**, as the design's Flushing section says. A command that is dropped changes nothing at all: it does not end an image segment and it does not break a run of blank rows, so a receipt with a cut that the printer cannot perform is one image and the blank rows on both sides of the cut are one feed item.
 - **Blank runs** are tracked while rows are appended, and the row buffer grows by doubling. A run becomes a feed item when it is at least `feedThreshold` rows and `feed` is supported. The six blank dots below a line of text belong to the run that follows them, so a feed item usually starts a few rows above the empty line that caused it.
 - **Vertical motion units.** The renderer tracks units per dot: the profile default, two for Epson, where one unit is half a dot, until `GS P x y` sets a vertical unit, after which one unit is one dot, and back to the profile default on `GS P 0 0`. `ESC 3 n` is therefore `round(n / units)` dots. The renderer does not know the resolution of the printer it emulates, so any non zero `y` is read as "the encoder set the unit to the resolution of the printer", which is the only thing the encoder ever does with this command. The stream that matters is `GS P dpi dpi`, `ESC 3 24`, which is 24 dots, `ESC 2`, `GS P 0 0`.
@@ -2863,6 +2946,13 @@ nothing on the paper, with one exception: `ESC e`, the reverse line feed of the
 escpos-php demo, which a printer performs and this renderer does not, so that
 fixture is three lines taller than the paper would be.
 
+**Section 16c emptied this table.** `ESC e` is rendered, `ESC SP` is read as the
+character spacing it is and the rest are parsed with no item, so the 296 unknown
+items of the two sections are 0; the counts above are what the capture found at
+the time, and the before and after are in the notes of that section.
+
+
+
 What the captures found in the renderer, all three fixed here:
 
 - **`ESC GS A` and `ESC GS R`, the Star print positions, were missing.**
@@ -3140,7 +3230,8 @@ of them**, which brings the external suite to 123 fixtures:
   fixture.
 - **Not one of the nineteen produces an unknown item.** These streams are
   written against renderers, so they stay inside the commands a renderer is
-  expected to have, and this one has all of them.
+  expected to have, and this one has all of them. Since section 16c none of the
+  other 104 fixtures produces one either.
 
 The eye review of all nineteen, against ESCPost's expected PNGs, against thermal's
 own renders and as ASCII art, is in the `notes` of every provenance. Five of them
@@ -3304,3 +3395,199 @@ Acceptance:
   every reference cell reading "not available" with its reason, and the
   agreement table replaced by the line that says there is nothing to compare.
 - Version stays 0.3.0, nothing committed.
+
+### Section 16c
+
+The reverse feed, the semantics in full:
+
+- **The painter has a paper position next to the rows it holds.** `#rows` is how
+  far the paper ever advanced in the buffer that is being built, `#position` is
+  where the print head is. Everything is committed at the position: past the
+  rows, it extends the paper; inside them, it draws over them with OR, because a
+  dot that is on the paper does not come off, and a second pass adds its own
+  dots to it. Appending white over rows that are already there changes nothing
+  and steps over them, which is what an empty line or the gap below a line does.
+- **`reverseFeed(dots)` and `reverseLineFeed(count)`** are the two new methods,
+  the mirror of `feed(dots)` and `lineFeed(count)`. Both commit the pending line
+  first, with a minimum height of zero: a reverse feed is a print command, and
+  the print of it advances the paper by the height of the line itself and not by
+  a line spacing. Then the position moves back, clamped at row 0 of the buffer.
+- **Row 0 of the buffer is the clamp, and it is also the flushed boundary.** A
+  flush hands the rows to an image item and empties the buffer, so the rows of
+  every line that was already flushed are out of reach and the two clamps the
+  plan asks for are the same one. It is the honest limit of a renderer that
+  streams items: a printer clamps in the same place for a different reason, its
+  mechanism.
+- **Blank runs are counted again when the paper was drawn over.** The painter
+  records a blank row as it appends it, which is one pass and no second scan,
+  and a row that is drawn over can stop being blank long after it was recorded.
+  The flush rescans the whole buffer, but only when something was overprinted,
+  so nothing changes for a stream without a reverse feed. Without the rescan a
+  drawn over line disappears into a `feed` item, which is what the painter test
+  of the blank runs checks.
+- **The ranges.** `ESC K n` takes 0 to 48 vertical motion units, which is 24 dots
+  at the two units per dot of the Epson profile and is the reverse feed of that
+  mechanism; a larger value is out of range and the whole command is ignored,
+  the pending line included, the way a printer ignores an argument it has no
+  range for. `ESC e n` takes every value: the Epson reference gives the command
+  no range that the wild respects, the mechanical maximum is a couple of lines
+  and differs per model, and the demo of escpos-php reverses three lines with
+  it, so the renderer does not impose a model's maximum and relies on the clamp.
+  That is a deliberate divergence and it is in the list of them on the reference
+  page.
+- **No Star reverse feed.** No command of the Star Line Mode or StarPRNT
+  specifications that were available here feeds the paper backwards, and no Star
+  stream of the fixtures asks for one, so this is ESC/POS only and the Star page
+  says so under its feeds.
+
+`ESC SP n` of the Star languages, the reading and where it comes from:
+
+- receiptline's `_star` command set, the one behind `starsbcs`, `starlinesbcs`
+  and `starmbcs`, opens every job with
+  `ESC @ ESC RS a n ESC RS F n ESC SP '0' ESC s '0' '0' ..`, and its `_dot` set,
+  the impact printers, with `ESC @ ESC RS a n ESC M ESC SP 0x00 ESC s 0x00 0x00 ..`
+  (`node_modules/receiptline/lib/receiptline.js`, the `open()` of `_star` and of
+  the impact set). Both write one argument byte and both mean no spacing at all,
+  one as the ASCII digit and one as the binary number, next to an `ESC s` and an
+  `ESC z` that they write in the same two forms.
+- So the command is the right side character spacing of ESC/POS under the same
+  name, it takes one argument byte, and the digits `'0'` to `'9'` are read as 0
+  to 9 the way the arguments of `ESC b` are, everything else as the number of
+  dots it is. The two forms cannot collide in practice: a spacing of 48 dots is
+  six millimetres between two characters. It is handed to the same
+  `painter.spacing()` the ESC/POS renderer uses, so it scales with the width
+  multiplier and counts towards the character width of `ESC D`.
+- **No StarPRNT specification text was available here**, so the reference page
+  keeps it marked as a reading and names receiptline as the source of it. Every
+  Star stream in the fixtures sets it to zero, so no golden image moved by it:
+  the command is the reading, not the pixels.
+
+Reported against Parsed, the rule and what moved:
+
+- **The rule, now in the Statuses section of both reference pages.** Reported
+  means the command may have changed the paper of a real printer and the
+  renderer did not reproduce it, so the `unknown` item is a warning that this
+  receipt could come out differently. A command that cannot touch the paper is
+  Parsed, consumed with its length and with no item, however much it changes
+  about the printer. The unknown count of a stream is then a measure of what the
+  renderer is not showing, which is what it was counted for.
+- **ESC/POS, moved to Parsed:** `ESC u`, `ESC v`, `GS I`, `GS a`, `GS j`, `GS r`,
+  `GS ( H`, `DLE EOT`, `DLE ENQ`, `GS b` and `FS ( A`. The status
+  transmissions and the enables of them have no channel back to the host to
+  answer over; `DLE ENQ` recovers a printer from an error state this renderer is
+  never in; `GS b`, the smoothing, interpolates dots of a scaled glyph and has
+  no dot of a one bit image to add; `FS ( A` picks a Kanji font, and every
+  multibyte character is the same placeholder cell here whichever font it picks.
+  `GS j` is the one addition to the list the section was given: it is a status
+  transmission of exactly the kind of `GS r`, and leaving it Reported next to a
+  Parsed `GS r` would have contradicted the rule in the same table.
+- **ESC/POS, left Reported on purpose:** `ESC =`, which can take the printer off
+  the line; `GS ( E`, the user settings, which reach the paper indirectly;
+  `ESC c`, the sensor and panel settings, which stop the printing on a paper
+  end; `GS z`, whose "other settings" are not settled here; `GS c`, `GS g`,
+  `GS E`, `GS :` and `FS g`; and `DLE DC4`, which is the one real time command
+  that is not a status request: `fn 1` fires the drawer, which is a `pulse` a
+  driver should see, and `fn 8` clears the buffer, which is the paper. That is
+  the one place where the list the section was given was not followed whole, and
+  the reference page says why.
+- **Star, moved to Parsed:** `ESC ACK SOH`, `ESC s`, `ESC GS ETX`, `ESC GS #`,
+  `ESC RS a`, `ESC RS d`, `ESC RS r` and the three buzzer commands, `ESC GS BEL`
+  and the two forms of `ESC GS EM`. The densities and the speed are the darkness
+  and the pace of the dots, neither of which a one bit image has room for, and
+  the item stream has no sound. `ESC s` stays a command whose effect is not
+  settled by any specification text available here, and it is parsed with the
+  rest of receiptline's setup because every other command of that setup is a
+  setting the paper cannot show and because the Star fixtures render the same
+  paper as the ESC/POS fixtures of the same document, which the parity test
+  checks dot for dot.
+- **Star, left Reported:** `ESC GS b`, the blackmark and sensor settings, which
+  decide where the paper stops, and `ESC GS c`, the colour, which is a second
+  ribbon this renderer does not draw.
+
+The end of a stream, the rule and what it moved:
+
+- **`end()` cancels the pending line and then flushes**, which is two lines of
+  the painter and a rule of the printer: cells reach the paper when a line feed
+  or a print command commits the line they are on, and the end of a job is
+  neither of those. It is the same discard that `CAN` and `ESC @` do, and the
+  same one that `print()` of an image the printer never got does.
+- **No encoder fixture moved**, which is the check that this is safe: the
+  encoder ends every line with `LF CR`, so the fixtures of sections 2 to 14 have
+  nothing pending at the end of a stream and not a dot of them changed.
+- **One external fixture moved, `escpost/cafe-order-voucher`**, 1240 rows to
+  1210. The sample ends with `GS V 0` and the text "Buffered, not printed" with
+  no line feed behind it, which is what the case is written to demonstrate; the
+  eye review of the ASCII art shows the last printed line is "Scan to redeem
+  online." now, with the thirty dot line of buffered text gone from the bottom
+  of the paper. ESCPost renders the same sample the same way, and the two now
+  agree to the dot: the notes of that fixture recorded 1240 dots here against
+  1210 there as a padding difference of ESCPost's sheets, and the real reason
+  was this line: its height difference against ESCPost is 0.0% now and it is one
+  of the 15 pairs whose ink rows were already within a rounding of each other.
+  The agreement table of section 16b moves with it, ESCPost from a median height
+  difference of 1.9% to 1.3% over the same 24 pairs, and thermal from 36.2% to
+  37.5% over its 76, which is the two fixtures of this section changing height
+  against a reference that scales everything anyway.
+- **Four tests changed with it**: the painter test that checked the old rule is
+  now the pair that checks the new one, the painter test of an image that was
+  never defined asserts no items at all, and two Star tests that ended their
+  stream on an unfinished line, the `ESC *` that is not the raster group and the
+  truncated raster row, write the line feed they meant.
+
+Rendering the fixtures again without capturing them:
+
+- **`node tools/external/rerender.js [library] [fixture..]`** is the new tool,
+  and it is what this section needed: the bytes of a fixture did not change, only
+  the render of them did, so running a capture script would have meant a PHP
+  install, a virtual environment and a new capture date in every provenance for
+  nothing. It reads every `.bin` with the provenance next to it, writes the
+  `.pbm`, the `.items.json` and the `unknown` count of that provenance again,
+  keeps every other field including `captured`, and prints the fixtures that
+  changed with what changed in them. Nothing of it runs during `npm test`.
+
+The unknown items, before and after, over all 123 fixtures:
+
+| Library | Fixtures | Unknown before | Unknown after | Which commands were counted |
+|---|---|---|---|---|
+| receiptline 4.0.4 | 84 | 269 | 0 | `GS a` 37, `GS r` 37, `FS ( A` 27, `ESC RS a` 47, `ESC SP` 37, `ESC s` 37, `ESC GS ETX` 37, `ESC ACK SOH` 10 |
+| python-escpos 3.2.dev81 | 7 | 26 | 0 | `GS b`, the smoothing mode, 26 |
+| escpos-php v2.2 | 8 | 1 | 0 | `ESC e`, the reverse line feed of the demo, 1 |
+| ESCPOS_NET ac185fc | 5 | 0 | 0 | none |
+| ESCPost 0.2.1 | 18 | 0 | 0 | none |
+| escpos-tools `4311694` | 1 | 0 | 0 | none |
+| **Total** | **123** | **296** | **0** | |
+
+- **Two golden images moved**, `escpos-php/demo` for the reverse feed and
+  `escpost/cafe-order-voucher` for the end of stream rule; in the other 121 only
+  the `.items.json` and the `unknown` of the provenance changed. `ESC SP` is zero
+  in every Star stream, so rendering it moves nothing, and a command that stops
+  reporting takes an item out of the stream and leaves the paper alone.
+- **`escpos-php/demo`, the eye review.** The example prints `ABC`, feeds seven
+  lines with `ESC d 7`, prints `DEF`, reverses three lines with `ESC e 3` and
+  prints `GHI`. As ASCII art the paper now reads `ABC` at the top of the
+  section, `GHI` 90 dots further down and `DEF` 90 dots below that: the `GHI`
+  landed three lines above the `DEF` it was printed after, which is what the
+  example demonstrates and what a printer does with those bytes. That part of
+  the receipt is 234 rows instead of the 240 it was when the reverse feed was
+  reported and `DEF` and `GHI` shared a line, so the whole fixture is 2477 rows
+  instead of 2483. Nothing is lost: the paper is everything the print head
+  passed over, and the rows below the head at the end of the job are on it too.
+
+Acceptance:
+
+- `npm test` 2156 passing, lint clean: the 2113 of section 16b plus 43 tests,
+  six for the reverse feed of the painter, seven for `ESC K` and `ESC e` of the
+  ESC/POS renderer, ten for the ESC/POS status commands that no longer report,
+  three for `ESC SP`, seven for the Star status commands and ten for the end of
+  a stream, two in the painter, where the test of the old rule became three, and
+  four in each renderer. Tests that changed
+  rather than moved: the `DLE EOT` and `DLE ENQ` rows of the real time commands
+  and the three buzzer commands now check that nothing is reported, the unknown
+  command of the `ESC RS` group is `ESC RS C` now, since `ESC RS r` is parsed,
+  and the four listed above under the end of a stream.
+- Every external fixture passes its three checks after `tools/external/rerender.js`,
+  and the parity test of the receiptline fixtures is unchanged.
+- `npm run contact-sheet` builds, with the two reference tools and without them.
+- Version stays 0.3.0, nothing committed.
+
+**thermal and double strike.** On the contact sheet thermal draws every line after an `ESC G 1` with a strike-through, and keeps doing so after `ESC G 0`, through the alignment samples, the barcode text and the QR labels of the escpos-php demo. Epson defines double strike as a second pass of the head, visually emphasis, which is what this renderer draws. A divergence of the reference, not of the renderer; recorded so the next reader of the sheet does not chase it.

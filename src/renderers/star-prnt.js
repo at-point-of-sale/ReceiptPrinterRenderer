@@ -499,13 +499,10 @@ function rasterArguments(bytes, index) {
 
 const UNKNOWN_ARGUMENTS = {
   [GROUP_ESC]: {
-    0x06: 1, /* ESC ACK SOH, the real time status of a raster mode printer */
-    0x20: 1, /* right side character spacing, see the notes: the length is a best effort */
     0x28: 1, /* select character expansion */
     0x29: 1, /* cancel character expansion */
     0x31: 0, /* select 1/8 inch line spacing, legacy */
     0x63: 1, /* select character set */
-    0x73: 2, /* ESC s n1 n2, a printer setting, see the notes: the length is what receiptline sends */
   },
 
   [GROUP_FS]: {
@@ -514,10 +511,6 @@ const UNKNOWN_ARGUMENTS = {
   },
 
   [GROUP_GS]: {
-    0x03: 3, /* ESC GS ETX s n1 n2, automatic status */
-    0x07: 3, /* ESC GS BEL m n1 n2, buzzer */
-    0x19: 4, /* ESC GS EM DC1 m n1 n2 and ESC GS EM DC2 m n1 n2, buzzer */
-    0x23: 1, /* print density */
     0x5c: 2, /* vertical position */
     0x62: 1, /* blackmark and sensor settings */
     0x63: 1, /* colour */
@@ -527,9 +520,6 @@ const UNKNOWN_ARGUMENTS = {
     0x41: 1, /* print area */
     0x43: 1, /* character style */
     0x45: 1, /* character expansion */
-    0x61: 1, /* print start control */
-    0x64: 1, /* print density */
-    0x72: 1, /* print speed */
   },
 };
 
@@ -871,7 +861,9 @@ class StarPrntRenderer {
   #tables() {
     return {
       [GROUP_ESC]: {
+        0x06: {args: 1, run: null}, /* ESC ACK SOH, the real time status, parsed, there is no channel back */
         0x07: {args: 2, run: (a) => this.#pulseWidth(a)},
+        0x20: {args: 1, run: (a) => this.#painter.spacing(this.#spacing(a[0]))},
         0x0c: {args: 1, run: (a, consumed) => this.#formFeed(a[0], consumed)},
         0x2a: {args: rasterArguments, run: (a, consumed) => this.#rasterCommand(a, consumed)},
         0x2d: {args: 1, run: (a) => this.#underline(a[0])},
@@ -898,10 +890,20 @@ class StarPrntRenderer {
         0x69: {args: 2, run: (a) => this.#size(a[0], a[1])},
         0x6b: {args: bandImageArguments, run: (a) => this.#bandImage(a)}, /* bit image, twenty four dot band */
         0x6c: {args: 1, run: (a) => this.#leftMargin(a[0])},
+        0x73: {args: 2, run: null}, /* ESC s n1 n2, a printer setting, parsed, see the reference page */
         0x7a: {args: 1, run: (a) => this.#lineSpacing(a[0])},
       },
 
+      /* The status, the settings and the buzzer are parsed: none of them puts a
+         dot on the paper, and the item stream carries neither a status nor a
+         sound. ESC GS b and ESC GS c are not among them, the sensor settings
+         move the paper and the colour is a second ribbon */
+
       [GROUP_GS]: {
+        0x03: {args: 3, run: null}, /* ESC GS ETX s n1 n2, automatic status */
+        0x07: {args: 3, run: null}, /* ESC GS BEL m n1 n2, buzzer */
+        0x19: {args: 4, run: null}, /* ESC GS EM DC1 or DC2 m n1 n2, buzzer */
+        0x23: {args: 1, run: null}, /* print density */
         0x41: {args: 2, run: (a) => this.#painter.position(a[0] + a[1] * 256)},
         0x50: {args: 1, run: null}, /* print mode, the encoder flushes with it, no effect on paper */
         0x52: {args: 2, run: (a) => this.#relative(a)},
@@ -914,6 +916,9 @@ class StarPrntRenderer {
 
       [GROUP_RS]: {
         0x46: {args: 1, run: (a) => this.#font(a[0])},
+        0x61: {args: 1, run: null}, /* print start control */
+        0x64: {args: 1, run: null}, /* print density */
+        0x72: {args: 1, run: null}, /* print speed */
       },
 
       /* ESC FS p prints a logo the printer holds and ESC FS q defines one,
@@ -1351,6 +1356,27 @@ class StarPrntRenderer {
     }
 
     this.#painter.style({width: SIZE[width], height: SIZE[height]});
+  }
+
+  /**
+     * ESC SP n, the character spacing, in dots behind every cell, which is the
+     * Star counterpart of the ESC/POS command of the same name.
+     *
+     * No StarPRNT specification text was available here, so the reading comes
+     * from the only producer the fixtures have: receiptline writes `ESC SP '0'`
+     * in the setup of its three thermal Star command sets and `ESC SP 0x00` in
+     * the one of its impact set, both of them no spacing at all, and it writes
+     * the arguments of `ESC s` and `ESC z` next to it in the same two forms. So
+     * the ASCII digits '0' to '9' are read as 0 to 9 dots, the way the arguments
+     * of ESC b are, and every other value as the number of dots it is. The two
+     * forms cannot be confused in practice: a character spacing of 48 dots is
+     * six millimetres between two characters.
+     *
+     * @param  {number}   value   The argument of the command
+     * @return {number}           The spacing in dots
+     */
+  #spacing(value) {
+    return value >= 0x30 && value <= 0x39 ? value - 0x30 : value;
   }
 
   /**

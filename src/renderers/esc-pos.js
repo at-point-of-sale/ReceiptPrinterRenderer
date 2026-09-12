@@ -25,6 +25,14 @@ const CR = 0x0d;
 
 const DEFAULT_DPI = 203;
 
+/* The largest reverse feed ESC K takes, in vertical motion units. Forty eight
+   units is twenty four dots at the default unit of an Epson, which is the
+   reverse feed the mechanism of that printer has; a larger value is out of
+   range and the command is ignored, the way a printer ignores it. ESC e has no
+   such range in the reference, see the notes of the reference page */
+
+const MAX_REVERSE_UNITS = 48;
+
 /* The code system FS C selects, which decides which bytes are the lead byte of
    a multibyte character in Kanji mode */
 
@@ -450,8 +458,6 @@ function realTimeRequestArguments(bytes, index) {
 
 const UNKNOWN_ARGUMENTS = {
   [DLE]: {
-    0x04: realTimeStatusArguments, /* DLE EOT n, transmit real time status */
-    0x05: 1, /* DLE ENQ n, real time request to the printer */
     0x14: realTimeRequestArguments, /* DLE DC4 fn .., real time request */
   },
 
@@ -461,7 +467,6 @@ const UNKNOWN_ARGUMENTS = {
     0x3d: 1, /* select peripheral device */
     0x3f: 1, /* cancel user defined character */
     0x43: 1, /* page length in lines */
-    0x4b: 1, /* print and reverse feed n dots */
     0x4c: 0, /* page mode */
     0x53: 0, /* standard mode */
     0x54: 1, /* print direction in page mode */
@@ -469,10 +474,7 @@ const UNKNOWN_ARGUMENTS = {
     0x56: 1, /* rotate 90 degrees */
     0x57: 8, /* print area in page mode */
     0x63: 2, /* paper sensor and panel button settings */
-    0x65: 1, /* print and reverse feed n lines */
     0x72: 1, /* print colour */
-    0x75: 1, /* transmit peripheral device status */
-    0x76: 0, /* transmit paper sensor status */
   },
 
   [GS]: {
@@ -480,20 +482,14 @@ const UNKNOWN_ARGUMENTS = {
     0x3a: 0, /* start or end macro definition */
     0x41: 2, /* print position adjustment */
     0x45: 1, /* print control method */
-    0x49: 1, /* transmit printer id */
     0x54: 1, /* print position at the top of the line */
     0x5c: 2, /* relative vertical position in page mode */
-    0x61: 1, /* automatic status back */
-    0x62: 1, /* smoothing */
     0x63: 0, /* print counter */
     0x67: 4, /* maintenance counter, GS g 0 m nL nH and GS g 2 m nL nH */
-    0x6a: 1, /* transmit remaining paper sensor status */
-    0x72: 1, /* transmit status */
     0x7a: 2, /* print density and other settings */
   },
 
   [FS]: {
-    0x28: parenthesisArguments, /* FS ( C and the other selectors of the group, see the notes */
     0x32: 34, /* define user defined Kanji, c1 c2 and the glyph, see below */
     0x3f: 2, /* cancel user defined Kanji, c1 c2 */
     0x67: userMemoryArguments, /* write and read the user memory */
@@ -788,7 +784,15 @@ class EscPosRenderer {
      */
   #tables() {
     return {
-      [DLE]: {},
+      /* The real time status requests are parsed: the renderer has no channel
+         back to the host, so a request for a status cannot reach the paper.
+         DLE DC4 is not one of them, it fires the drawer and clears the buffer,
+         and stays an unknown item the driver can see */
+
+      [DLE]: {
+        0x04: {args: realTimeStatusArguments, run: null}, /* DLE EOT n, transmit real time status */
+        0x05: {args: 1, run: null}, /* DLE ENQ n, real time request to the printer */
+      },
 
       [ESC]: {
         0x20: {args: 1, run: (a) => this.#painter.spacing(this.#horizontal(a[0]))},
@@ -804,15 +808,19 @@ class EscPosRenderer {
         0x45: {args: 1, run: (a) => this.#bold({emphasis: (a[0] & 1) !== 0})},
         0x47: {args: 1, run: (a) => this.#bold({doubleStrike: (a[0] & 1) !== 0})},
         0x4a: {args: 1, run: (a) => this.#painter.feed(Math.round(a[0] / this.#verticalUnits))},
+        0x4b: {args: 1, run: (a) => this.#reverseFeed(a[0])},
         0x4d: {args: 1, run: (a) => this.#font(a[0])},
         0x52: {args: 1, run: (a) => this.#international(a[0])},
         0x5c: {args: 2, run: (a) => this.#relative(a)},
         0x61: {args: 1, run: (a) => this.#align(a[0])},
         0x64: {args: 1, run: (a) => this.#painter.lineFeed(a[0])},
+        0x65: {args: 1, run: (a) => this.#painter.reverseLineFeed(a[0])},
         0x69: {args: 0, run: () => this.#emitCut('full')}, /* legacy full cut */
         0x6d: {args: 0, run: () => this.#emitCut('partial')}, /* legacy partial cut */
         0x70: {args: 3, run: (a) => this.#pulse(a)},
         0x74: {args: 1, run: (a) => this.#selectCodepage(a[0])},
+        0x75: {args: 1, run: null}, /* transmit peripheral device status, parsed, there is no channel back */
+        0x76: {args: 0, run: null}, /* transmit paper sensor status, parsed */
         0x7b: {args: 1, run: (a) => this.#painter.style({upsideDown: (a[0] & 1) !== 0})},
       },
 
@@ -824,13 +832,18 @@ class EscPosRenderer {
         0x38: {args: largeParenthesisArguments, run: (a, consumed) => this.#largeParenthesis(a, consumed)},
         0x42: {args: 1, run: (a) => this.#painter.style({invert: (a[0] & 1) !== 0})},
         0x48: {args: 1, run: (a) => this.#hriPosition(a[0])},
+        0x49: {args: 1, run: null}, /* transmit printer id, parsed, there is no channel back */
         0x4c: {args: 2, run: (a) => this.#painter.margins({left: this.#horizontal(a[0] + a[1] * 256)})},
         0x50: {args: 2, run: (a) => this.#motionUnits(a[0], a[1])},
         0x56: {args: cutArguments, run: (a) => this.#cut(a[0])},
         0x57: {args: 2, run: (a) => this.#painter.margins({width: this.#horizontal(a[0] + a[1] * 256)})},
+        0x61: {args: 1, run: null}, /* automatic status back, parsed, there is no channel back */
+        0x62: {args: 1, run: null}, /* smoothing, parsed, it changes no dot of a one bit image */
         0x66: {args: 1, run: (a) => this.#hriFont(a[0])},
         0x68: {args: 1, run: (a) => this.#barcodeHeight(a[0])},
+        0x6a: {args: 1, run: null}, /* transmit remaining paper sensor status, parsed */
         0x6b: {args: barcodeArguments, run: (a, consumed) => this.#drawBarcode(a, consumed)},
+        0x72: {args: 1, run: null}, /* transmit status, parsed, there is no channel back */
         0x76: {args: rasterImageArguments, run: (a, consumed) => this.#rasterImage(a, consumed)},
         0x77: {args: 1, run: (a) => this.#moduleWidth(a[0])},
       },
@@ -838,6 +851,7 @@ class EscPosRenderer {
       [FS]: {
         0x21: {args: 1, run: null}, /* multibyte print mode, parsed, see the notes */
         0x26: {args: 0, run: () => this.#kanjiMode(true)},
+        0x28: {args: parenthesisArguments, run: (a, consumed) => this.#fsParenthesis(a, consumed)},
         0x2d: {args: 1, run: null}, /* multibyte underline, parsed */
         0x2e: {args: 0, run: () => this.#kanjiMode(false)},
         0x43: {args: 1, run: (a) => this.#kanjiCodeSystem(a[0])},
@@ -868,6 +882,33 @@ class EscPosRenderer {
 
     if (args[0] === 0x4c) {
       this.#graphicsFunction(args.subarray(3), consumed);
+      return;
+    }
+
+    /* GS ( H asks the printer to send a response back, which is a channel this
+       renderer has not got and paper it cannot touch, so it is parsed */
+
+    if (args[0] === 0x48) {
+      return;
+    }
+
+    this.#unknown(consumed);
+  }
+
+  /**
+     * FS ( x, the multibyte group under a two byte length. FS ( A selects the
+     * font a Kanji glyph is drawn in, and this renderer draws a placeholder
+     * cell for every multibyte character whatever the font is, so the command
+     * cannot change a dot and is parsed.
+     *
+     * Everything else in the group reports an unknown command, FS ( C, the code
+     * system, included: it selects UTF-8, which this renderer does not decode.
+     *
+     * @param  {Uint8Array}   args       The arguments of the command
+     * @param  {Uint8Array}   consumed   The whole command, for the unknown item
+     */
+  #fsParenthesis(args, consumed) {
+    if (args[0] === 0x41) {
       return;
     }
 
@@ -1754,6 +1795,26 @@ class EscPosRenderer {
      */
   #horizontal(units) {
     return Math.round(units * this.#horizontalUnits);
+  }
+
+  /**
+     * ESC K n, print and reverse feed n vertical motion units. The pending line
+     * is printed first and the paper then moves back over the rows that are
+     * already on it, so that everything behind it overprints them.
+     *
+     * The command takes 0 to 48 units, twenty four dots at the default vertical
+     * motion unit of an Epson, which is as far as the mechanism reverses. A
+     * larger value is out of range and the whole command is ignored, the line
+     * included, the way a printer ignores an argument it has no range for.
+     *
+     * @param  {number}   units   The argument of the command
+     */
+  #reverseFeed(units) {
+    if (units > MAX_REVERSE_UNITS) {
+      return;
+    }
+
+    this.#painter.reverseFeed(Math.round(units / this.#verticalUnits));
   }
 
   /**

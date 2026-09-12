@@ -193,7 +193,7 @@ These are the items:
 
 An image item is a bitmap: one bit per pixel, most significant bit first, rows padded to whole bytes, a set bit is a black dot. The row stride is `Math.ceil(width / 8)` bytes. That is byte for byte the row format of the ESC/POS `GS v 0` raster command, the Star raster `b` command and the PBM P4 file format, so an image item usually goes to the printer without touching a single byte.
 
-A supported command flushes the lines above it: the renderer emits everything up to the last finished line as an image item, then the command item. That is why there are two image items in the example above, one for the text and one for the blank line the encoder feeds between the cut and the pulse. The end of the stream flushes everything, so a receipt without a cut, common for kitchen printers, still produces its last image.
+A supported command flushes the lines above it: the renderer emits everything up to the last finished line as an image item, then the command item. That is why there are two image items in the example above, one for the text and one for the blank line the encoder feeds between the cut and the pulse. The end of the stream flushes every line that was finished, so a receipt without a cut, common for kitchen printers, still produces its last image. Text that never got its line feed is the one thing it does not print: those cells are still in the line buffer of the printer when the job ends, and a printer never puts them on paper either.
 
 <br>
 
@@ -360,7 +360,7 @@ The renderer covers the commands ReceiptPrinterEncoder version 3 emits. A few th
 - **Maxicode, the two dimensional GS1 DataBar and the composite symbologies.** The other selectors of the two dimensional group of `GS ( k`, parsed and reported as an `unknown` item.
 - **Commands the parser does not know.** Skipped according to the argument lengths of the specification and reported as an `unknown` item, so that one command the renderer has never seen does not derail the text after it.
 
-An `unknown` item only reaches you when `unknown` is in `commands`, otherwise it is dropped. It carries the bytes of the command, which makes it the place to look when something is missing from a render.
+An `unknown` item only reaches you when `unknown` is in `commands`, otherwise it is dropped. It carries the bytes of the command, which makes it the place to look when something is missing from a render. A command that cannot change the paper at all, a status request or a setting of the printer, does not produce one: it is consumed with its length and nothing else happens, so an `unknown` item always means something that could have been on the paper is not. The two command references say which is which, under "Statuses".
 
 <br>
 

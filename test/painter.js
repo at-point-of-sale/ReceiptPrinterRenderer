@@ -162,16 +162,152 @@ describe('Painter', function() {
       assert.equal(paper.end()[0].height, 17);
     });
 
-    it('should commit a pending line at the end of the stream', function() {
+    it('should not print a line that never got its line feed', function() {
       const paper = painter();
 
       paper.text('Hi');
 
+      assert.deepEqual(paper.end(), []);
+    });
+
+    it('should print the same line when the line feed is there', function() {
+      const paper = painter();
+
+      paper.text('Hi');
+      paper.lineFeed();
+
       assert.equal(paper.end()[0].height, 30);
+    });
+
+    it('should keep the lines that were committed before the unfinished one', function() {
+      const paper = painter();
+
+      paper.text('Hi');
+      paper.lineFeed();
+      paper.text('Ho');
+
+      const items = paper.end();
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 30);
     });
 
     it('should not add a line at the end of the stream when nothing is pending', function() {
       assert.deepEqual(painter().end(), []);
+    });
+  });
+
+  describe('the reverse feed', function() {
+    it('should print the pending line before it moves the paper back', function() {
+      const paper = painter();
+
+      paper.lineSpacing(24);
+      paper.text('A');
+      paper.reverseLineFeed();
+
+      const items = paper.end();
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 24);
+    });
+
+    it('should draw the line behind it over the line it moved back over', function() {
+      const paper = painter();
+      const same = painter();
+
+      paper.lineSpacing(24);
+      paper.text('A');
+      paper.reverseLineFeed();
+      paper.position(12);
+      paper.text('B');
+      paper.lineFeed();
+
+      same.lineSpacing(24);
+      same.text('AB');
+      same.lineFeed();
+
+      assert.deepEqual(
+          toAscii(stitch(paper.end(), {width: WIDTH})),
+          toAscii(stitch(same.end(), {width: WIDTH})),
+      );
+    });
+
+    it('should move back no further than the rows it still holds', function() {
+      const paper = painter();
+      const same = painter();
+
+      paper.lineSpacing(24);
+      paper.text('A');
+      paper.lineFeed();
+      paper.text('B');
+      paper.reverseFeed(1000);
+      paper.position(12);
+      paper.text('C');
+      paper.lineFeed();
+
+      same.lineSpacing(24);
+      same.text('AC');
+      same.lineFeed();
+      same.text('B');
+      same.lineFeed();
+
+      const items = paper.end();
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 48);
+
+      assert.deepEqual(
+          toAscii(stitch(items, {width: WIDTH})),
+          toAscii(stitch(same.end(), {width: WIDTH})),
+      );
+    });
+
+    it('should not move back into the rows that were flushed to an item', function() {
+      const paper = painter({commands: ['cut']});
+
+      paper.lineSpacing(24);
+      paper.text('A');
+      paper.lineFeed();
+      paper.command({type: 'cut', value: 'full'});
+      paper.text('B');
+      paper.reverseLineFeed(2);
+      paper.text('C');
+      paper.lineFeed();
+
+      const items = paper.end();
+
+      assert.deepEqual(items.map((item) => item.type), ['image', 'cut', 'image']);
+      assert.equal(items[0].height, 24);
+      assert.equal(items[2].height, 24);
+    });
+
+    it('should not count a row as blank once ink is drawn over it', function() {
+      const paper = painter({commands: ['feed'], feedThreshold: 40});
+
+      paper.feed(48);
+      paper.reverseFeed(48);
+      paper.text('A');
+      paper.lineFeed();
+
+      const items = paper.end();
+
+      assert.deepEqual(items.map((item) => item.type), ['image']);
+      assert.equal(items[0].height, 48);
+    });
+
+    it('should ignore a move that is not a positive number of dots', function() {
+      const paper = painter();
+
+      paper.lineSpacing(24);
+      paper.text('A');
+      paper.lineFeed();
+      paper.reverseFeed(0);
+      paper.reverseFeed(-10);
+      paper.reverseFeed(1.5);
+      paper.text('B');
+      paper.lineFeed();
+
+      assert.equal(paper.end()[0].height, 48);
     });
   });
 
@@ -367,12 +503,10 @@ describe('Painter', function() {
       assert.isFalse(paper.print('nv:65:66'));
 
       /* The pending line is not committed either: a printer without the image
-         does nothing at all with the command */
+         does nothing at all with the command, and the A is still in the line
+         buffer when the stream ends, so it never prints */
 
-      const items = paper.end();
-
-      assert.equal(items.length, 1);
-      assert.equal(items[0].height, 30);
+      assert.deepEqual(paper.end(), []);
     });
 
     it('should scale the image by repeating its dots', function() {

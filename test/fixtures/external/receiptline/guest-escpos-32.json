@@ -11,6 +11,6 @@
   "width": 384,
   "codepageMapping": "epson",
   "captured": "2026-09-12",
-  "unknown": 3,
-  "notes": "ESC/POS of receiptline's escpos command set. Unknown: GS a and GS r, the status commands, and FS ( A, the Kanji font, none of which print. Reviewed against receiptline's SVG preview of the same document."
+  "unknown": 0,
+  "notes": "ESC/POS of receiptline's escpos command set. No unknown items: GS a and GS r, the status commands, and FS ( A, the Kanji font, are parsed since section 16c, none of them prints. Reviewed against receiptline's SVG preview of the same document."
 }

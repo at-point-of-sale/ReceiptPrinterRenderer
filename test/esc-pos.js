@@ -387,6 +387,116 @@ describe('EscPosRenderer', function() {
     });
   });
 
+  describe('the end of the stream', function() {
+    /* A printer prints a line when its line feed arrives, not when the job
+       ends, so text without one stays in the line buffer, see section 16c */
+
+    it('should print nothing for text that never got its line feed', function() {
+      assert.deepEqual(render(stream(ESC, '@', 'Buffered')), []);
+    });
+
+    it('should print the same text when the line feed is there', function() {
+      const items = render(stream(ESC, '@', 'Buffered', LF));
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 30);
+    });
+
+    it('should keep the lines in front of the unfinished one', function() {
+      const buffered = render(stream(ESC, '@', 'Printed', LF, 'Buffered'));
+      const alone = render(stream(ESC, '@', 'Printed', LF));
+
+      assert.equal(dots(stitch(buffered, {width: WIDTH})), dots(stitch(alone, {width: WIDTH})));
+    });
+
+    it('should leave a receipt that ends with a complete line as it was', function() {
+      const items = render(stream(ESC, '@', 'One', LF, 'Two', LF));
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 2 * 30);
+    });
+  });
+
+  describe('the reverse feed', function() {
+    it('should print the pending line and move the paper back with ESC e', function() {
+      /* The line of the A is printed and the paper then moves back one line,
+         which is further than the paper the painter holds, so it lands on the
+         top of it and the B is drawn over the same rows */
+
+      const back = render(stream(ESC, '@', 'A', ESC, 'e', 1, ESC, '$', 12, 0, 'B', LF));
+      const same = render(stream(ESC, '@', 'AB', LF));
+
+      assert.equal(dots(stitch(back, {width: WIDTH})), dots(stitch(same, {width: WIDTH})));
+    });
+
+    it('should move back the lines of the current line spacing', function() {
+      const items = render(stream(ESC, '@', ESC, '3', 48, 'A', LF, 'B', ESC, 'e', 1, 'C', LF));
+
+      /* Two lines of 24 dots, the second of them printed over the first */
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 48);
+    });
+
+    it('should move back in vertical motion units with ESC K', function() {
+      const back = render(stream(ESC, '@', 'A', ESC, 'K', 48, ESC, '$', 12, 0, 'B', LF));
+      const same = render(stream(ESC, '@', 'AB', LF));
+
+      assert.equal(dots(stitch(back, {width: WIDTH})), dots(stitch(same, {width: WIDTH})));
+    });
+
+    it('should take one unit as one dot after the encoder sets the motion unit', function() {
+      /* The A is printed at 30 dots and is 24 dots tall, so the paper is 54
+         dots. ESC K 48 is 24 dots by default, which puts the B back at 30 and
+         the paper at 60, and 48 dots once a unit is a dot, which puts it at 6
+         and leaves the paper the 54 dots of the A */
+
+      const units = render(stream(ESC, '@', ESC, 'J', 60, 'A', ESC, 'K', 48, 'B', LF));
+      const dot = render(stream(ESC, '@', GS, 'P', 203, 203, ESC, 'J', 30, 'A', ESC, 'K', 48, 'B', LF));
+
+      assert.equal(units[0].height, 60);
+      assert.equal(dot[0].height, 54);
+    });
+
+    it('should ignore an ESC K of more than 48 units, the line included', function() {
+      const out = render(stream(ESC, '@', 'A', ESC, 'K', 49, 'B', LF));
+      const same = render(stream(ESC, '@', 'AB', LF));
+
+      assert.equal(dots(stitch(out, {width: WIDTH})), dots(stitch(same, {width: WIDTH})));
+    });
+
+    it('should not move back into the rows of an item that was already emitted', function() {
+      const items = render(stream(
+          ESC, '@', 'A', LF, GS, 'V', 0, 'B', ESC, 'e', 2, 'C', LF,
+      ), {commands: COMMANDS});
+
+      assert.deepEqual(items.map((item) => item.type), ['image', 'cut', 'image']);
+      assert.equal(items[0].height, 30);
+      assert.equal(items[2].height, 30);
+    });
+
+    it('should consume the argument of an ESC K that is out of range', function() {
+      const items = render(stream(ESC, '@', ESC, 'K', 65, LF));
+
+      assert.equal(items.length, 1);
+      assert.isTrue(items[0].data.every((byte) => byte === 0));
+    });
+
+    it('should consume the argument of an ESC e that moves further than the paper', function() {
+      const items = render(stream(ESC, '@', ESC, 'e', 65, LF));
+
+      assert.isTrue(items[0].data.every((byte) => byte === 0));
+    });
+
+    it('should report neither ESC e nor ESC K', function() {
+      const items = render(stream(ESC, '@', 'A', ESC, 'e', 1, ESC, 'K', 24, 'B', LF), {
+        commands: ['unknown'],
+      });
+
+      assert.equal(items.filter((item) => item.type === 'unknown').length, 0);
+    });
+  });
+
   describe('codepages', function() {
     it('should start in cp437', function() {
       const paper = stitch(render(stream(ESC, '@', [0x82], LF)), {width: WIDTH});
@@ -489,19 +599,6 @@ describe('EscPosRenderer', function() {
           dots(stitch(items, {width: WIDTH})),
           dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
       );
-    });
-
-    it('should consume the argument of ESC K', function() {
-      const items = render(stream(ESC, '@', ESC, 'K', 65, LF));
-
-      assert.equal(items.length, 1);
-      assert.isTrue(items[0].data.every((byte) => byte === 0));
-    });
-
-    it('should consume the argument of ESC e', function() {
-      const items = render(stream(ESC, '@', ESC, 'e', 65, LF));
-
-      assert.isTrue(items[0].data.every((byte) => byte === 0));
     });
 
     it('should consume the arguments of the maintenance counter', function() {
@@ -1727,11 +1824,31 @@ describe('EscPosRenderer', function() {
   });
 
   describe('the real time commands', function() {
-    const realTime = [
+    /* The status requests are parsed, there is no channel back to the host for
+       an answer to travel over; DLE DC4 is reported, it fires the drawer and
+       clears the buffer */
+
+    const parsed = [
       ['DLE EOT n', [0x10, 0x04, 1]],
       ['DLE EOT 7 n', [0x10, 0x04, 7, 1]],
       ['DLE EOT 8 n', [0x10, 0x04, 8, 3]],
       ['DLE ENQ n', [0x10, 0x05, 1]],
+    ];
+
+    for (const [name, bytes] of parsed) {
+      it(`should consume ${name} with its own length and report nothing`, function() {
+        const items = render(stream(ESC, '@', bytes, 'Hi', LF), {commands: ['unknown']});
+
+        assert.equal(items.filter((item) => item.type === 'unknown').length, 0);
+
+        assert.equal(
+            dots(stitch(items.filter((item) => item.type === 'image'), {width: WIDTH})),
+            dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+        );
+      });
+    }
+
+    const realTime = [
       ['DLE DC4 1 m t', [0x10, 0x14, 1, 0, 1]],
       ['DLE DC4 2 a b', [0x10, 0x14, 2, 1, 8]],
       ['DLE DC4 3 a', [0x10, 0x14, 3, 1]],
@@ -1753,6 +1870,48 @@ describe('EscPosRenderer', function() {
         );
       });
     }
+  });
+
+  describe('the status and setting commands', function() {
+    /* None of them can put a dot on the paper, so they are parsed with their
+       own length and report nothing, see documentation/commands-esc-pos.md */
+
+    const parsed = [
+      ['ESC u n', [ESC, 0x75, 0]],
+      ['ESC v', [ESC, 0x76]],
+      ['GS I n', [GS, 0x49, 1]],
+      ['GS a n', [GS, 0x61, 0]],
+      ['GS b n', [GS, 0x62, 1]],
+      ['GS j n', [GS, 0x6a, 1]],
+      ['GS r n', [GS, 0x72, 1]],
+      ['GS ( H pL pH fn m', [GS, 0x28, 0x48, 3, 0, 48, 49, 0]],
+      ['FS ( A pL pH fn m', [FS, 0x28, 0x41, 2, 0, 48, 0]],
+    ];
+
+    for (const [name, bytes] of parsed) {
+      it(`should consume ${name} and keep the text behind it`, function() {
+        const items = render(stream(ESC, '@', bytes, 'Hi', LF), {commands: ['unknown']});
+
+        assert.equal(items.filter((item) => item.type === 'unknown').length, 0);
+
+        assert.equal(
+            dots(stitch(items.filter((item) => item.type === 'image'), {width: WIDTH})),
+            dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+        );
+      });
+    }
+
+    it('should still report the other selectors of the FS ( group', function() {
+      const items = render(
+          stream(ESC, '@', FS, '(', 'C', [2, 0], [48, 1], 'Hi', LF),
+          {commands: ['unknown']},
+      );
+
+      assert.deepEqual(
+          Array.from(items.find((item) => item.type === 'unknown').data),
+          [FS, 0x28, 0x43, 2, 0, 48, 1],
+      );
+    });
   });
 
   describe('the lengths of the text layout commands', function() {

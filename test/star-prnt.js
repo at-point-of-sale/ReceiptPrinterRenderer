@@ -598,11 +598,11 @@ describe('StarPrntRenderer', function() {
     });
 
     it('should consume the argument of an unknown command of the ESC RS group', function() {
-      const items = render(stream(ESC, '@', 'A', ESC, RS, 'r', 2, 'B', LF), {commands: ['unknown']});
+      const items = render(stream(ESC, '@', 'A', ESC, RS, 'C', 2, 'B', LF), {commands: ['unknown']});
 
       assert.deepEqual(
           Array.from(items.find((item) => item.type === 'unknown').data),
-          [ESC, RS, 0x72, 2],
+          [ESC, RS, 0x43, 2],
       );
 
       assert.equal(
@@ -650,7 +650,7 @@ describe('StarPrntRenderer', function() {
     });
 
     it('should consume an ESC * that is not the raster group', function() {
-      const items = render(stream(ESC, '@', 'A', ESC, '*', 'Q'), {commands: ['unknown']});
+      const items = render(stream(ESC, '@', 'A', ESC, '*', 'Q', LF), {commands: ['unknown']});
 
       assert.deepEqual(
           Array.from(items.find((item) => item.type === 'unknown').data),
@@ -1299,6 +1299,89 @@ describe('StarPrntRenderer', function() {
     });
   });
 
+  describe('the end of the stream', function() {
+    /* A printer prints a line when its line feed arrives, not when the job
+       ends, so text without one stays in the line buffer, see section 16c */
+
+    it('should print nothing for text that never got its line feed', function() {
+      assert.deepEqual(render(stream(ESC, '@', 'Buffered')), []);
+    });
+
+    it('should print the same text when the line feed is there', function() {
+      const items = render(stream(ESC, '@', 'Buffered', LF));
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 32);
+    });
+
+    it('should keep the lines in front of the unfinished one', function() {
+      const buffered = render(stream(ESC, '@', 'Printed', LF, 'Buffered'));
+      const alone = render(stream(ESC, '@', 'Printed', LF));
+
+      assert.equal(dots(stitch(buffered, {width: WIDTH})), dots(stitch(alone, {width: WIDTH})));
+    });
+
+    it('should leave a receipt that ends with a complete line as it was', function() {
+      const items = render(stream(ESC, '@', 'One', LF, 'Two', LF));
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 2 * 32);
+    });
+  });
+
+  describe('ESC SP n, right side character spacing', function() {
+    it('should leave the space behind every character', function() {
+      const paper = stitch(render(stream(ESC, '@', ESC, ' ', 4, 'AAA', LF)), {width: WIDTH});
+      const starts = columnsOf(paper, 0, 24).map((run) => run.start);
+
+      assert.equal(starts.length, 3);
+      assert.equal(starts[1] - starts[0], 16);
+      assert.equal(starts[2] - starts[1], 16);
+    });
+
+    it('should read the ASCII digits as the numbers they are', function() {
+      const digit = render(stream(ESC, '@', ESC, ' ', '4', 'AAA', LF));
+      const number = render(stream(ESC, '@', ESC, ' ', 4, 'AAA', LF));
+
+      assert.equal(dots(stitch(digit, {width: WIDTH})), dots(stitch(number, {width: WIDTH})));
+    });
+
+    it('should leave no space at all for the ESC SP 0 of receiptline', function() {
+      const zero = render(stream(ESC, '@', ESC, ' ', '0', 'AAA', LF));
+      const plain = render(stream(ESC, '@', 'AAA', LF));
+
+      assert.equal(dots(stitch(zero, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+  });
+
+  describe('the status and setting commands', function() {
+    /* None of them can put a dot on the paper, so they are parsed with their
+       own length and report nothing, see documentation/commands-star-prnt.md */
+
+    const parsed = [
+      ['ESC ACK SOH', [ESC, 0x06, 0x01]],
+      ['ESC s n1 n2', [ESC, 0x73, 0x30, 0x30]],
+      ['ESC GS ETX s n1 n2', [ESC, GS, 0x03, 1, 0, 0]],
+      ['ESC GS # n', [ESC, GS, 0x23, 2]],
+      ['ESC RS a n', [ESC, RS, 0x61, 0]],
+      ['ESC RS d n', [ESC, RS, 0x64, 3]],
+      ['ESC RS r n', [ESC, RS, 0x72, 1]],
+    ];
+
+    for (const [name, bytes] of parsed) {
+      it(`should consume ${name} and keep the text behind it`, function() {
+        const items = render(stream(ESC, '@', bytes, 'Hi', LF), {commands: ['unknown']});
+
+        assert.equal(items.filter((item) => item.type === 'unknown').length, 0);
+
+        assert.equal(
+            dots(stitch(items.filter((item) => item.type === 'image'), {width: WIDTH})),
+            dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+        );
+      });
+    }
+  });
+
   describe('HT and ESC D, tab stops', function() {
     it('should move to the next default stop, every eight characters', function() {
       const paper = stitch(render(stream(ESC, '@', 'A', 0x09, 'A', LF)), {width: WIDTH});
@@ -1328,12 +1411,10 @@ describe('StarPrntRenderer', function() {
     ];
 
     for (const [name, bytes] of buzzers) {
-      it(`should report ${name} and keep the text behind it`, function() {
+      it(`should consume ${name} and keep the text behind it`, function() {
         const items = render(stream(ESC, '@', bytes, 'Hi', LF), {commands: ['unknown']});
-        const unknown = items.filter((item) => item.type === 'unknown');
 
-        assert.equal(unknown.length, 1);
-        assert.deepEqual(Array.from(unknown[0].data), bytes);
+        assert.equal(items.filter((item) => item.type === 'unknown').length, 0);
 
         assert.equal(
             dots(stitch(items.filter((item) => item.type === 'image'), {width: WIDTH})),
@@ -1536,7 +1617,7 @@ describe('StarPrntRenderer', function() {
     });
 
     it('should keep the text in front of a truncated row command', function() {
-      const items = render(stream(ESC, '@', 'Hi', LF, 'Ho', enter, [0x62, 4, 0, 0xff]));
+      const items = render(stream(ESC, '@', 'Hi', LF, 'Ho', LF, enter, [0x62, 4, 0, 0xff]));
 
       assert.equal(
           dots(stitch(items, {width: WIDTH})),

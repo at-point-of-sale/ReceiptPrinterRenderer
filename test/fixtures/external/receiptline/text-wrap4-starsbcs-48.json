@@ -11,6 +11,6 @@
   "width": 576,
   "codepageMapping": "star",
   "captured": "2026-09-12",
-  "unknown": 4,
-  "notes": "StarPRNT of receiptline's starsbcs command set. Unknown: ESC RS a and ESC GS ETX, the status commands, ESC SP, the right side character spacing, and ESC s, a printer setting. Reviewed against receiptline's SVG preview of the same document."
+  "unknown": 0,
+  "notes": "StarPRNT of receiptline's starsbcs command set. No unknown items: ESC SP, the right side character spacing, is rendered since section 16c, and ESC RS a, ESC GS ETX and ESC s, the print start control, the status and the printer setting of receiptline's setup, are parsed. Reviewed against receiptline's SVG preview of the same document."
 }

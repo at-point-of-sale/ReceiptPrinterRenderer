@@ -11,6 +11,6 @@
   "width": 576,
   "codepageMapping": "epson",
   "captured": "2026-09-12",
-  "unknown": 8,
-  "notes": "Profile TM-P80, 42 columns of font A and 576 dots of paper. The renderer draws font A in twelve dots, so the paper holds 48 columns instead of the 42 the profile reports; python-escpos lays its software columns out for 42. Exercises ESC ! print modes, custom size, underline, block text, partial cut. Reviewed as a PNG against what the example prints. The unknown items are GS b, the smoothing mode, which set_with_default() sends with every style change and which changes nothing on paper."
+  "unknown": 0,
+  "notes": "Profile TM-P80, 42 columns of font A and 576 dots of paper. The renderer draws font A in twelve dots, so the paper holds 48 columns instead of the 42 the profile reports; python-escpos lays its software columns out for 42. Exercises ESC ! print modes, custom size, underline, block text, partial cut. Reviewed as a PNG against what the example prints. GS b, the smoothing mode, which set_with_default() sends with every style change, is parsed since section 16c: it changes nothing on paper and no longer reports an unknown item."
 }

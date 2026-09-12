@@ -11,6 +11,6 @@
   "width": 576,
   "codepageMapping": "epson",
   "captured": "2026-09-12",
-  "unknown": 1,
-  "notes": "Exercises text, fonts, justification, underline, emphasis, sizes, cut, pulse, barcodes. The example prints to a FilePrintConnector on php://stdout; the default capability profile names no paper, so the fixture is rendered on the 80 mm paper of the other fixtures. Reviewed as a PNG against what the example prints. The reverse feed of ESC e is reported and not performed, so the second line sits three lines lower than it would on paper. The two \"Failed to load image\" lines are the example's own output, its image loader returns an empty image on this PHP."
+  "unknown": 0,
+  "notes": "Exercises text, fonts, justification, underline, emphasis, sizes, cut, pulse, barcodes. The example prints to a FilePrintConnector on php://stdout; the default capability profile names no paper, so the fixture is rendered on the 80 mm paper of the other fixtures. Reviewed as a PNG against what the example prints. The reverse feed of ESC e is rendered since section 16c: the example prints ABC, feeds seven lines, prints DEF, reverses three lines and prints GHI, so GHI lands 90 dots above DEF and the paper of that part is 234 rows instead of the 240 it was when DEF and GHI shared a line. Reviewed as ASCII art: ABC at the top, GHI three lines above DEF, which is what the example demonstrates. The two \"Failed to load image\" lines are the example's own output, its image loader returns an empty image on this PHP."
 }

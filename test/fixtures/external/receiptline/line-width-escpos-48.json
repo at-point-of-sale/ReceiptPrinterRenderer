@@ -11,6 +11,6 @@
   "width": 576,
   "codepageMapping": "epson",
   "captured": "2026-09-12",
-  "unknown": 3,
-  "notes": "ESC/POS of receiptline's escpos command set. Unknown: GS a and GS r, the status commands, and FS ( A, the Kanji font, none of which print. receiptline writes the Code 128 of ESC/POS as the code set selection {C and the value of every digit pair, one byte each, and the one of StarPRNT as the digits themselves; the renderer reads {C the way the specification describes, so both draw the same symbol, see the notes of section 16. Reviewed against receiptline's SVG preview of the same document."
+  "unknown": 0,
+  "notes": "ESC/POS of receiptline's escpos command set. No unknown items: GS a and GS r, the status commands, and FS ( A, the Kanji font, are parsed since section 16c, none of them prints. receiptline writes the Code 128 of ESC/POS as the code set selection {C and the value of every digit pair, one byte each, and the one of StarPRNT as the digits themselves; the renderer reads {C the way the specification describes, so both draw the same symbol, see the notes of section 16. Reviewed against receiptline's SVG preview of the same document."
 }

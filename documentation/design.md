@@ -182,7 +182,7 @@ One bit per pixel, most significant bit first, rows padded to whole bytes, a set
 ### Flushing
 
 - A supported command flushes completed lines. The painter emits everything up to the last finished line as an image item, then the command item. A half composed line stays in the painter and continues afterwards. The encoder always finishes the line before a cut or pulse, so in practice the line is empty, but the rule is also correct for a real printer, which fires the drawer before the pending line prints.
-- The end of the stream flushes everything, including an unfinished line. A receipt without a cut, common for kitchen printers and the cat printers, still produces its last image.
+- The end of the stream flushes every row that was committed, and discards the line that is still being composed, because that is what the printer does with it: cells sit in the line buffer until a line feed or a print command puts them on the paper, and the end of a job is neither. A receipt without a cut, common for kitchen printers and the cat printers, still produces its last image in full, because the line feed of its last line committed that line; text without its line feed stays in the buffer and never prints, here as on paper. See section 16c of the [implementation plan](implementation-plan.md), which found it on a sample stream that ends with unbuffered text on purpose.
 - `maxHeight` splits image items that grow taller than the limit. The split is on a row boundary, the pieces are consecutive image items, and nothing is lost. Drivers use it for printers with a maximum raster height per command and for flow control over slow links.
 
 ### Fallbacks for unsupported commands

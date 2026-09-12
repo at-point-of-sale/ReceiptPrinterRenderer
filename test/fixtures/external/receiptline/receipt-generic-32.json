@@ -11,6 +11,6 @@
   "width": 384,
   "codepageMapping": "epson",
   "captured": "2026-09-12",
-  "unknown": 2,
-  "notes": "ESC/POS of receiptline's generic command set, which prints its images with GS v 0 instead of the graphics group and writes its arguments as binary numbers. Unknown: GS a and GS r, the status commands. Reviewed against receiptline's SVG preview of the same document."
+  "unknown": 0,
+  "notes": "ESC/POS of receiptline's generic command set, which prints its images with GS v 0 instead of the graphics group and writes its arguments as binary numbers. No unknown items: GS a and GS r, the status commands, are parsed since section 16c. Reviewed against receiptline's SVG preview of the same document."
 }

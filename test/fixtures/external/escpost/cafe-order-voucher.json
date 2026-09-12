@@ -12,5 +12,5 @@
   "codepageMapping": "epson",
   "captured": "2026-09-12",
   "unknown": 0,
-  "notes": "Exercises a raster logo, double size text, bold, alignment and a full cut. The sample names no profile and no width, so it is rendered on the 80 mm paper of the other fixtures, 576 dots. The stream is the hexadecimal file of the repository, not a run of the library. Reviewed as a PNG next to ESCPost's own render of the same job: the same blocks in the same order and 664 ink rows here against 651 there, with the paper 1240 dots against 1210 because ESCPost pads a sheet to its cutter."
+  "notes": "Exercises a raster logo, double size text, bold, alignment and a full cut. The sample names no profile and no width, so it is rendered on the 80 mm paper of the other fixtures, 576 dots. The stream is the hexadecimal file of the repository, not a run of the library. Reviewed as a PNG next to ESCPost's own render of the same job: the same blocks in the same order. The sample ends with GS V 0 and the words \"Buffered, not printed\" and no line feed behind them, which is the point of the case: a printer keeps that line in its buffer and never prints it. Section 16c made the end of a stream discard the unfinished line, so the paper is 1210 dots instead of 1240 and agrees with ESCPost exactly; reviewed again as ASCII art, where the last printed line is \"Scan to redeem online.\""
 }

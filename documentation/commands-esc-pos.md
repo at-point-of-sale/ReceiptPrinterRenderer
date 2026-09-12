@@ -34,7 +34,7 @@ This page lists every ESC/POS command `EscPosRenderer` recognises, what it does 
 
 The renderer emulates an Epson ESC/POS printer. It interprets the bytes the way the firmware does, including the cases where the firmware prints nothing at all: a barcode with invalid data, a symbol wider than the paper, an argument outside the range of its command. It does not improve on the printer, so `ESC 4` italic is ignored exactly as an Epson ignores it.
 
-It deliberately differs from the hardware in a few places, each of them because the behaviour is not on the wire and no hardware check settled it. They are marked in the notes below, and these are all of them: the four dot gap between the bars of a barcode and its human readable text, the approximations of `ESC J` and `ESC d`, the default horizontal motion unit of `GS P`, a QR model 1 drawn as a model 2 symbol, the basic 43 character set of Code 93, the minimum of three data codewords of a PDF417 symbol, the placeholder cells of the Kanji group, the initial code system of `FS C`, `FS ( C` and with it UTF-8 not being decoded, sets 16 and 17 of `ESC R` replacing nothing, the feed order of `ESC { n`, the argument lengths of `DLE DC4 3` and `DLE DC4 7`, the images of the graphics print buffer drawn under each other, the download graphics and the downloaded bit image of `GS *` surviving an `ESC @`, a multiple tone image drawn as its first colour, the reference dot density of function `49`, which is consumed and not honoured, and the heights of the GS1 DataBar family, which are a reading of the specification pending a hardware check.
+It deliberately differs from the hardware in a few places, each of them because the behaviour is not on the wire and no hardware check settled it. They are marked in the notes below, and these are all of them: the four dot gap between the bars of a barcode and its human readable text, the approximations of `ESC J` and `ESC d`, the default horizontal motion unit of `GS P`, a QR model 1 drawn as a model 2 symbol, the basic 43 character set of Code 93, the minimum of three data codewords of a PDF417 symbol, the placeholder cells of the Kanji group, the initial code system of `FS C`, `FS ( C` and with it UTF-8 not being decoded, sets 16 and 17 of `ESC R` replacing nothing, the feed order of `ESC { n`, the argument lengths of `DLE DC4 3` and `DLE DC4 7`, the reverse feed of `ESC e`, which is clamped to the paper the renderer holds rather than to the couple of lines the mechanism of a printer reverses, the images of the graphics print buffer drawn under each other, the download graphics and the downloaded bit image of `GS *` surviving an `ESC @`, a multiple tone image drawn as its first colour, the reference dot density of function `49`, which is consumed and not honoured, and the heights of the GS1 DataBar family, which are a reading of the specification pending a hardware check.
 
 <br>
 
@@ -49,6 +49,8 @@ It deliberately differs from the hardware in a few places, each of them because 
 
 A `cut`, `pulse`, `feed` or `unknown` item only reaches the output when the driver put that type in the `commands` option, see [Commands the printer supports](usage.md#commands-the-printer-supports). A **Reported** command with `unknown` switched off therefore leaves nothing at all, which is the same paper as **Skipped**.
 
+**Reported** and **Parsed** are the same to the paper and say different things about it. **Reported** means the command may have changed the paper of a real printer and the renderer did not reproduce it, so the `unknown` item is the warning that this receipt could come out differently: a page mode layout, a downloaded glyph, a logo the printer holds. A command that cannot touch the paper is **Parsed** instead, however much it changes about the printer: a status request, which has no channel back to the host to answer over, a setting of a sensor reading or a print speed, a smoothing mode that adds no dot to a one bit image. The number of unknown items of a stream is therefore a measure of how much of it this renderer is not showing, which is what the fixtures of section 16 of the [implementation plan](implementation-plan.md) count.
+
 Every command in the tables below knows how many argument bytes it has, so a command the renderer does not implement never derails the text behind it. A command that is in neither table consumes its two prefix bytes alone, which is the best guess there is, and is reported. A command whose arguments run past the end of the stream stops the parser without an error, and everything before it is still rendered.
 
 <br>
@@ -62,10 +64,12 @@ Every command in the tables below knows how many argument bytes it has, so a com
 | `CR` | carriage return | Skipped | Does not move the paper. The encoder ends every line with `LF CR`. |
 | `ESC @` | initialize | Rendered | Resets style, font, alignment, line spacing, motion units, codepage and the stored barcode, QR code and PDF417 parameters. It also discards a half composed line, because the command initializes the line buffer along with the printer. Rows that were already committed stay on the paper, the command does not flush. |
 | `HT` | horizontal tab | Rendered | Moves the cursor to the next tab stop, see [Alignment and position](#alignment-and-position). |
-| `DLE` | real time prefix | Reported | `DLE EOT`, `DLE ENQ` and `DLE DC4` are consumed with their own lengths, see [Printer state and status](#printer-state-and-status). |
+| `DLE` | real time prefix | Parsed | `DLE EOT`, `DLE ENQ` and `DLE DC4` are consumed with their own lengths. The first two are status requests and leave no item; `DLE DC4` is reported, see [Printer state and status](#printer-state-and-status). |
 | `FS &` | select Kanji mode | Rendered | The bytes that follow are read as multibyte characters, see [Codepages and character sets](#codepages-and-character-sets). |
 | `FS .` | cancel Kanji mode | Rendered | Back to one byte per character. The encoder sends it right behind `ESC @`, where there is no Kanji mode to leave. |
 | other bytes below `0x20` | — | Skipped | Everything that is not `HT`, `LF`, `CR`, `DLE`, `ESC`, `GS` or `FS` is ignored, the way a printer ignores it. |
+
+**The end of a stream is not a line feed.** Cells go on the paper when a line feed or a print command commits the line they are on, and at the end of a job the line that is still being composed is thrown away, the way `ESC @` throws it away and the way a printer leaves it in its line buffer. A receipt still prints in full: its last line ends with a line feed, which committed it. Text without one never prints, here or on paper, which is what the `cafe-order-voucher` sample of ESCPost demonstrates: it ends with `GS V 0` and the words "Buffered, not printed".
 
 <br>
 
@@ -97,9 +101,13 @@ The height of a committed line is the larger of the tallest cell on it and the c
 | `ESC 3 n` | line spacing | Rendered | `n` vertical motion units, rounded to `n / units` dots. With the Epson default of two units per dot `ESC 3 24` is twelve dots; behind the `GS P dpi dpi` the encoder writes in front of a column mode image it is 24 dots. |
 | `ESC J n` | print and feed n units | Rendered | Commits the line and advances by `n / units` dot rows, rounded. A line taller than that still advances by its own height, so nothing overlaps. An approximation: the encoder never emits this command and no hardware check settled it. |
 | `ESC d n` | print and feed n lines | Rendered | Commits the line and advances by at least `n` line spacings, under the same rule, so `ESC d 1` is exactly `LF` and `ESC d 0` commits the line without a gap below it. The same approximation as `ESC J`. |
-| `ESC K n` | print and reverse feed n dots | Reported | Reverse feeds are not modelled, the paper only moves forward here. |
-| `ESC e n` | print and reverse feed n lines | Reported | |
+| `ESC K n` | print and reverse feed n units | Rendered | Commits the line, printing it, and then moves the paper back by `n / units` dot rows, rounded, so that everything behind it is printed over the rows that are already there, dot for dot with OR. `n` is 0 to 48, which is 24 dots at the default vertical motion unit of an Epson and is as far as the mechanism reverses; a larger value is out of range and the whole command is ignored, the pending line included, the way a printer ignores an argument it has no range for. |
+| `ESC e n` | print and reverse feed n lines | Rendered | The same, `n` lines of the current line spacing instead of dot rows. Every value of `n` is accepted, see the note below the table. |
 | `ESC C n` | page length in lines | Reported | |
+
+A reverse feed moves the paper back over rows the painter still holds, and no further: the rows of the lines that were already handed to an image item are gone, so the move stops at the top of the rows that are left, and it never goes above the first row of the paper. That is the one clamp there is. The mechanism of a printer has a clamp of its own, a couple of lines at most and for `ESC K` the 48 units of its range, and this renderer does not impose it on `ESC e`: the Epson reference gives that command no range that the wild respects, and the demo of escpos-php reverses three lines with it. A stream that asks for more than the paper it has just printed gets the top of that paper, which is where a printer would have refused to go too.
+
+Rows the paper moved back over are printed over, they are not replaced: a dot that is there stays there, and the second pass adds its own dots to it, which is what a print head does. A row that was blank and is drawn over is no longer blank, so it no longer counts towards a `feed` item.
 
 Runs of blank rows of at least `feedThreshold` dots become `feed` items and split the image around them, but only when `feed` is in `commands`; otherwise they stay in the image as white rows. The six blank dots below a line of text belong to the run that follows them, so a feed item usually starts a few rows above the empty line that caused it.
 
@@ -143,6 +151,7 @@ Runs of blank rows of at least `feedThreshold` dots become `feed` items and spli
 | `FS - n` | multi byte underline | Parsed | The same. |
 | `FS S n1 n2` | Kanji character spacing | Parsed | The left and the right space of a multibyte character, in horizontal motion units. |
 | `FS W n` | quadruple size Kanji | Parsed | |
+| `FS ( A pL pH fn m` | Kanji font | Parsed | Selects the font a multibyte character is drawn in. There is no CJK font here whatever it selects, every multibyte character is a placeholder cell of the same size, so the command cannot change a dot. receiptline sends it in the setup of its ESC/POS command sets. |
 | `FS ( C pL pH fn ..` | character encode system | Reported | The group that selects UTF-8 on the models that have it. Consumed with the length it carries, so the stream stays in sync. **Its layout is not settled by a specification text that was available here, so nothing is rendered for it and a stream in UTF-8 prints the bytes through the current codepage.** |
 | `FS 2 c1 c2 d1..dk` | define user defined Kanji | Reported | The number of data bytes depends on the Kanji font of the printer, which the stream does not say, so the table assumes the 32 bytes of the 16 by 16 font. The encoder never sends this command. |
 | `FS ? c1 c2` | cancel user defined Kanji | Reported | |
@@ -288,30 +297,31 @@ A half composed line stays in the painter and continues behind the command, whic
 
 ### Printer state and status
 
-These commands change nothing about the paper of the receipt that is being rendered. They are consumed with the lengths of the specification and reported, so that a driver can see them and the stream stays in sync.
+These commands change nothing about the paper of the receipt that is being rendered. They are all consumed with the lengths of the specification, so that the stream stays in sync, and the status column says whether the command could have changed the paper of a real printer: the ones that ask the printer something or set something the paper cannot show are **Parsed**, the ones that might have moved a dot are **Reported**, so that a driver sees them. See [Statuses](#statuses) for the rule.
 
 | Command | Name | Status | Notes |
 |---|---|---|---|
-| `ESC = n` | select peripheral device | Reported | |
+| `ESC u n` | transmit peripheral device status | Parsed | The renderer never answers a status request, it has no channel back to the host, and a request cannot reach the paper. |
+| `ESC v` | transmit paper sensor status | Parsed | |
+| `GS I n` | transmit printer id | Parsed | |
+| `GS a n` | automatic status back | Parsed | Switches the status the printer sends by itself, over the channel that is not there. |
+| `GS b n` | smoothing | Parsed | Smoothing interpolates the dots of a scaled glyph on the printer. There is no dot of a one bit image it can add or take away here, so it changes nothing that can be drawn. |
+| `GS j n` | transmit remaining paper sensor status | Parsed | |
+| `GS r n` | transmit status | Parsed | |
+| `GS ( H pL pH fn m ..` | request the transmission of a response | Parsed | The whole selector, whichever function it carries: every one of them asks for an answer over the channel that is not there. |
+| `DLE EOT n` | transmit real time status | Parsed | One argument byte, and two for `DLE EOT 7 n` and `DLE EOT 8 n`. |
+| `DLE ENQ n` | real time request | Parsed | Recovers the printer from an error and restarts or cancels the job. This renderer is never in an error state, so there is nothing to recover from and nothing to cancel. |
+| `ESC = n` | select peripheral device | Reported | It can switch the printer off the line, and what a printer that is not listening does with the rest of the stream is not modelled. |
 | `ESC U n` | unidirectional printing | Reported | |
-| `ESC c n` (`ESC c 3`, `ESC c 4`, `ESC c 5`) | paper sensor and panel button settings | Reported | Consumed as two argument bytes, the selector and its value. |
-| `ESC u n` | transmit peripheral device status | Reported | The renderer never answers a status request, it has no channel back to the host. |
-| `ESC v` | transmit paper sensor status | Reported | |
-| `GS I n` | transmit printer id | Reported | |
-| `GS a n` | automatic status back | Reported | |
-| `GS b n` | smoothing | Reported | |
+| `ESC c n` (`ESC c 3`, `ESC c 4`, `ESC c 5`) | paper sensor and panel button settings | Reported | Consumed as two argument bytes, the selector and its value. The sensor settings stop the printing on a paper end, which is paper. |
 | `GS c` | print counter | Reported | |
 | `GS g m nL nH` | maintenance counter | Reported | Both `GS g 0` and `GS g 2`, consumed as four argument bytes. |
-| `GS j n` | transmit remaining paper sensor status | Reported | |
-| `GS r n` | transmit status | Reported | |
-| `GS z n1 n2` | print density and other settings | Reported | |
+| `GS z n1 n2` | print density and other settings | Reported | The density is not the only thing behind this command, the "other settings" of its name are not settled here. |
 | `GS E n` | print control method | Reported | |
-| `GS :` | start or end macro definition | Reported | |
+| `GS :` | start or end macro definition | Reported | The macro is printed by `GS ^`, which this renderer does not keep. |
 | `FS g 1 m a1..a4 nL nH d..` | write to the user memory | Reported | Consumed with the data length it carries. |
 | `FS g 2 m a1..a4 nL nH` | read from the user memory | Reported | |
-| `DLE EOT n` | transmit real time status | Reported | One argument byte, and two for `DLE EOT 7 n` and `DLE EOT 8 n`. |
-| `DLE ENQ n` | real time request | Reported | |
-| `DLE DC4 fn ..` | real time request | Reported | `fn 1 m t` generates a pulse, `fn 2 a b` runs the power off sequence, `fn 8` carries the seven fixed bytes of the clear buffer request, and `fn 3` and `fn 7` one parameter byte each. Anything else is read as the function byte alone. **The lengths of `fn 3` and `fn 7` are the common ones, they are not settled by a specification text that was available here.** The pulse of `fn 1` is reported rather than rendered: it is a real time command the printer performs at once, next to the receipt rather than in it. |
+| `DLE DC4 fn ..` | real time request | Reported | `fn 1 m t` generates a pulse, `fn 2 a b` runs the power off sequence, `fn 8` carries the seven fixed bytes of the clear buffer request, and `fn 3` and `fn 7` one parameter byte each. Anything else is read as the function byte alone. **The lengths of `fn 3` and `fn 7` are the common ones, they are not settled by a specification text that was available here.** This is the one real time command that is reported and not parsed: `fn 1` fires the drawer, which is a `pulse` the driver should see, and `fn 8` clears the buffer, which is the paper. The pulse is reported rather than rendered: it is a real time command the printer performs at once, next to the receipt rather than in it. |
 
 <br>
 
@@ -323,7 +333,7 @@ These are the ESC/POS commands the renderer parses but does not render. Every co
 - CJK fonts. The Kanji group draws placeholder cells, not glyphs; a receipt that needs real CJK text needs a printer with the font. UTF-8 through `FS ( C` is not decoded either, for the same reason and because the layout of that group is not settled here.
 - User defined characters, `ESC %`, `ESC ?`, `FS 2` and `FS ?`: glyphs downloaded into the printer.
 - NV logos and graphics that a utility put in the printer before the stream. An image the stream defines itself is drawn, see [Images](#images) and [Graphics](#graphics); a print of a key code or an image number the stream never defined prints nothing and is reported, because the renderer has never seen what the printer holds.
-- Status and settings commands, `GS I`, `GS r`, `GS a`, `ESC u`, `ESC v`, `GS j`, `GS z`, `FS g`, the `DLE` real time commands and the rest of [Printer state and status](#printer-state-and-status): there is no channel back to the host, and the settings do not change the paper.
+- Status and settings commands, `GS I`, `GS r`, `GS a`, `ESC u`, `ESC v`, `GS j`, `GS z`, `FS g`, the `DLE` real time commands and the rest of [Printer state and status](#printer-state-and-status): there is no channel back to the host, and the settings do not change the paper. The ones that provably cannot change it are parsed and leave no item, the ones that might are reported.
 - Maxicode and the composite symbologies, the other selectors of the `GS ( k` group.
 
 <br>
@@ -350,7 +360,7 @@ Every command below is exercised by at least one of those streams. A command tha
 | `ESC 2` | default line spacing | Rendered | escpost |
 | `ESC d n` | print and feed n lines | Rendered | escpos-php, escpos-tools, escpost, python-escpos |
 | `ESC J n` | print and feed n dots | Rendered | escpost |
-| `ESC e n` | print and reverse feed n lines | Reported | escpos-php |
+| `ESC e n` | print and reverse feed n lines | Rendered | escpos-php, the demo, which prints three lines, reverses three lines and prints over them |
 | `ESC a n` | alignment | Rendered | escpos-php, escpos-tools, escpost, python-escpos, receiptline |
 | `ESC SP n` | right side character spacing | Rendered | escpost, receiptline |
 | `ESC $ nL nH` | absolute print position | Rendered | escpost, receiptline |
@@ -362,7 +372,7 @@ Every command below is exercised by at least one of those streams. A command tha
 | `FS C n` | Kanji code system | Rendered | receiptline |
 | `FS - n` | multi byte underline | Parsed | receiptline |
 | `FS S n1 n2` | Kanji character spacing | Parsed | receiptline |
-| `FS ( A pL pH fn m` | Kanji font | Reported | receiptline |
+| `FS ( A pL pH fn m` | Kanji font | Parsed | receiptline |
 | `GS h n` | barcode height | Rendered | escpos-php, escpost, python-escpos, receiptline |
 | `GS w n` | barcode module width | Rendered | escpos-php, escpost, python-escpos, receiptline |
 | `GS H n` | HRI position | Rendered | escpos-php, escpost, python-escpos, receiptline |
@@ -378,11 +388,11 @@ Every command below is exercised by at least one of those streams. A command tha
 | `GS ( L pL pH 48 50` | print the graphics buffer | Rendered | escpos-tools, python-escpos, receiptline |
 | `GS V m`, `GS V m n` | cut | Rendered | escpos-php, escpos-tools, escpost, with the full and the partial cut and with function B, python-escpos, receiptline |
 | `ESC p m t1 t2` | pulse | Rendered | escpos-php, escpos-tools |
-| `GS a n` | automatic status back | Reported | receiptline |
-| `GS r n` | transmit status | Reported | receiptline |
-| `GS b n` | smoothing | Reported | python-escpos |
+| `GS a n` | automatic status back | Parsed | receiptline |
+| `GS r n` | transmit status | Parsed | receiptline |
+| `GS b n` | smoothing | Parsed | python-escpos |
 
-Four of these are **Reported**, which is the interesting part of the table: `ESC e`, the reverse line feed the demo of escpos-php uses, and `GS a`, `GS r` and `GS b`, the status and smoothing commands receiptline and python-escpos put around a job. The three settings change nothing on paper, so reporting them is the whole behaviour; `ESC e` does move the paper on a printer, and a receipt that relies on it comes out taller here, see the notes of section 16 of the implementation plan.
+**Not one of these produces an `unknown` item any more.** Four of them did until section 16c: `ESC e`, the reverse line feed of the escpos-php demo, which is rendered now, and `GS a`, `GS r`, `GS b` and `FS ( A`, the status, smoothing and Kanji font commands receiptline and python-escpos put around a job, which are parsed now because none of them can touch the paper. The 296 unknown items the 123 external fixtures carried are 0, so an unknown item in one of these streams is a real gap from here on.
 
 The last rows come from the sample streams of two renderers rather than from an encoder, which is why they reach commands no library above sends: the four bit image densities of `ESC *`, every scaling mode of `GS v 0`, `ESC 2`, `ESC J`, `GS P` and the GS1 DataBar selectors of `GS k`. A renderer writes those by hand to exercise a parser, so they are the part of the table that says what the wild does when it is not an encoder holding the pen.
 
