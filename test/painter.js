@@ -345,6 +345,98 @@ describe('Painter', function() {
     });
   });
 
+  describe('define(), forget() and print()', function() {
+    it('should draw an image that was defined as a block', function() {
+      const paper = painter();
+
+      paper.define('nv:65:66', black(48, 10));
+
+      assert.isTrue(paper.print('nv:65:66'));
+
+      const items = paper.end();
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 10);
+    });
+
+    it('should print nothing at all for a key that was never defined', function() {
+      const paper = painter();
+
+      paper.text('A');
+
+      assert.isFalse(paper.print('nv:65:66'));
+
+      /* The pending line is not committed either: a printer without the image
+         does nothing at all with the command */
+
+      const items = paper.end();
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 30);
+    });
+
+    it('should scale the image by repeating its dots', function() {
+      const paper = painter();
+
+      paper.define('dl:67:68', black(24, 10));
+      paper.print('dl:67:68', {scale: {x: 2, y: 2}});
+
+      const items = paper.end();
+      const bitmap = stitch(items, {width: WIDTH});
+
+      assert.equal(items[0].height, 20);
+      assert.equal(Bitmap.getPixel(bitmap, 47, 19), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 48, 19), 0);
+    });
+
+    it('should align the image the way the current alignment says', function() {
+      const paper = painter();
+
+      paper.define('dl:67:68', black(48, 10));
+      paper.align('right');
+      paper.print('dl:67:68');
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(Bitmap.getPixel(bitmap, 47, 0), 0);
+      assert.equal(Bitmap.getPixel(bitmap, 48, 0), 1);
+    });
+
+    it('should delete an image with a definition without a bitmap', function() {
+      const paper = painter();
+
+      paper.define('nv:65:66', black(48, 10));
+      paper.define('nv:65:66', null);
+
+      assert.isFalse(paper.print('nv:65:66'));
+    });
+
+    it('should delete every image of a prefix with forget()', function() {
+      const paper = painter();
+
+      paper.define('nv:65:66', black(48, 10));
+      paper.define('nv:67:68', black(48, 10));
+      paper.define('dl:65:66', black(48, 10));
+
+      paper.forget('nv:');
+
+      assert.isFalse(paper.print('nv:65:66'));
+      assert.isFalse(paper.print('nv:67:68'));
+      assert.isTrue(paper.print('dl:65:66'));
+    });
+
+    it('should keep the definitions through a reset and a discard', function() {
+      const paper = painter();
+
+      paper.define('nv:65:66', black(48, 10));
+
+      paper.reset();
+      paper.discard();
+
+      assert.isTrue(paper.print('nv:65:66'));
+    });
+  });
+
   describe('barcodes and QR codes', function() {
     it('should draw a barcode as a block of its own', function() {
       const paper = painter();

@@ -76,6 +76,63 @@ const HRI = Object.assign(Object.create(null), {
 
 const ERROR_LEVELS = Object.assign(Object.create(null), {48: 'L', 49: 'M', 50: 'Q', 51: 'H'});
 
+/* How the mode of GS v 0, GS / and FS p scales an image: 0 normal, 1 double
+   width, 2 double height and 3 both, as the numbers and as the ASCII digits.
+   Any other value prints the image unscaled */
+
+const IMAGE_SCALES = Object.assign(Object.create(null), {
+  0: {x: 1, y: 1}, 1: {x: 2, y: 1}, 2: {x: 1, y: 2}, 3: {x: 2, y: 2},
+  48: {x: 1, y: 1}, 49: {x: 2, y: 1}, 50: {x: 1, y: 2}, 51: {x: 2, y: 2},
+});
+
+/* The prefixes of the keys the images of the graphics commands are kept under
+   in the painter. The NV and the download graphics of GS ( L are addressed by
+   a key code of two bytes, the NV bit images of FS q by their number, and the
+   downloaded bit image of GS * is the only one of its kind */
+
+const NV_GRAPHICS = 'nv:';
+const DOWNLOAD_GRAPHICS = 'dl:';
+const NV_BIT_IMAGE = 'nv-bit-image:';
+const DOWNLOAD_BIT_IMAGE = 'download-bit-image';
+
+/* The tone parameter of the graphics commands: 48 is a monochrome image and 52
+   a multiple tone one, of which this renderer draws the first colour */
+
+const MONOCHROME = 48;
+const MULTI_TONE = 52;
+
+/* The colour of a block of graphics data. Colour 1 is the black of a single
+   colour printer, the other colours belong to a second ribbon or a second
+   thermal layer and are consumed without being drawn */
+
+const FIRST_COLOUR = 49;
+
+/* The size the graphics functions of GS ( L accept, in dots: the direction the
+   data runs in holds up to 8192 dots and the other one up to 2047, so a raster
+   image is at most 8192 dots wide and 2047 dots tall and a column image the
+   other way round. A command that asks for more is out of range and is
+   ignored, the way a printer ignores it */
+
+const MAX_GRAPHICS_DATA = 8192;
+const MAX_GRAPHICS_LINES = 2047;
+
+/* The scale factors bx, by, x and y of the graphics functions: one dot, or two
+   dots by repeating every dot */
+
+const GRAPHICS_SCALES = [1, 2];
+
+/* The delete all functions carry the three fixed bytes CLR, and no other
+   parameter deletes anything */
+
+const DELETE_ALL = [0x43, 0x4c, 0x52];
+
+/* The size GS * accepts: x bytes of eight dots wide, y bytes of eight dots
+   tall, and the memory of the printer holds 1536 of those bytes */
+
+const MAX_DOWNLOAD_WIDTH = 255;
+const MAX_DOWNLOAD_HEIGHT = 48;
+const MAX_DOWNLOAD_BYTES = 1536;
+
 /* What a printer starts a barcode with, until the commands say otherwise. The
    encoder always sets all three, so these are only reached by hand written
    streams */
@@ -417,8 +474,6 @@ const UNKNOWN_ARGUMENTS = {
 
   [GS]: {
     0x24: 2, /* absolute vertical position in page mode */
-    0x2a: downloadedBitmapArguments, /* define downloaded bitmap */
-    0x2f: 1, /* print downloaded bitmap */
     0x3a: 0, /* start or end macro definition */
     0x41: 2, /* print position adjustment */
     0x45: 1, /* print control method */
@@ -439,8 +494,6 @@ const UNKNOWN_ARGUMENTS = {
     0x32: 34, /* define user defined Kanji, c1 c2 and the glyph, see below */
     0x3f: 2, /* cancel user defined Kanji, c1 c2 */
     0x67: userMemoryArguments, /* write and read the user memory */
-    0x70: 2, /* print NV bit image */
-    0x71: nvBitImageArguments, /* define NV bit image, n images with their sizes */
   },
 };
 
@@ -471,6 +524,7 @@ class EscPosRenderer {
   #codeSystem;
   #dpi;
   #text;
+  #graphics;
   #barcode;
   #qrcode;
   #pdf417;
@@ -577,6 +631,12 @@ class EscPosRenderer {
     this.#kanji = false;
     this.#codeSystem = 'shift-jis';
     this.#text = [];
+
+    /* The graphics print buffer is part of the print buffer of the printer,
+       which an initialize empties. The images the definition commands stored
+       are not, they live in the painter for as long as this renderer does */
+
+    this.#graphics = [];
     this.#barcode = Object.assign({}, BARCODE_DEFAULTS);
     this.#qrcode = Object.assign({data: new Uint8Array(0)}, QRCODE_DEFAULTS);
     this.#pdf417 = Object.assign({data: new Uint8Array(0)}, PDF417_DEFAULTS);
@@ -756,7 +816,9 @@ class EscPosRenderer {
       [GS]: {
         0x21: {args: 1, run: (a) => this.#size(a[0])},
         0x28: {args: parenthesisArguments, run: (a, consumed) => this.#parenthesis(a, consumed)},
-        0x38: {args: largeParenthesisArguments, run: (a, consumed) => this.#unknown(consumed)},
+        0x2a: {args: downloadedBitmapArguments, run: (a) => this.#defineBitImage(a)},
+        0x2f: {args: 1, run: (a, consumed) => this.#printBitImage(a, consumed)},
+        0x38: {args: largeParenthesisArguments, run: (a, consumed) => this.#largeParenthesis(a, consumed)},
         0x42: {args: 1, run: (a) => this.#painter.style({invert: (a[0] & 1) !== 0})},
         0x48: {args: 1, run: (a) => this.#hriPosition(a[0])},
         0x4c: {args: 2, run: (a) => this.#painter.margins({left: this.#horizontal(a[0] + a[1] * 256)})},
@@ -778,16 +840,19 @@ class EscPosRenderer {
         0x43: {args: 1, run: (a) => this.#kanjiCodeSystem(a[0])},
         0x53: {args: 2, run: null}, /* multibyte character spacing, parsed */
         0x57: {args: 1, run: null}, /* quadruple size multibyte, parsed */
+        0x70: {args: 2, run: (a, consumed) => this.#printNvBitImage(a, consumed)},
+        0x71: {args: nvBitImageArguments, run: (a) => this.#defineNvBitImages(a)},
       },
     };
   }
 
   /**
-     * GS ( x, a group of commands that all carry their length the same way.
-     * Only the two dimensional symbologies of GS ( k are rendered, in a later
-     * section. The graphics of GS ( L are not, and neither is the same group
-     * under GS 8 L, so both of those report an unknown command, as does
-     * everything else in the group.
+     * GS ( x, a group of commands that all carry their length the same way:
+     * GS ( k are the two dimensional symbologies and GS ( L the graphics. Both
+     * carry two bytes behind their length, the selector and the function, so
+     * the handlers are given everything behind the length bytes.
+     *
+     * Everything else in the group reports an unknown command.
      *
      * @param  {Uint8Array}   args       The arguments of the command
      * @param  {Uint8Array}   consumed   The whole command, for the unknown item
@@ -798,7 +863,511 @@ class EscPosRenderer {
       return;
     }
 
+    if (args[0] === 0x4c) {
+      this.#graphicsFunction(args.subarray(3), consumed);
+      return;
+    }
+
     this.#unknown(consumed);
+  }
+
+  /**
+     * GS 8 L p1 p2 p3 p4 .., the graphics group under a four byte length, which
+     * is how an image that is larger than 65535 bytes is sent. The functions
+     * are the ones of GS ( L, only the length is longer.
+     *
+     * @param  {Uint8Array}   args       The arguments of the command
+     * @param  {Uint8Array}   consumed   The whole command, for the unknown item
+     */
+  #largeParenthesis(args, consumed) {
+    if (args[0] === 0x4c) {
+      this.#graphicsFunction(args.subarray(5), consumed);
+      return;
+    }
+
+    this.#unknown(consumed);
+  }
+
+  /**
+     * The graphics group of GS ( L and GS 8 L, everything behind the length
+     * bytes: m, which is always 48, the function code, and its parameters.
+     *
+     * Functions 112 and 113 store an image in the graphics print buffer, in
+     * raster and in column format, and function 50 prints what is in it.
+     * Functions 67, 68, 83 and 84 define an image under a key code, in the NV
+     * memory and in the download memory, 69 and 85 print one of them, and 65,
+     * 66, 81 and 82 delete them. The functions that only answer the host, the
+     * capacities and the key code lists, are consumed and do nothing.
+     *
+     * @param  {Uint8Array}   payload    The bytes behind the length, m first
+     * @param  {Uint8Array}   consumed   The whole command, for the unknown item
+     */
+  #graphicsFunction(payload, consumed) {
+    if (payload.length < 2 || payload[0] !== 0x30) {
+      this.#unknown(consumed);
+      return;
+    }
+
+    const parameters = payload.subarray(2);
+
+    switch (payload[1]) {
+      /* Store graphics in the print buffer, in raster and in column format */
+
+      case 112:
+        this.#storeGraphics(parameters, false, consumed);
+        break;
+
+      case 113:
+        this.#storeGraphics(parameters, true, consumed);
+        break;
+
+        /* Print the graphics that are in the print buffer */
+
+      case 50:
+        this.#printGraphics();
+        break;
+
+        /* Define NV and download graphics, in raster and in column format */
+
+      case 67:
+        this.#defineGraphics(parameters, NV_GRAPHICS, false, consumed);
+        break;
+
+      case 68:
+        this.#defineGraphics(parameters, NV_GRAPHICS, true, consumed);
+        break;
+
+      case 83:
+        this.#defineGraphics(parameters, DOWNLOAD_GRAPHICS, false, consumed);
+        break;
+
+      case 84:
+        this.#defineGraphics(parameters, DOWNLOAD_GRAPHICS, true, consumed);
+        break;
+
+        /* Print the graphics of a key code, with the two scale factors */
+
+      case 69:
+        this.#printDefined(parameters, NV_GRAPHICS, consumed);
+        break;
+
+      case 85:
+        this.#printDefined(parameters, DOWNLOAD_GRAPHICS, consumed);
+        break;
+
+        /* Delete every image of a memory, and one image of a key code */
+
+      case 65:
+        this.#deleteAllGraphics(parameters, NV_GRAPHICS);
+        break;
+
+      case 81:
+        this.#deleteAllGraphics(parameters, DOWNLOAD_GRAPHICS);
+        break;
+
+      case 66:
+        this.#deleteGraphics(parameters, NV_GRAPHICS);
+        break;
+
+      case 82:
+        this.#deleteGraphics(parameters, DOWNLOAD_GRAPHICS);
+        break;
+
+        /* The capacity and the key code list functions answer the host, which
+         this renderer has no channel to, so they are reported the way every
+         other command that asks the printer something is */
+
+      case 48:
+      case 51:
+      case 52:
+      case 64:
+      case 80:
+        this.#unknown(consumed);
+        break;
+
+        /* Function 49 sets the reference dot density of the graphics
+         commands, x y of 50 for 180 dpi and 51 for 360 dpi. It is consumed and
+         not honoured: the images of this renderer are drawn at one dot per
+         dot, on the 203 dpi of both profiles */
+
+      case 49:
+        break;
+
+      default:
+        this.#unknown(consumed);
+        break;
+    }
+  }
+
+  /**
+     * Functions 112 and 113, which store an image in the graphics print buffer:
+     * a bx by c xL xH yL yH d1..dk, where a is 48 for a monochrome image and 52
+     * for a multiple tone one, bx and by are 1 or 2 and scale the image by
+     * repeating its dots, c is the colour of the data, and x and y are the size
+     * of the image in dots.
+     *
+     * Only colour 1 is drawn, the black of a single colour printer. The data of
+     * another colour is consumed and nothing is stored for it, which is what a
+     * printer without a second colour prints.
+     *
+     * @param  {Uint8Array}   parameters   The parameters of the function
+     * @param  {boolean}      column       True for the column format of 113
+     * @param  {Uint8Array}   consumed     The whole command, for the unknown item
+     */
+  #storeGraphics(parameters, column, consumed) {
+    if (parameters.length < 8 || (parameters[0] !== MONOCHROME && parameters[0] !== MULTI_TONE)) {
+      this.#unknown(consumed);
+      return;
+    }
+
+    const width = parameters[4] + parameters[5] * 256;
+    const height = parameters[6] + parameters[7] * 256;
+
+    /* A parameter outside the range of the command makes the printer ignore
+       the whole command, so nothing is stored and nothing is printed */
+
+    if (!GRAPHICS_SCALES.includes(parameters[1]) || !GRAPHICS_SCALES.includes(parameters[2])) {
+      return;
+    }
+
+    if (!this.#fits(width, height, column)) {
+      return;
+    }
+
+    if (parameters[3] !== FIRST_COLOUR) {
+      return;
+    }
+
+    const bitmap = this.#bitmap(parameters.subarray(8), width, height, column);
+
+    if (bitmap.width === 0 || bitmap.height === 0) {
+      return;
+    }
+
+    this.#graphics.push(Bitmap.scale(bitmap, parameters[1], parameters[2]));
+  }
+
+  /**
+     * Function 50, which prints the graphics print buffer as a block, aligned
+     * the way the alignment says, and empties it. Images that were stored one
+     * after another are drawn under each other, so that nothing is lost.
+     */
+  #printGraphics() {
+    const images = this.#graphics;
+
+    this.#graphics = [];
+
+    if (images.length === 0) {
+      return;
+    }
+
+    if (images.length === 1) {
+      this.#painter.block(images[0]);
+      return;
+    }
+
+    const width = images.reduce((widest, image) => Math.max(widest, image.width), 0);
+    const height = images.reduce((total, image) => total + image.height, 0);
+
+    const bitmap = Bitmap.create(width, height);
+
+    let y = 0;
+
+    for (const image of images) {
+      Bitmap.blit(image, bitmap, 0, y);
+      y += image.height;
+    }
+
+    this.#painter.block(bitmap);
+  }
+
+  /**
+     * Functions 67, 68, 83 and 84, which define an image in the NV or the
+     * download memory: a kc1 kc2 b xL xH yL yH [c d1..dk]1..[c d1..dk]b, where
+     * kc1 and kc2 are the key code the print functions address the image with
+     * and b is the number of colour blocks that follow the size.
+     *
+     * The image is kept in the painter under its key code for as long as this
+     * renderer lives, an initialize and the end of a stream included, the way
+     * the memory of a printer keeps it.
+     *
+     * @param  {Uint8Array}   parameters   The parameters of the function
+     * @param  {string}       prefix       Key prefix of the memory, NV or download
+     * @param  {boolean}      column       True for the column format of 68 and 84
+     * @param  {Uint8Array}   consumed     The whole command, for the unknown item
+     */
+  #defineGraphics(parameters, prefix, column, consumed) {
+    if (parameters.length < 8 || (parameters[0] !== MONOCHROME && parameters[0] !== MULTI_TONE)) {
+      this.#unknown(consumed);
+      return;
+    }
+
+    const key = `${prefix}${parameters[1]}:${parameters[2]}`;
+    const colours = parameters[3];
+
+    const width = parameters[4] + parameters[5] * 256;
+    const height = parameters[6] + parameters[7] * 256;
+
+    /* A size outside the range of the command makes the printer ignore the
+       whole command, so the image that is under this key code stays there */
+
+    if (!this.#fits(width, height, column)) {
+      return;
+    }
+
+    /* A colour block is the colour byte and the dots of the image in the
+       format of the function */
+
+    const size = column ?
+      ((height + 7) >> 3) * width :
+      ((width + 7) >> 3) * height;
+
+    let offset = 8;
+
+    for (let colour = 0; colour < colours && offset < parameters.length; colour++) {
+      if (parameters[offset] === FIRST_COLOUR) {
+        const bitmap = this.#bitmap(
+            parameters.subarray(offset + 1, offset + 1 + size), width, height, column,
+        );
+
+        /* A definition whose dots are missing leaves the image that is under
+           this key code alone, it does not delete it */
+
+        if (bitmap.width > 0 && bitmap.height > 0) {
+          this.#painter.define(key, bitmap);
+        }
+      }
+
+      offset += 1 + size;
+    }
+  }
+
+  /**
+     * Functions 69 and 85, which print an image of a key code: kc1 kc2 x y,
+     * where x and y are 1 or 2 and scale the image by repeating its dots.
+     *
+     * A key code the printer never got a definition for prints nothing and does
+     * not advance the paper, and the command is reported instead.
+     *
+     * @param  {Uint8Array}   parameters   The parameters of the function
+     * @param  {string}       prefix       Key prefix of the memory, NV or download
+     * @param  {Uint8Array}   consumed     The whole command, for the unknown item
+     */
+  #printDefined(parameters, prefix, consumed) {
+    /* The function carries four parameters, and one that is missing or outside
+       its range makes the printer ignore the command */
+
+    if (parameters.length < 4) {
+      return;
+    }
+
+    if (!GRAPHICS_SCALES.includes(parameters[2]) || !GRAPHICS_SCALES.includes(parameters[3])) {
+      return;
+    }
+
+    const printed = this.#painter.print(`${prefix}${parameters[0]}:${parameters[1]}`, {
+      scale: {x: parameters[2], y: parameters[3]},
+    });
+
+    if (!printed) {
+      this.#unknown(consumed);
+    }
+  }
+
+  /**
+     * Functions 65 and 81, which delete every image of a memory. They carry the
+     * three fixed bytes CLR, and a parameter that is not those three makes the
+     * printer ignore the command, so nothing is deleted by accident.
+     *
+     * @param  {Uint8Array}   parameters   The parameters of the function
+     * @param  {string}       prefix       Key prefix of the memory, NV or download
+     */
+  #deleteAllGraphics(parameters, prefix) {
+    if (parameters.length < 3 || !DELETE_ALL.every((byte, index) => parameters[index] === byte)) {
+      return;
+    }
+
+    this.#painter.forget(prefix);
+  }
+
+  /**
+     * Whether a size is one the graphics functions accept. The data direction
+     * of the format holds up to 8192 dots and the other one up to 2047, and a
+     * size of zero is not an image, so anything else is out of range and makes
+     * the printer ignore the command.
+     *
+     * @param  {number}    width    Width of the image in dots
+     * @param  {number}    height   Height of the image in dots
+     * @param  {boolean}   column   True for column format, false for raster format
+     * @return {boolean}            True when the printer would accept the size
+     */
+  #fits(width, height, column) {
+    const widest = column ? MAX_GRAPHICS_LINES : MAX_GRAPHICS_DATA;
+    const tallest = column ? MAX_GRAPHICS_DATA : MAX_GRAPHICS_LINES;
+
+    return width >= 1 && width <= widest && height >= 1 && height <= tallest;
+  }
+
+  /**
+     * Functions 66 and 82, which delete the image of one key code. A key code
+     * that holds no image deletes nothing, as it does on a printer.
+     *
+     * @param  {Uint8Array}   parameters   The parameters of the function
+     * @param  {string}       prefix       Key prefix of the memory, NV or download
+     */
+  #deleteGraphics(parameters, prefix) {
+    if (parameters.length < 2) {
+      return;
+    }
+
+    this.#painter.define(`${prefix}${parameters[0]}:${parameters[1]}`, null);
+  }
+
+  /**
+     * The dots of a graphics command as a bitmap, in the format the function
+     * carries them in.
+     *
+     * The size of these images is not the length of the command, the group
+     * length is, so a stream can ask for an image that is larger than the dots
+     * it carries. The image is cut down to the rows, or the columns, the data
+     * actually holds, and data that is not even one row or one column long is
+     * no image at all, so both axes are bounded by the bytes that are there and
+     * a size the range check let through never allocates more than the command
+     * carries.
+     *
+     * @param  {Uint8Array}   data     The dots
+     * @param  {number}       width    Width of the image in dots
+     * @param  {number}       height   Height of the image in dots
+     * @param  {boolean}      column   True for column format, false for raster format
+     * @return {Bitmap}                The image
+     */
+  #bitmap(data, width, height, column) {
+    if (width <= 0 || height <= 0) {
+      return Bitmap.create(0, 0);
+    }
+
+    if (column) {
+      const bytes = (height + 7) >> 3;
+      const lines = Math.min(width, Math.floor(data.length / bytes));
+
+      return lines > 0 ? Bitmap.fromColumns(data, lines, height) : Bitmap.create(0, 0);
+    }
+
+    const bytes = (width + 7) >> 3;
+    const lines = Math.min(height, Math.floor(data.length / bytes));
+
+    return lines > 0 ? Bitmap.fromRaster(data, width, lines) : Bitmap.create(0, 0);
+  }
+
+  /**
+     * GS * x y d.., the downloaded bit image: x bytes of eight dots wide and y
+     * bytes of eight dots tall, in column format. There is one downloaded bit
+     * image, so a definition replaces the one before it.
+     *
+     * A size outside the range of the command, `x` of 1 to 255, `y` of 1 to 48
+     * and at most 1536 bytes in all, makes the printer ignore the command, so
+     * the image that was downloaded before it stays where it is.
+     *
+     * @param  {Uint8Array}   args   The arguments of the command
+     */
+  #defineBitImage(args) {
+    const width = args[0];
+    const height = args[1];
+
+    if (width < 1 || width > MAX_DOWNLOAD_WIDTH || height < 1 || height > MAX_DOWNLOAD_HEIGHT) {
+      return;
+    }
+
+    if (width * height > MAX_DOWNLOAD_BYTES) {
+      return;
+    }
+
+    this.#painter.define(
+        DOWNLOAD_BIT_IMAGE,
+        Bitmap.fromColumns(args.subarray(2), width * 8, height * 8),
+    );
+  }
+
+  /**
+     * GS / m, which prints the downloaded bit image in one of the four modes of
+     * GS v 0. A printer that was never given a definition prints nothing.
+     *
+     * @param  {Uint8Array}   args       The arguments of the command
+     * @param  {Uint8Array}   consumed   The whole command, for the unknown item
+     */
+  #printBitImage(args, consumed) {
+    const scale = IMAGE_SCALES[args[0]];
+
+    /* A mode the command does not define is out of range, and the printer
+       ignores the command */
+
+    if (!scale) {
+      return;
+    }
+
+    if (!this.#painter.print(DOWNLOAD_BIT_IMAGE, {scale})) {
+      this.#unknown(consumed);
+    }
+  }
+
+  /**
+     * FS q n [xL xH yL yH d1..dk]1..[..]n, which defines the NV bit images: n
+     * images, each x bytes of eight dots wide and y bytes of eight dots tall,
+     * in column format. The command replaces every NV bit image the printer
+     * held, as the reference says, so the images of an earlier definition are
+     * forgotten first.
+     *
+     * @param  {Uint8Array}   args   The arguments of the command
+     */
+  #defineNvBitImages(args) {
+    /* A count outside the range of the command makes the printer ignore it, so
+       an FS q 0 deletes nothing */
+
+    if (args[0] < 1) {
+      return;
+    }
+
+    this.#painter.forget(NV_BIT_IMAGE);
+
+    let offset = 1;
+
+    for (let image = 1; image <= args[0] && offset + 4 <= args.length; image++) {
+      const width = args[offset] + args[offset + 1] * 256;
+      const height = args[offset + 2] + args[offset + 3] * 256;
+      const size = width * height * 8;
+
+      if (width > 0 && height > 0) {
+        this.#painter.define(`${NV_BIT_IMAGE}${image}`, Bitmap.fromColumns(
+            args.subarray(offset + 4, offset + 4 + size), width * 8, height * 8,
+        ));
+      }
+
+      offset += 4 + size;
+    }
+  }
+
+  /**
+     * FS p n m, which prints NV bit image n in one of the four modes of GS v 0.
+     * An image the stream never defined prints nothing and the command is
+     * reported: the printer holds NV bit images of its own, and this renderer
+     * has never seen them.
+     *
+     * @param  {Uint8Array}   args       The arguments of the command
+     * @param  {Uint8Array}   consumed   The whole command, for the unknown item
+     */
+  #printNvBitImage(args, consumed) {
+    const scale = IMAGE_SCALES[args[1]];
+
+    /* A mode the command does not define is out of range, and the printer
+       ignores the command */
+
+    if (!scale) {
+      return;
+    }
+
+    if (!this.#painter.print(`${NV_BIT_IMAGE}${args[0]}`, {scale})) {
+      this.#unknown(consumed);
+    }
   }
 
   /**
@@ -1035,19 +1604,7 @@ class EscPosRenderer {
     const bytes = mode === 32 || mode === 33 ? 3 : 1;
     const double = mode === 1 || mode === 33;
 
-    const strip = Bitmap.create(columns, bytes * 8);
-
-    for (let column = 0; column < columns; column++) {
-      for (let byte = 0; byte < bytes; byte++) {
-        const value = args[3 + column * bytes + byte];
-
-        for (let bit = 0; bit < 8; bit++) {
-          if (value & (0x80 >> bit)) {
-            Bitmap.setPixel(strip, column, byte * 8 + bit, 1);
-          }
-        }
-      }
-    }
+    const strip = Bitmap.fromColumns(args.subarray(3), columns, bytes * 8);
 
     this.#painter.strip(double ? strip : Bitmap.scale(strip, 2, 1));
   }
@@ -1074,15 +1631,13 @@ class EscPosRenderer {
     /* The first argument byte is the 0 of the command itself, the mode is the
        one behind it */
 
-    const mode = args[1] >= 48 ? args[1] - 48 : args[1];
+    const scale = IMAGE_SCALES[args[1]] || {x: 1, y: 1};
     const rowBytes = args[2] + args[3] * 256;
     const rows = args[4] + args[5] * 256;
 
-    const bitmap = Bitmap.create(rowBytes * 8, rows);
+    const bitmap = Bitmap.fromRaster(args.subarray(6), rowBytes * 8, rows);
 
-    bitmap.data.set(args.subarray(6, 6 + rowBytes * rows));
-
-    this.#painter.block(Bitmap.scale(bitmap, mode === 1 || mode === 3 ? 2 : 1, mode === 2 || mode === 3 ? 2 : 1));
+    this.#painter.block(Bitmap.scale(bitmap, scale.x, scale.y));
   }
 
   /**

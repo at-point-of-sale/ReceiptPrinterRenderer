@@ -33,7 +33,7 @@ This page lists every command `StarPrntRenderer` recognises, what it does to the
 
 The renderer emulates a Star printer. It interprets the bytes the way the firmware does, including the cases where the firmware prints nothing at all: a barcode with invalid data, a symbol wider than the paper, an argument outside the range of its command, which leaves the setting as it was rather than clipping it.
 
-It deliberately differs from the hardware in a few places, each of them because the behaviour is not on the wire and no hardware check settled it. They are marked in the notes below, and these are all of them: the module widths of `ESC b`, the line spacing of an `ESC z n` that is not `0` or `1`, the feeds of `ESC I`, `ESC J` and `ESC a`, the four dot gap between the bars of a barcode and its human readable text, the reading of `ESC GS x S 0`, a QR model 1 drawn as a model 2 symbol, the basic 43 character set of Code 93, the minimum of three data codewords of a PDF417 symbol, the reading of `ESC h n` and `ESC Q n`, `ESC R n` leaving the sets above 13 alone, `ESC SP n`, whose length and effect are both unsettled, and the tear bar mode of raster mode read as a partial cut.
+It deliberately differs from the hardware in a few places, each of them because the behaviour is not on the wire and no hardware check settled it. They are marked in the notes below, and these are all of them: the module widths of `ESC b`, the line spacing of an `ESC z n` that is not `0` or `1`, the feeds of `ESC I`, `ESC J` and `ESC a`, the four dot gap between the bars of a barcode and its human readable text, the reading of `ESC GS x S 0`, a QR model 1 drawn as a model 2 symbol, the basic 43 character set of Code 93, the minimum of three data codewords of a PDF417 symbol, the reading of `ESC h n` and `ESC Q n`, `ESC R n` leaving the sets above 13 alone, `ESC SP n`, whose length and effect are both unsettled, the tear bar mode of raster mode read as a partial cut, the quadruple density of `ESC k` drawn at the resolution of the head, the layout of `ESC GS S` and its alignment, and the assumed layout of `ESC FS q`.
 
 Two differences are the printer itself rather than the renderer, and both show up when the same receipt is printed in both languages: a pulse to the second drawer is fixed at 200 ms on and 200 ms off, because the width is not on the wire, and the size multipliers of `ESC i` stop at six where `GS ! n` of ESC/POS goes to eight.
 
@@ -50,7 +50,7 @@ Two differences are the printer itself rather than the renderer, and both show u
 
 A `cut`, `pulse`, `feed` or `unknown` item only reaches the output when the driver put that type in the `commands` option, see [Commands the printer supports](usage.md#commands-the-printer-supports). A **Reported** command with `unknown` switched off therefore leaves nothing at all, which is the same paper as **Skipped**.
 
-A Star command is `ESC` and a command byte, or `ESC GS` or `ESC RS` and a command byte, so the parser has three tables. Every command in them knows how many argument bytes it has, so a command the renderer does not implement never derails the text behind it. A command that is in none of the tables consumes its prefix alone, two bytes or three, which is the best guess there is, and is reported. A command whose arguments run past the end of the stream stops the parser without an error, and everything before it is still rendered.
+A Star command is `ESC` and a command byte, or `ESC GS`, `ESC RS` or `ESC FS` and a command byte, so the parser has four tables. Every command in them knows how many argument bytes it has, so a command the renderer does not implement never derails the text behind it. A command that is in none of the tables consumes its prefix alone, two bytes or three, which is the best guess there is, and is reported. A command whose arguments run past the end of the stream stops the parser without an error, and everything before it is still rendered.
 
 <br>
 
@@ -212,7 +212,10 @@ A symbol never holds fewer than three data codewords: one codeword of data and t
 | `ESC X nL nH d..` | column mode image, 24 dots | Rendered | `nL + nH * 256` columns, three bytes per column, the most significant bit of the first byte at the top. The strip goes into the line that is being composed, like one wide cell, and the `LF CR` behind it commits the line; the encoder writes `ESC 0` in front of an image so that the 24 dot strips join up. This is the only image command the encoder emits. |
 | `ESC L nL nH d..` | bit image, fine density | Rendered | A strip of eight rows, one byte per column, with the number of data bytes in the two length bytes. One dot per column. |
 | `ESC K nL nH d..` | bit image, normal density | Rendered | The same, but every column is printed twice, so the image keeps its proportions at half the resolution. |
-| `ESC k nL nH d..` | bit image, quadruple density | Reported | Consumed with its length. Its horizontal scale has no obvious reading, so it draws nothing. [Section 13](#not-supported-yet). |
+| `ESC k nL nH d..` | bit image, quadruple density | Rendered | A strip of eight rows, one byte per column, like `ESC L`, and drawn with one dot per column. **A print head of 203 dpi cannot print more dots per inch than `ESC L` already gives it, so the quadruple density is drawn at the resolution of the head and the image comes out as wide as the same data under `ESC L`. No Star Line Mode specification text was available here to settle what the printer does instead; merging pairs of columns, the other reading, would lose dots, which this renderer does not do.** |
+| `ESC GS S m n1 n2 n3 n4 n5 d..` | raster image | Rendered | The raster image the Star SDKs print a picture with. `m` of `1`, and the ASCII digit `49` for the same, is the raster bit image; any other value is a variant this renderer does not know and is reported, its data consumed. `n1 + n2 * 256` is the width of the image in bytes of eight dots, `n3 + n4 * 256` its height in dots, and `n5` is the fixed byte the command carries, which is consumed and ignored. The dots follow in raster format, one row after another, exactly as `GS v 0` carries them on ESC/POS. Drawn as a block of its own, aligned the way `ESC GS a` says and inside the print area of `ESC l` and `ESC Q`, like every other block. **The layout is the one of the plan and of this page; no Star specification text was available here to confirm it, and a variant with two bytes in front of the size is described elsewhere and is not what this renderer reads.** |
+| `ESC FS p n m` | print an NV logo | Reported | The logo is stored in the printer by a utility, so the renderer has never seen it and prints nothing. Two argument bytes, the number of the logo and the mode. |
+| `ESC FS q n [xL xH yL yH d..]..` | define logos | Reported | **Consumed with the layout of the ESC/POS command of the same name, `n` images of `x` bytes wide and `y` bytes of eight dots tall, because no Star specification text that was available here settles the layout of this command. Nothing is kept and nothing is drawn, so a logo this command defines is not printed by `ESC FS p` either.** |
 | `ESC * r ..` | raster mode group | Rendered | The raster commands of the TSP100 family, see [Raster mode](#raster-mode). An `ESC *` that is not followed by an `r` is consumed as one argument byte and reported. |
 
 <br>
@@ -284,12 +287,6 @@ These commands change nothing about the paper of the receipt that is being rende
 
 These are the common StarPRNT and Star Line Mode commands the renderer parses but does not render, and what is planned for them. The sections are the ones of the [implementation plan](implementation-plan.md).
 
-**Section 13, images.**
-
-- `ESC GS S 1 n1 n2 n3 n4 NUL d..`, the StarPRNT raster image command the Star SDKs use, rendered as a block.
-- `ESC k n1 n2 d..`, the quadruple density bit image, and any other bit image density the specification defines.
-- `ESC FS p n m`, which prints an NV logo the printer holds and the renderer has never seen: an `unknown` item and nothing on paper.
-
 **Section 14, GS1 DataBar.** The symbologies `10` to `13` of `ESC b`, Omnidirectional, Truncated, Limited and Expanded, with the human readable text below them.
 
 **Not planned.**
@@ -297,7 +294,7 @@ These are the common StarPRNT and Star Line Mode commands the renderer parses bu
 - Page mode. `ESC GS P` switches the printer between page and line units and is parsed; composing a page in memory is a second layout engine next to the line one and is not modelled.
 - CJK fonts. A receipt that needs real CJK text needs a printer with the font.
 - User defined characters: glyphs downloaded into the printer.
-- NV logos: images stored in the printer, which the renderer cannot draw. `ESC FS p` will report an `unknown` item and print nothing.
+- NV logos: images a utility stored in the printer, which the renderer has never seen. `ESC FS p` reports an `unknown` item and prints nothing, and so does the definition command `ESC FS q`, whose layout is not settled here.
 - Status and settings commands, `ESC GS ETX`, `ESC GS #`, `ESC GS b`, `ESC GS c`, `ESC RS a`, `ESC RS d`, `ESC RS r` and the rest of [Printer state and status](#printer-state-and-status): there is no channel back to the host, and the settings do not change the paper.
 - The buzzer, `ESC GS BEL` and `ESC GS EM`: the item stream carries paper, cuts and drawers, and no sound.
 - Maxicode and the composite symbologies, which this command set has no selector for in anything the renderer parses.

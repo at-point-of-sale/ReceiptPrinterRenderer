@@ -82,6 +82,13 @@ import {pdf417 as encodePdf417} from './symbologies/pdf417.js';
  */
 
 /**
+ * How a kept image is drawn, as a parser asks the painter to print it
+ *
+ * @typedef {object} PrintRequest
+ * @property {{x: number, y: number}} [scale]   Horizontal and vertical multiplier, 1 by default
+ */
+
+/**
  * The current print style, as the printers style commands set it
  *
  * @typedef {object} Style
@@ -164,6 +171,7 @@ class Painter {
   #upsideDown;
 
   #line;
+  #definitions;
 
   #buffer;
   #rows;
@@ -225,6 +233,12 @@ class Painter {
 
     this.#cache = new Map();
     this.#items = [];
+
+    /* The images the graphics commands define live as long as this painter
+       does: they are the memory of the printer, which an initialize does not
+       empty and which is still there for the next job */
+
+    this.#definitions = new Map();
 
     this.#clear();
     this.reset();
@@ -584,6 +598,76 @@ class Painter {
     Bitmap.blit(bitmap, line, offset, 0);
 
     this.#append(this.#upsideDown ? Bitmap.rotate180(line) : line);
+  }
+
+  /**
+     * Keep an image for later, under a key of the parser's own making, such as
+     * `nv:65:66` for the NV graphics of a key code or `nv-bit-image:1` for the
+     * first image of an `FS q` definition.
+     *
+     * The images are the memory of the printer: they survive `reset()`, which
+     * is what an initialize does, and `discard()`, so a definition in one
+     * stream is still there in the next one. A definition without a bitmap
+     * deletes the key, which is what the delete commands of the graphics group
+     * do.
+     *
+     * @param  {string}        key      Name of the image
+     * @param  {Bitmap|null}   bitmap   The image, or null to delete it
+     */
+  define(key, bitmap) {
+    if (typeof key !== 'string') {
+      return;
+    }
+
+    if (!bitmap) {
+      this.#definitions.delete(key);
+      return;
+    }
+
+    this.#definitions.set(key, bitmap);
+  }
+
+  /**
+     * Delete every image whose key starts with a prefix, which is what the
+     * commands that delete all NV or all download graphics do
+     *
+     * @param  {string}   prefix   The start of the keys to delete
+     */
+  forget(prefix) {
+    for (const key of this.#definitions.keys()) {
+      if (key.startsWith(prefix)) {
+        this.#definitions.delete(key);
+      }
+    }
+  }
+
+  /**
+     * Draw an image that was kept as a block, scaled by repeating its dots the
+     * way the print commands of the graphics group scale it.
+     *
+     * A key that was never defined prints nothing at all and does not advance
+     * the paper, which is what a printer does with an image it does not hold.
+     * The parser reports the command instead, so the caller is told whether
+     * anything was drawn.
+     *
+     * @param  {string}         key         Name of the image
+     * @param  {PrintRequest}   [options]   How the image is scaled
+     * @return {boolean}                    True when the image was drawn
+     */
+  print(key, options) {
+    const bitmap = this.#definitions.get(key);
+
+    if (!bitmap) {
+      return false;
+    }
+
+    const scale = (options && options.scale) || {};
+    const x = Number.isInteger(scale.x) && scale.x > 0 ? scale.x : 1;
+    const y = Number.isInteger(scale.y) && scale.y > 0 ? scale.y : 1;
+
+    this.block(Bitmap.scale(bitmap, x, y));
+
+    return true;
   }
 
   /**

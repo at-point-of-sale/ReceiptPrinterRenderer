@@ -206,6 +206,82 @@ class Bitmap {
   }
 
   /**
+     * Build a bitmap from data in raster format, which is how `GS v 0`, the
+     * graphics of `GS ( L` and the Star raster image carry their dots: one row
+     * after another, eight dots per byte, the most significant bit leftmost,
+     * and every row padded to whole bytes.
+     *
+     * Data that is shorter than the image leaves the rest of the image white,
+     * so that a truncated command still draws what it carried.
+     *
+     * @param  {Uint8Array}   data     The dots
+     * @param  {number}       width    Width of the image in dots
+     * @param  {number}       height   Height of the image in dots
+     * @return {Image}                The bitmap
+     */
+  static fromRaster(data, width, height) {
+    const bitmap = Bitmap.create(width, height);
+    const length = Math.min(data.length, bitmap.data.length);
+
+    bitmap.data.set(data.subarray(0, length));
+
+    /* A row is padded to whole bytes, and the dots past the width are not part
+       of the image. A stream that sets them would break the invariant every
+       other operation relies on, that the padding is white, so they are
+       cleared here */
+
+    const padding = width & 7;
+
+    if (padding) {
+      const rowBytes = Bitmap.rowBytes(width);
+      const mask = (0xff << (8 - padding)) & 0xff;
+
+      for (let row = 0; row < height; row++) {
+        bitmap.data[row * rowBytes + rowBytes - 1] &= mask;
+      }
+    }
+
+    return bitmap;
+  }
+
+  /**
+     * Build a bitmap from data in column format, which is how `ESC *`, `ESC X`,
+     * `GS *`, `FS q` and the column graphics of `GS ( L` carry their dots: one
+     * column after another, every column a number of bytes of eight dots, the
+     * most significant bit of the first byte at the top.
+     *
+     * Data that is shorter than the image leaves the rest of the image white,
+     * the way the raster format does.
+     *
+     * @param  {Uint8Array}   data     The dots
+     * @param  {number}       width    Width of the image in dots, the number of columns
+     * @param  {number}       height   Height of the image in dots
+     * @return {Image}                The bitmap
+     */
+  static fromColumns(data, width, height) {
+    const bitmap = Bitmap.create(width, height);
+    const bytes = (height + 7) >> 3;
+
+    for (let column = 0; column < width; column++) {
+      for (let byte = 0; byte < bytes; byte++) {
+        const value = data[column * bytes + byte];
+
+        if (!value) {
+          continue;
+        }
+
+        for (let bit = 0; bit < 8; bit++) {
+          if (value & (0x80 >> bit)) {
+            Bitmap.setPixel(bitmap, column, byte * 8 + bit, 1);
+          }
+        }
+      }
+    }
+
+    return bitmap;
+  }
+
+  /**
      * Cut a bitmap into pieces of at most a given height. The pieces are
      * consecutive and nothing is lost, the last one can be shorter. A bitmap
      * that already fits is returned as it is, without copying.

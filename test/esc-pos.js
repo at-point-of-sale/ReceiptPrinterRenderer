@@ -137,11 +137,16 @@ describe('EscPosRenderer', function() {
       const items = renderer.render([0x1b, 0x40, ...definition, 0x42, 0x0a]);
       const plain = new EscPosRenderer({width: 576}).render([0x1b, 0x40, 0x42, 0x0a]);
 
-      const unknown = items.filter((i) => i.type === 'unknown');
+      /* A definition prints nothing of its own, so the paper is the B of the
+         text behind it, and both images are there to be printed by number */
 
-      assert.equal(unknown.length, 1);
-      assert.equal(unknown[0].data.length, definition.length);
+      assert.deepEqual(items.filter((i) => i.type !== 'image'), []);
       assert.deepEqual(items.filter((i) => i.type === 'image'), plain.filter((i) => i.type === 'image'));
+
+      assert.deepEqual(
+          renderer.render([0x1b, 0x40, 0x1c, 0x70, 2, 0]).map((item) => item.type),
+          ['image'],
+      );
     });
 
     it('should stop cleanly when the definition is cut off', function() {
@@ -532,25 +537,28 @@ describe('EscPosRenderer', function() {
       assert.equal(dots(stitch(cancel, {width: WIDTH})), dots(stitch(known, {width: WIDTH})));
     });
 
-    it('should report both graphics groups as unknown', function() {
+    it('should report both graphics groups with their own length', function() {
+      /* Function 99 is not a function of the group, in the short and in the
+         long form, so both are consumed with the length they carry */
+
       const parenthesis = render(
-          stream(ESC, '@', GS, '(', 'L', [3, 0], [48, 69, 48], LF),
+          stream(ESC, '@', GS, '(', 'L', [3, 0], [48, 99, 48], LF),
           {commands: ['unknown']},
       );
 
       const large = render(
-          stream(ESC, '@', GS, '8', 'L', [4, 0, 0, 0], [48, 69, 48, 0], LF),
+          stream(ESC, '@', GS, '8', 'L', [4, 0, 0, 0], [48, 99, 48, 0], LF),
           {commands: ['unknown']},
       );
 
       assert.deepEqual(
           Array.from(parenthesis.find((item) => item.type === 'unknown').data),
-          [GS, 0x28, 0x4c, 3, 0, 48, 69, 48],
+          [GS, 0x28, 0x4c, 3, 0, 48, 99, 48],
       );
 
       assert.deepEqual(
           Array.from(large.find((item) => item.type === 'unknown').data),
-          [GS, 0x38, 0x4c, 4, 0, 0, 0, 48, 69, 48, 0],
+          [GS, 0x38, 0x4c, 4, 0, 0, 0, 48, 99, 48, 0],
       );
     });
 
@@ -1727,6 +1735,744 @@ describe('EscPosRenderer', function() {
       ['DLE DC4', [0x10, 0x14]],
       ['DLE DC4 1', [0x10, 0x14, 1, 0]],
       ['DLE DC4 8', [0x10, 0x14, 8, 1, 3]],
+    ];
+
+    for (const [name, bytes] of truncated) {
+      it(`should stop cleanly on a truncated ${name}`, function() {
+        let items;
+
+        assert.doesNotThrow(() => {
+          items = render(stream(ESC, '@', 'Hi', LF, bytes), {commands: COMMANDS});
+        });
+
+        assert.equal(
+            dots(stitch(items, {width: WIDTH})),
+            dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+        );
+      });
+    }
+  });
+
+  describe('the image commands of the graphics group', function() {
+    /*
+        The same picture through every image command of section 13.
+
+        It is 16 by 24 dots, which is a whole number of bytes in both
+        directions, so that the column commands can carry it as well, and its
+        rows and columns are all different, so that a decoding that transposes
+        or mirrors the dots shows up at once.
+    */
+
+    const PICTURE_WIDTH = 16;
+    const PICTURE_HEIGHT = 24;
+
+    /* The dots in raster format, two bytes per row */
+
+    const raster = [];
+
+    for (let y = 0; y < PICTURE_HEIGHT; y++) {
+      raster.push((y * 37 + 11) & 0xff, (y * 151 + 5) & 0xff);
+    }
+
+    /* And the same dots in column format, three bytes per column */
+
+    const columns = [];
+
+    for (let x = 0; x < PICTURE_WIDTH; x++) {
+      for (let byte = 0; byte < PICTURE_HEIGHT / 8; byte++) {
+        let value = 0;
+
+        for (let bit = 0; bit < 8; bit++) {
+          if ((raster[(byte * 8 + bit) * 2 + (x >> 3)] >> (7 - (x & 7))) & 1) {
+            value |= 0x80 >> bit;
+          }
+        }
+
+        columns.push(value);
+      }
+    }
+
+    /* The size of the picture as the graphics functions count it, in dots */
+
+    const size = [PICTURE_WIDTH, 0, PICTURE_HEIGHT, 0];
+
+    /**
+     * A function of the graphics group, under the two byte length of GS ( L
+     *
+     * @param  {number}     fn           The function code
+     * @param  {number[]}   parameters   The parameters of the function
+     * @return {number[]}                The bytes of the command
+     */
+    function graphics(fn, parameters) {
+      const payload = [48, fn, ...parameters];
+
+      return [GS, 0x28, 0x4c, payload.length & 0xff, payload.length >> 8, ...payload];
+    }
+
+    /**
+     * The same function under the four byte length of GS 8 L
+     *
+     * @param  {number}     fn           The function code
+     * @param  {number[]}   parameters   The parameters of the function
+     * @return {number[]}                The bytes of the command
+     */
+    function largeGraphics(fn, parameters) {
+      const payload = [48, fn, ...parameters];
+      const length = payload.length;
+
+      return [
+        GS, 0x38, 0x4c,
+        length & 0xff, (length >> 8) & 0xff, (length >> 16) & 0xff, (length >> 24) & 0xff,
+        ...payload,
+      ];
+    }
+
+    /* Every way of printing the picture. The column mode image needs the line
+       spacing of a strip, which is what the encoder sets around one, so that
+       its line is as tall as the blocks of the other commands */
+
+    const ways = {
+      'ESC *': stream(
+          ESC, '@', GS, 'P', 203, 203, ESC, '3', 24,
+          ESC, '*', 33, [PICTURE_WIDTH, 0], columns, LF,
+      ),
+
+      'GS v 0': stream(ESC, '@', GS, 'v', '0', [0, 2, 0, PICTURE_HEIGHT, 0], raster),
+
+      'GS ( L 112': stream(ESC, '@', graphics(112, [48, 1, 1, 49, ...size, ...raster]), graphics(50, [])),
+
+      'GS 8 L 112': stream(
+          ESC, '@', largeGraphics(112, [48, 1, 1, 49, ...size, ...raster]), largeGraphics(50, []),
+      ),
+
+      'GS ( L 113': stream(ESC, '@', graphics(113, [48, 1, 1, 49, ...size, ...columns]), graphics(50, [])),
+
+      'GS ( L 67 and 69': stream(
+          ESC, '@',
+          graphics(67, [48, 0x41, 0x42, 1, ...size, 49, ...raster]),
+          graphics(69, [0x41, 0x42, 1, 1]),
+      ),
+
+      'GS ( L 68 and 69': stream(
+          ESC, '@',
+          graphics(68, [48, 0x41, 0x42, 1, ...size, 49, ...columns]),
+          graphics(69, [0x41, 0x42, 1, 1]),
+      ),
+
+      'GS ( L 84 and 85': stream(
+          ESC, '@',
+          graphics(84, [48, 0x43, 0x44, 1, ...size, 49, ...columns]),
+          graphics(85, [0x43, 0x44, 1, 1]),
+      ),
+
+      'GS ( L 83 and 85': stream(
+          ESC, '@',
+          graphics(83, [48, 0x43, 0x44, 1, ...size, 49, ...raster]),
+          graphics(85, [0x43, 0x44, 1, 1]),
+      ),
+
+      'GS * and GS /': stream(
+          ESC, '@', GS, '*', PICTURE_WIDTH / 8, PICTURE_HEIGHT / 8, columns, GS, '/', 0,
+      ),
+
+      'FS q and FS p': stream(
+          ESC, '@', FS, 'q', 1, [PICTURE_WIDTH / 8, 0, PICTURE_HEIGHT / 8, 0], columns, FS, 'p', 1, 0,
+      ),
+    };
+
+    const expected = dots(stitch(render(ways['GS v 0']), {width: WIDTH}));
+
+    for (const [name, bytes] of Object.entries(ways)) {
+      it(`should print the same dots for ${name}`, function() {
+        const paper = stitch(render(bytes), {width: WIDTH});
+
+        assert.equal(paper.height, PICTURE_HEIGHT);
+
+        if (dots(paper) !== expected) {
+          assert.fail(`${name} does not print the picture of GS v 0`);
+        }
+      });
+    }
+
+    /* The scaling of the graphics commands against the doubling of GS v 0 */
+
+    const scales = [
+      [1, 1, 0],
+      [2, 1, 1],
+      [1, 2, 2],
+      [2, 2, 3],
+    ];
+
+    for (const [x, y, mode] of scales) {
+      it(`should scale bx ${x} by ${y} like GS v 0 mode ${mode}`, function() {
+        const scaled = render(stream(
+            ESC, '@', graphics(112, [48, x, y, 49, ...size, ...raster]), graphics(50, []),
+        ));
+
+        const doubled = render(stream(ESC, '@', GS, 'v', '0', [mode, 2, 0, PICTURE_HEIGHT, 0], raster));
+
+        assert.equal(
+            dots(stitch(scaled, {width: WIDTH})),
+            dots(stitch(doubled, {width: WIDTH})),
+        );
+      });
+
+      it(`should scale function 69 by x ${x} and y ${y} like GS v 0 mode ${mode}`, function() {
+        const scaled = render(stream(
+            ESC, '@',
+            graphics(67, [48, 0x41, 0x42, 1, ...size, 49, ...raster]),
+            graphics(69, [0x41, 0x42, x, y]),
+        ));
+
+        const doubled = render(stream(ESC, '@', GS, 'v', '0', [mode, 2, 0, PICTURE_HEIGHT, 0], raster));
+
+        assert.equal(
+            dots(stitch(scaled, {width: WIDTH})),
+            dots(stitch(doubled, {width: WIDTH})),
+        );
+      });
+
+      it(`should print GS / mode ${mode} like GS v 0 mode ${mode}`, function() {
+        const printed = render(stream(
+            ESC, '@', GS, '*', PICTURE_WIDTH / 8, PICTURE_HEIGHT / 8, columns, GS, '/', mode,
+        ));
+
+        const doubled = render(stream(ESC, '@', GS, 'v', '0', [mode, 2, 0, PICTURE_HEIGHT, 0], raster));
+
+        assert.equal(
+            dots(stitch(printed, {width: WIDTH})),
+            dots(stitch(doubled, {width: WIDTH})),
+        );
+      });
+
+      it(`should print FS p mode ${mode} like GS v 0 mode ${mode}`, function() {
+        const printed = render(stream(
+            ESC, '@',
+            FS, 'q', 1, [PICTURE_WIDTH / 8, 0, PICTURE_HEIGHT / 8, 0], columns,
+            FS, 'p', 1, mode,
+        ));
+
+        const doubled = render(stream(ESC, '@', GS, 'v', '0', [mode, 2, 0, PICTURE_HEIGHT, 0], raster));
+
+        assert.equal(
+            dots(stitch(printed, {width: WIDTH})),
+            dots(stitch(doubled, {width: WIDTH})),
+        );
+      });
+    }
+
+    it('should align the graphics of the print buffer the way the alignment says', function() {
+      const items = render(stream(
+          ESC, '@', ESC, 'a', 2,
+          graphics(112, [48, 1, 1, 49, ...size, ...raster]),
+          graphics(50, []),
+      ));
+
+      const paper = stitch(items, {width: WIDTH});
+
+      assert.deepEqual(ink(paper, 0, PICTURE_HEIGHT).max, WIDTH - 1);
+    });
+
+    it('should draw the images of the print buffer under each other', function() {
+      const items = render(stream(
+          ESC, '@',
+          graphics(112, [48, 1, 1, 49, ...size, ...raster]),
+          graphics(112, [48, 1, 1, 49, ...size, ...raster]),
+          graphics(50, []),
+      ));
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, PICTURE_HEIGHT * 2);
+    });
+
+    it('should empty the print buffer once it is printed', function() {
+      const items = render(stream(
+          ESC, '@',
+          graphics(112, [48, 1, 1, 49, ...size, ...raster]),
+          graphics(50, []),
+          graphics(50, []),
+      ));
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, PICTURE_HEIGHT);
+    });
+
+    it('should throw the print buffer away on ESC @', function() {
+      const items = render(stream(
+          ESC, '@',
+          graphics(112, [48, 1, 1, 49, ...size, ...raster]),
+          ESC, '@',
+          graphics(50, []),
+          'Nothing was printed', LF,
+      ));
+
+      assert.equal(
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'Nothing was printed', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should draw the multiple tone images of a as colour one', function() {
+      const tone = render(stream(ESC, '@', graphics(112, [52, 1, 1, 49, ...size, ...raster]), graphics(50, [])));
+      const plain = render(stream(ESC, '@', graphics(112, [48, 1, 1, 49, ...size, ...raster]), graphics(50, [])));
+
+      assert.equal(dots(stitch(tone, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+
+    it('should consume the data of a colour it does not draw', function() {
+      const items = render(stream(
+          ESC, '@',
+          graphics(112, [48, 1, 1, 50, ...size, ...raster]),
+          graphics(50, []),
+          'Only colour one is drawn', LF,
+      ), {commands: ['unknown']});
+
+      assert.equal(
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'Only colour one is drawn', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should report a tone parameter the command does not define', function() {
+      const items = render(stream(
+          ESC, '@', graphics(112, [50, 1, 1, 49, ...size, ...raster]), 'Hi', LF,
+      ), {commands: ['unknown']});
+
+      assert.equal(items.filter((item) => item.type === 'unknown').length, 1);
+
+      assert.equal(
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should print nothing and report the command for a key it does not hold', function() {
+      const items = render(stream(
+          ESC, '@', graphics(69, [0x5a, 0x5a, 1, 1]), 'Hi', LF,
+      ), {commands: ['unknown']});
+
+      const unknown = items.filter((item) => item.type === 'unknown');
+
+      assert.equal(unknown.length, 1);
+      assert.equal(unknown[0].data[0], GS);
+
+      assert.equal(
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should not commit the pending line for a key it does not hold', function() {
+      const items = render(stream(ESC, '@', 'AB', graphics(69, [0x5a, 0x5a, 1, 1]), 'CD', LF));
+
+      assert.equal(
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'ABCD', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should keep a definition through an initialize and the next stream', function() {
+      const renderer = new EscPosRenderer({width: WIDTH, commands: ['unknown']});
+
+      renderer.render(stream(ESC, '@', graphics(67, [48, 0x41, 0x42, 1, ...size, 49, ...raster])));
+
+      const items = renderer.render(stream(ESC, '@', graphics(69, [0x41, 0x42, 1, 1])));
+
+      assert.deepEqual(items.map((item) => item.type), ['image']);
+      assert.equal(items[0].height, PICTURE_HEIGHT);
+    });
+
+    it('should keep a downloaded bit image through an initialize and the next stream', function() {
+      const renderer = new EscPosRenderer({width: WIDTH, commands: ['unknown']});
+
+      renderer.render(stream(ESC, '@', GS, '*', PICTURE_WIDTH / 8, PICTURE_HEIGHT / 8, columns));
+
+      const items = renderer.render(stream(ESC, '@', GS, '/', 0));
+
+      assert.deepEqual(items.map((item) => item.type), ['image']);
+      assert.equal(items[0].height, PICTURE_HEIGHT);
+    });
+
+    it('should not carry a definition over to another renderer', function() {
+      new EscPosRenderer({width: WIDTH}).render(
+          stream(ESC, '@', graphics(67, [48, 0x41, 0x42, 1, ...size, 49, ...raster])),
+      );
+
+      const items = new EscPosRenderer({width: WIDTH, commands: ['unknown']})
+          .render(stream(ESC, '@', graphics(69, [0x41, 0x42, 1, 1])));
+
+      assert.deepEqual(items.map((item) => item.type), ['unknown']);
+    });
+
+    it('should delete the image of a key with function 66', function() {
+      const renderer = new EscPosRenderer({width: WIDTH, commands: ['unknown']});
+
+      renderer.render(stream(ESC, '@', graphics(67, [48, 0x41, 0x42, 1, ...size, 49, ...raster])));
+
+      const items = renderer.render(stream(
+          ESC, '@', graphics(66, [0x41, 0x42]), graphics(69, [0x41, 0x42, 1, 1]),
+      ));
+
+      assert.deepEqual(items.map((item) => item.type), ['unknown']);
+    });
+
+    it('should delete every NV image with function 65 and leave the download images alone', function() {
+      const renderer = new EscPosRenderer({width: WIDTH, commands: ['unknown']});
+
+      renderer.render(stream(
+          ESC, '@',
+          graphics(67, [48, 0x41, 0x42, 1, ...size, 49, ...raster]),
+          graphics(83, [48, 0x41, 0x42, 1, ...size, 49, ...raster]),
+      ));
+
+      const items = renderer.render(stream(
+          ESC, '@',
+          graphics(65, [0x43, 0x4c, 0x52]),
+          graphics(69, [0x41, 0x42, 1, 1]),
+          graphics(85, [0x41, 0x42, 1, 1]),
+      ));
+
+      assert.deepEqual(items.map((item) => item.type), ['unknown', 'image']);
+    });
+
+    it('should delete every download image with function 81', function() {
+      const renderer = new EscPosRenderer({width: WIDTH, commands: ['unknown']});
+
+      renderer.render(stream(ESC, '@', graphics(83, [48, 0x41, 0x42, 1, ...size, 49, ...raster])));
+
+      const items = renderer.render(stream(
+          ESC, '@', graphics(81, [0x43, 0x4c, 0x52]), graphics(85, [0x41, 0x42, 1, 1]),
+      ));
+
+      assert.deepEqual(items.map((item) => item.type), ['unknown']);
+    });
+
+    it('should replace every NV bit image with a new FS q definition', function() {
+      const definition = [FS, 0x71, 2,
+        PICTURE_WIDTH / 8, 0, PICTURE_HEIGHT / 8, 0, ...columns,
+        PICTURE_WIDTH / 8, 0, PICTURE_HEIGHT / 8, 0, ...columns,
+      ];
+
+      const renderer = new EscPosRenderer({width: WIDTH, commands: ['unknown']});
+
+      renderer.render(stream(ESC, '@', definition));
+
+      /* Two images, and after a definition of one image the second one is gone */
+
+      assert.deepEqual(
+          renderer.render(stream(ESC, '@', FS, 'p', 2, 0)).map((item) => item.type),
+          ['image'],
+      );
+
+      renderer.render(stream(
+          ESC, '@', FS, 'q', 1, [PICTURE_WIDTH / 8, 0, PICTURE_HEIGHT / 8, 0], columns,
+      ));
+
+      assert.deepEqual(
+          renderer.render(stream(ESC, '@', FS, 'p', 2, 0)).map((item) => item.type),
+          ['unknown'],
+      );
+    });
+
+    it('should print nothing and report FS p for an image the stream never defined', function() {
+      const items = render(stream(ESC, '@', FS, 'p', 1, 0, 'Hi', LF), {commands: ['unknown']});
+
+      assert.equal(items.filter((item) => item.type === 'unknown').length, 1);
+
+      assert.equal(
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should print nothing and report GS / when no bit image was downloaded', function() {
+      const items = render(stream(ESC, '@', GS, '/', 0, 'Hi', LF), {commands: ['unknown']});
+
+      assert.equal(items.filter((item) => item.type === 'unknown').length, 1);
+
+      assert.equal(
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should draw only the rows a store function carries', function() {
+      /* The size of an image is not the length of the command, the group
+         length is, so a stream can ask for an image that is far larger than
+         the dots behind it. Only the rows that are there are drawn */
+
+      const items = render(stream(
+          ESC, '@',
+          graphics(112, [48, 1, 1, 49, PICTURE_WIDTH, 0, 0xff, 0x07, ...raster.slice(0, 8)]),
+          graphics(50, []),
+      ));
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 4);
+    });
+
+    it('should draw only the columns a column store function carries', function() {
+      const items = render(stream(
+          ESC, '@',
+          graphics(113, [48, 1, 1, 49, 0xff, 0x07, PICTURE_HEIGHT, 0, ...columns.slice(0, 6)]),
+          graphics(50, []),
+      ));
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, PICTURE_HEIGHT);
+      assert.equal(ink(stitch(items, {width: WIDTH}), 0, PICTURE_HEIGHT).max, 1);
+    });
+
+    it('should ignore a store function whose size is outside the range of the command', function() {
+      /* 65535 by 65535 dots behind four bytes of data, ten times over, and the
+         vertical scale of two on top of it. The command is out of range in both
+         directions, so the printer ignores it and nothing is stored: the page
+         stays empty and no bitmap of that size is ever allocated */
+
+      const store = graphics(113, [48, 1, 2, 49, 0xff, 0xff, 0xff, 0xff, ...raster.slice(0, 4)]);
+
+      const items = render(stream(
+          ESC, '@', ...new Array(10).fill(store), graphics(50, []), 'Hi', LF,
+      ));
+
+      assert.equal(
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should ignore a store function with a scale that is not one or two', function() {
+      const items = render(stream(
+          ESC, '@',
+          graphics(112, [48, 3, 1, 49, ...size, ...raster]),
+          graphics(112, [48, 1, 0, 49, ...size, ...raster]),
+          graphics(50, []),
+          'Hi', LF,
+      ));
+
+      assert.equal(
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should ignore a define whose size is outside the range of the command', function() {
+      const renderer = new EscPosRenderer({width: WIDTH, commands: ['unknown']});
+
+      renderer.render(stream(ESC, '@', graphics(67, [48, 0x41, 0x42, 1, ...size, 49, ...raster])));
+
+      /* A definition that is out of range leaves the image that is under the
+         key code alone, it does not delete it */
+
+      renderer.render(stream(
+          ESC, '@', graphics(67, [48, 0x41, 0x42, 1, 0xff, 0xff, 0xff, 0xff, 49, ...raster]),
+      ));
+
+      assert.deepEqual(
+          renderer.render(stream(ESC, '@', graphics(69, [0x41, 0x42, 1, 1]))).map((item) => item.type),
+          ['image'],
+      );
+    });
+
+    it('should leave an image alone when a definition carries no dots', function() {
+      const renderer = new EscPosRenderer({width: WIDTH, commands: ['unknown']});
+
+      renderer.render(stream(ESC, '@', graphics(67, [48, 0x41, 0x42, 1, ...size, 49, ...raster])));
+      renderer.render(stream(ESC, '@', graphics(67, [48, 0x41, 0x42, 1, ...size, 49])));
+
+      assert.deepEqual(
+          renderer.render(stream(ESC, '@', graphics(69, [0x41, 0x42, 1, 1]))).map((item) => item.type),
+          ['image'],
+      );
+    });
+
+    it('should ignore a print function without its four parameters', function() {
+      const renderer = new EscPosRenderer({width: WIDTH, commands: ['unknown']});
+
+      renderer.render(stream(ESC, '@', graphics(67, [48, 0x41, 0x42, 1, ...size, 49, ...raster])));
+
+      assert.deepEqual(renderer.render(stream(ESC, '@', graphics(69, [0x41, 0x42, 1]))), []);
+    });
+
+    it('should ignore a print function with a scale that is not one or two', function() {
+      const renderer = new EscPosRenderer({width: WIDTH, commands: ['unknown']});
+
+      renderer.render(stream(ESC, '@', graphics(67, [48, 0x41, 0x42, 1, ...size, 49, ...raster])));
+
+      assert.deepEqual(renderer.render(stream(ESC, '@', graphics(69, [0x41, 0x42, 3, 1]))), []);
+    });
+
+    it('should delete every image only with the CLR parameters', function() {
+      const renderer = new EscPosRenderer({width: WIDTH, commands: ['unknown']});
+
+      renderer.render(stream(
+          ESC, '@',
+          graphics(67, [48, 0x41, 0x42, 1, ...size, 49, ...raster]),
+          graphics(83, [48, 0x41, 0x42, 1, ...size, 49, ...raster]),
+      ));
+
+      /* Neither delete carries CLR, so both are ignored and both images are
+         still there */
+
+      renderer.render(stream(ESC, '@', graphics(65, [0x43, 0x4c, 0x00]), graphics(81, [])));
+
+      assert.deepEqual(
+          renderer.render(stream(
+              ESC, '@', graphics(69, [0x41, 0x42, 1, 1]), graphics(85, [0x41, 0x42, 1, 1]),
+          )).map((item) => item.type),
+          ['image'],
+      );
+    });
+
+    it('should delete one download image with function 82', function() {
+      const renderer = new EscPosRenderer({width: WIDTH, commands: ['unknown']});
+
+      renderer.render(stream(
+          ESC, '@',
+          graphics(83, [48, 0x43, 0x44, 1, ...size, 49, ...raster]),
+          graphics(84, [48, 0x45, 0x46, 1, ...size, 49, ...columns]),
+      ));
+
+      const items = renderer.render(stream(
+          ESC, '@',
+          graphics(82, [0x43, 0x44]),
+          graphics(85, [0x43, 0x44, 1, 1]),
+          graphics(85, [0x45, 0x46, 1, 1]),
+      ));
+
+      assert.deepEqual(items.map((item) => item.type), ['unknown', 'image']);
+    });
+
+    it('should ignore GS * with a size outside the range of the command', function() {
+      /* y of 49 bytes is past the 48 the command defines, so the image that
+         was downloaded before it is still the one that prints */
+
+      const renderer = new EscPosRenderer({width: WIDTH, commands: ['unknown']});
+
+      renderer.render(stream(ESC, '@', GS, '*', PICTURE_WIDTH / 8, PICTURE_HEIGHT / 8, columns));
+      renderer.render(stream(ESC, '@', GS, '*', 2, 49, new Array(2 * 49 * 8).fill(0xff)));
+
+      const items = renderer.render(stream(ESC, '@', GS, '/', 0));
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, PICTURE_HEIGHT);
+    });
+
+    it('should ignore GS * with more bytes than the memory of the printer holds', function() {
+      const items = render(stream(
+          ESC, '@', GS, '*', 40, 40, new Array(40 * 40 * 8).fill(0xff), GS, '/', 0, 'Hi', LF,
+      ), {commands: ['unknown']});
+
+      /* The definition is ignored, so the print reports a bit image that was
+         never downloaded */
+
+      assert.equal(items.filter((item) => item.type === 'unknown').length, 1);
+
+      assert.equal(
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should ignore a GS / and an FS p mode the commands do not define', function() {
+      const printed = render(stream(
+          ESC, '@',
+          GS, '*', PICTURE_WIDTH / 8, PICTURE_HEIGHT / 8, columns,
+          GS, '/', 4,
+          FS, 'q', 1, [PICTURE_WIDTH / 8, 0, PICTURE_HEIGHT / 8, 0], columns,
+          FS, 'p', 1, 52,
+          'Hi', LF,
+      ), {commands: ['unknown']});
+
+      assert.deepEqual(printed.filter((item) => item.type === 'unknown'), []);
+
+      assert.equal(
+          dots(stitch(printed, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should keep the NV bit images when FS q defines none', function() {
+      const renderer = new EscPosRenderer({width: WIDTH, commands: ['unknown']});
+
+      renderer.render(stream(
+          ESC, '@', FS, 'q', 1, [PICTURE_WIDTH / 8, 0, PICTURE_HEIGHT / 8, 0], columns,
+      ));
+
+      renderer.render(stream(ESC, '@', FS, 'q', 0));
+
+      assert.deepEqual(
+          renderer.render(stream(ESC, '@', FS, 'p', 1, 0)).map((item) => item.type),
+          ['image'],
+      );
+    });
+
+    it('should define nothing for an image without dots', function() {
+      const items = render(stream(
+          ESC, '@',
+          graphics(67, [48, 0x41, 0x42, 1, 0, 0, 0, 0, 49]),
+          graphics(69, [0x41, 0x42, 1, 1]),
+          'Hi', LF,
+      ), {commands: ['unknown']});
+
+      assert.equal(items.filter((item) => item.type === 'unknown').length, 1);
+
+      assert.equal(
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should report a function of the group it does not know', function() {
+      const items = render(stream(ESC, '@', graphics(99, [1, 2]), 'Hi', LF), {commands: ['unknown']});
+      const unknown = items.filter((item) => item.type === 'unknown');
+
+      assert.equal(unknown.length, 1);
+      assert.deepEqual(Array.from(unknown[0].data), graphics(99, [1, 2]));
+    });
+
+    it('should report a group that is not the graphics of m 48', function() {
+      const items = render(stream(ESC, '@', [GS, 0x28, 0x4c, 2, 0, 49, 50], 'Hi', LF), {commands: ['unknown']});
+
+      assert.equal(items.filter((item) => item.type === 'unknown').length, 1);
+    });
+
+    const lengths = [
+      ['GS ( L 48, transmit the NV capacity', graphics(48, [])],
+      ['GS ( L 49, set the reference dot density', graphics(49, [50, 50])],
+      ['GS ( L 51, transmit the remaining NV capacity', graphics(51, [])],
+      ['GS ( L 52, transmit the remaining download capacity', graphics(52, [])],
+      ['GS ( L 64, transmit the NV key codes', graphics(64, [0x4b, 0x43])],
+      ['GS ( L 80, transmit the download key codes', graphics(80, [0x4b, 0x43])],
+      ['GS ( L 50, print an empty graphics buffer', graphics(50, [])],
+      ['GS ( L 66, delete a key it does not hold', graphics(66, [0x5a, 0x5a])],
+      ['GS ( L 65, delete every NV image', graphics(65, [0x43, 0x4c, 0x52])],
+      ['GS 8 L 50, print an empty graphics buffer', largeGraphics(50, [])],
+      ['GS * x y d..', [GS, 0x2a, 1, 1, ...new Array(8).fill(0xff)]],
+      ['FS q n .., a definition', [FS, 0x71, 1, 1, 0, 1, 0, ...new Array(8).fill(0xff)]],
+    ];
+
+    for (const [name, bytes] of lengths) {
+      it(`should consume the arguments of ${name}`, function() {
+        assert.equal(
+            dots(stitch(render(stream(ESC, '@', bytes, 'Hi', LF)), {width: WIDTH})),
+            dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+        );
+      });
+    }
+
+    const truncated = [
+      ['GS ( L without its length', [GS, 0x28, 0x4c, 10]],
+      ['GS ( L with data missing', [GS, 0x28, 0x4c, 20, 0, 48, 112, 48, 1, 1, 49]],
+      ['GS 8 L without its length', [GS, 0x38, 0x4c, 10, 0, 0]],
+      ['GS 8 L with data missing', [GS, 0x38, 0x4c, 40, 0, 0, 0, 48, 112, 48, 1, 1, 49]],
+      ['GS ( L 84 with data missing', [GS, 0x28, 0x4c, 20, 0, 48, 84, 48, 0x43, 0x44, 1, 16, 0]],
+      ['GS * without its size', [GS, 0x2a, 2]],
+      ['GS * with data missing', [GS, 0x2a, 2, 3, 0xff, 0xff]],
+      ['GS /', [GS, 0x2f]],
+      ['FS p', [FS, 0x70, 1]],
+      ['FS q without its count', [FS, 0x71]],
+      ['FS q with data missing', [FS, 0x71, 1, 2, 0, 3, 0, 0xff]],
     ];
 
     for (const [name, bytes] of truncated) {

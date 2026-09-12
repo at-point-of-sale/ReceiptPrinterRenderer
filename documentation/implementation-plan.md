@@ -275,8 +275,9 @@ painter.placeholder(cells)                 // a fallback glyph cell repeated, fo
 In Section 13:
 
 ```js
-painter.define(key, bitmap)                // keep an image for later, keys are strings such as 'nv:3' or 'dl:kc1kc2'
-painter.print(key, { scale })              // draw a kept image as a block, nothing plus an unknown item when the key is absent
+painter.define(key, bitmap)                // keep an image for later, keys are strings such as 'nv-bit-image:3' or 'nv:65:66', null deletes one
+painter.forget(prefix)                     // delete every image whose key starts with the prefix, for the delete all functions
+painter.print(key, { scale }) → boolean    // draw a kept image as a block, nothing at all when the key is absent, which the parser reports
 ```
 
 <br>
@@ -1878,6 +1879,219 @@ Acceptance:
 
 - `npm test` 1302 passing, `npm run build` clean, `npm run test:types` and
   `npm run test:umd` pass. Version stays 0.3.0, nothing committed.
+
+### Section 13
+
+Implemented on 2026-09-12. Files: `src/bitmap.js`, `src/painter.js`,
+`src/renderers/esc-pos.js`, `src/renderers/star-prnt.js`, `test/bitmap.js`,
+`test/painter.js`, `test/esc-pos.js`, `test/star-prnt.js`,
+`test/tools/make-fixtures.js`, the seven hand assembled fixtures in
+`test/fixtures/<language>/raw`, `documentation/design.md`,
+`documentation/commands-esc-pos.md`, `documentation/commands-star-prnt.md`.
+
+The bitmap and the painter:
+
+- **Two decoders, one for each format.** `Bitmap.fromRaster` clears the padding
+  dots past the width of every row it copies, so the invariant the rest of the
+  module relies on, that the bytes of a row hold nothing beyond the image,
+  holds for every constructor. `Bitmap.fromRaster` reads rows of
+  `int((width + 7) / 8)` bytes and `Bitmap.fromColumns` reads columns of
+  `int((height + 7) / 8)` bytes, both with the most significant bit first, and
+  both leave the rest of the image white when the data is short. Every image
+  command of both languages goes through one of the two, `ESC *`, `ESC X`,
+  `ESC K` and `ESC L` included, which is what makes the acceptance of this
+  section hold by construction: the same picture through ten commands is the
+  same picture through two decoders.
+- **The painter gained `define(key, bitmap)` and `print(key, {scale})`**, as
+  the plan asks, plus `forget(prefix)`, which the delete functions of the
+  graphics group need: `GS ( L` function 65 deletes every NV image at once and
+  a parser cannot enumerate the keys the painter holds. `define(key, null)`
+  deletes one key, so there is no fourth method.
+- **`print()` returns a boolean instead of emitting the `unknown` item.** The
+  painter has no bytes of the command, so the parser is the only one that can
+  report it. A key without an image draws nothing at all and does not commit
+  the line that is being composed either, so `AB` `print` `CD` is one line of
+  four characters, the way a printer that ignores the command prints it.
+- **The definitions live in the painter and survive `reset()` and
+  `discard()`**, so they survive `ESC @` and the end of a stream. A second
+  renderer starts with nothing, which is a second printer.
+
+ESC/POS, the graphics group:
+
+- **The function codes are the symmetric table of the Epson reference**: 48,
+  49, 51 and 52 the capacities, 64 and 80 the key code lists, 65 and 81 delete
+  all, 66 and 82 delete one key, 67 and 83 define in raster format, 68 and 84
+  define in column format, 69 and 85 print by key code, 112 and 113 store
+  raster and column graphics in the print buffer, 50 prints the buffer. The NV
+  functions are 64 to 69 and the download ones 80 to 85, the same six commands
+  over two memories. **That mapping is the one this implementation used; the
+  plan's deliverables were unsure of 66, 68 and 84.**
+- **68 and 84 are rendered, where the plan has them parsed and skipped.** They
+  are the column format of the define functions, which is the data format of
+  function 113 that this section implements anyway, so defining them costs
+  three lines and removes a hole: a stream that defines in column format and
+  prints by key code would otherwise print nothing.
+- **Function 49 sets the reference dot density**, `x y` of 50 for 180 dpi and
+  51 for 360 dpi, and it is consumed and not honoured: this renderer draws one
+  dot of an image on one dot of the paper, at the 203 dpi of both profiles, so
+  a stream that asks for another density prints its image at the size its dots
+  have. It is in the deviation list of the reference page.
+- **The host answering functions are reported, not skipped.** 48, 51 and 52
+  transmit a capacity and 64 and 80 a key code list; there is no channel back
+  to the host, so they produce an `unknown` item the way every other request
+  for a status does. Only 49 is silent, because it is a setting and not a
+  question.
+- **`GS 8 L` is accepted for every function of the group**, where the reference
+  reserves the long form for the functions that carry data, 67, 68, 83, 84, 112
+  and 113. Accepting all of them costs nothing and keeps a stream that uses the
+  long form for a delete in sync.
+- **The stores stack, they do not overwrite.** Two store functions before one
+  print draw their images under each other, the widest one deciding the width.
+  The reference says an image is stored in the print buffer and function 50
+  prints the buffer, and says nothing about where a second image lands;
+  stacking is the reading that loses no dots. `ESC @` throws the buffer away,
+  because it is the print buffer of the printer.
+- **`bx`, `by`, `x` and `y` of 2 double, everything else is 1.** That is the
+  same doubling `GS v 0` does with its mode, and the test compares the four
+  combinations against the four modes of `GS v 0` dot for dot.
+- **Colour 1 is drawn and the other colours are consumed.** A multiple tone
+  image, `a` of 52, is drawn as its colour 1, which is what a single colour
+  printer puts on paper. An `a` that is neither 48 nor 52 is not a graphics
+  command this renderer knows and is reported with all of its bytes.
+- **Out of range is ignored, and the dots that are there bound the rest.** The
+  size of a graphics image is not the length of its command, the group length
+  is, so a stream can ask for an image of 65535 by 65535 dots behind four bytes
+  of data. Two rules answer that. The ranges of the reference are checked
+  first, 1 to 8192 dots in the direction the data of the format runs in and 1
+  to 2047 across it, `bx`, `by`, `x` and `y` of 1 or 2, `GS *` of 1 to 255 by 1
+  to 48 bytes and at most 1536 of them, and the modes 0 to 3 or 48 to 51 of
+  `GS /` and `FS p`; a command with a parameter outside its range is consumed
+  and ignored whole, which is what the printer does with it, so nothing is
+  stored, defined, deleted or printed. And what is left is cut down to the
+  rows, or the columns, the data actually holds, data shorter than one row or
+  one column being no image at all, so an allocation is never larger than the
+  command that asked for it. **`GS v 0` keeps its old reading of an unknown
+  mode, an image printed unscaled, because its image is in the same command;
+  `GS /` and `FS p` print an image the stream sent earlier, and a mode they do
+  not define is a parameter out of range.**
+- **A definition never deletes by accident.** A define whose dots are missing
+  or whose size is out of range leaves the image that is under its key code
+  where it is, functions 65 and 81 delete a whole memory only with their fixed
+  `CLR` parameters, and an `FS q 0` is out of range and deletes nothing. The
+  bit image commands need no size rule of their own, their length carries the
+  whole image.
+- **An image that is wider than the paper is clipped, not dropped.** Barcodes
+  and symbols print nothing at all when they do not fit, because an unreadable
+  symbol is worse than none; an image that is a few dots too wide still carries
+  its message, so `block()` draws it at the left of the print area and the
+  right edge of the paper cuts it off, which is what a printer does.
+
+ESC/POS, the bit images:
+
+- **`GS *` is column format of `x * 8` columns and `y` bytes**, `x * y * 8`
+  data bytes, and there is one downloaded bit image, so a definition replaces
+  the one before it. `GS / m` prints it in the four modes of `GS v 0`.
+- **`FS q` replaces every NV bit image**, as the reference says, so the images
+  of an earlier definition are forgotten before the new ones are stored, and
+  the images are numbered 1 to `n` for `FS p`. The length function of `FS q`
+  was already in the parser from the fix of section 12 and did not change.
+- **The column data of `GS *` and `FS q` is read as the bytes of a column under
+  each other, then the next column**, `y` bytes per column and `x * 8` columns,
+  the most significant bit of a byte at the top, which is the same order
+  `ESC *` and `ESC X` use. **That is the reading of this implementation, and
+  the fixtures were generated with the same convention, so the fixtures cannot
+  disprove it: only a printer can.**
+- **A print of an image or a key code the stream never defined prints nothing
+  and reports the command.** That is the whole of the NV logo story: a printer
+  holds images a utility put there, the renderer has never seen them, and the
+  driver is told that the stream asked for one.
+- **The download memory and the downloaded bit image survive `ESC @`**, where a
+  printer clears both, because they live in the painter next to the NV ones.
+  The task asked for exactly this, and the reference page lists it as a
+  deviation: a stream that relies on the clear prints an image where a printer
+  prints nothing.
+
+StarPRNT:
+
+- **`ESC FS` became a fourth command group**, next to `ESC`, `ESC GS` and
+  `ESC RS`. Without it `ESC FS p 1 0` consumed two bytes and printed `p` as
+  text, which was a parser bug of its own.
+- **`ESC GS S m n1 n2 n3 n4 n5 d..`** is the raster image: `m` of 1 or the
+  ASCII digit 49, the width in bytes of eight dots, the height in dots, a fixed
+  byte, and the dots in raster format, exactly the format of `GS v 0`. **That
+  layout is the one of the plan and of the reference page and no Star
+  specification text was available here to confirm it**; the brief mentioned a
+  variant with two bytes in front of the size, which this renderer does not
+  read, because two documents of this repository and the reading this
+  implementation knows agree on one. An `m` it does not know is reported and
+  its data consumed, since the length bytes sit in the same place either way.
+- **The raster image is aligned like every other block**, so `ESC GS a 2` puts
+  it against the right edge and `ESC l` and `ESC Q` keep it inside the print
+  area. Star documents its alignment as applying to bit images as well as to
+  characters, and the rows of the raster *mode* of the TSP100 are the exception
+  that carries its own position, not the rule. No hardware check settled it.
+- **`ESC k` draws one dot per column, the same dots as `ESC L`.** `ESC K` is
+  the normal density, which prints every column twice, `ESC L` the fine density
+  at one dot per column, and a 203 dpi head cannot print more dots per inch
+  than that. **No Star Line Mode specification text was available here.** The
+  other reading, merging pairs of columns into one dot, would halve the image
+  and lose dots, which this renderer does not do anywhere else.
+- **`ESC FS p` is reported**, which is what the plan asks: the logo is in the
+  printer. **`ESC FS q` is consumed with the layout of the ESC/POS command of
+  the same name, which is an assumption**, and reported: a definition this
+  renderer is not sure it parses right must not be drawn, and a length that is
+  probably right keeps the stream in sync where consuming three bytes would
+  certainly lose it.
+
+Fixtures and tests:
+
+- **Seven hand assembled fixtures**, `graphics-raster`, `graphics-column`,
+  `graphics-nv`, `graphics-download`, `download-bit-image` and `nv-bit-image`
+  in ESC/POS, and `star-raster-image` in StarPRNT. They all print the same
+  picture as the image fixtures of section 4: `make-fixtures.js` runs the
+  encoder over the test image, takes the dots out of the `GS v 0` command it
+  writes, and transposes them for the commands that carry columns, so the
+  comparison with `ESC *` and `GS v 0` is direct.
+- **Reviewed as ASCII art before they were frozen**: the circle over the
+  checkerboard is centred in every fixture, the raster and the column fixture
+  print the same picture, the `bx` of 2 and the `GS / 3` versions are twice as
+  wide and twice as tall in the right direction, and the lines behind a print
+  of a key code that was deleted or never defined stand on the paper with no
+  image above them.
+- **No fixture exists in both languages**, so the shared list of
+  `test/parity.js` is unchanged. The parity the plan asks for is inside the
+  languages: `test/esc-pos.js` renders the same picture through `ESC *`,
+  `GS v 0`, `GS ( L` 112 and 113, `GS 8 L` 112, the four define and print
+  functions, `GS *` with `GS /` and `FS q` with `FS p`, ten streams in all, and
+  compares every one of them with the dots of `GS v 0`; `test/star-prnt.js`
+  compares `ESC GS S` with `ESC X`.
+- **Argument lengths and truncated streams** are table tests, as in section 12:
+  every new command with arguments that change nothing, and every new command
+  cut off halfway, in both languages. The ranges have tests of their own: a
+  store of 65535 by 65535 dots behind four bytes of data, ten times over,
+  leaves the page as empty as the receipt without it, and every out of range
+  scale, mode, size and delete parameter is checked for leaving the images and
+  the paper alone.
+
+Review:
+
+The first round of this section was returned with eight points, all of them
+applied here: the ranges of the reference are enforced before an image is
+allocated and both axes are bounded by the dots the command carries, `FS q 0`
+deletes nothing, functions 65 and 81 delete only with their `CLR` parameters, a
+define whose data is missing or whose size is out of range leaves the image
+under that key code alone, functions 69 and 85 need all four parameters,
+functions 84 and 82 gained tests and 84 joined the identical dots table and the
+truncation sweep, function 49 turned out to be the reference dot density and
+says so in the reference page, the host answering functions are reported
+instead of skipped, and `Bitmap.fromRaster` clears the padding dots past the
+width of a row. No fixture changed a dot.
+
+Acceptance:
+
+- `npm test` 1432 passing, `npm run build` clean, `npm run test:types` and
+  `npm run test:umd` pass. The fixtures of the encoder and of section 12 did
+  not change a dot. Version stays 0.3.0, nothing committed.
 
 ### Fixtures regenerated with encoder 4.0.0, 2026-09-12
 

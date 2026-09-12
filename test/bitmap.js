@@ -308,6 +308,72 @@ describe('Bitmap', function() {
     });
   });
 
+  describe('fromRaster()', function() {
+    it('should read one row after another, eight dots per byte', function() {
+      assert.deepEqual(toAscii(Bitmap.fromRaster(Uint8Array.from([0x80, 0x01, 0xff, 0x00]), 16, 2)), [
+        '#..............#',
+        '########........',
+      ]);
+    });
+
+    it('should pad every row to whole bytes', function() {
+      assert.deepEqual(toAscii(Bitmap.fromRaster(Uint8Array.from([0xf0, 0x0f]), 4, 2)), ['####', '....']);
+    });
+
+    it('should leave the rest white when the data is too short', function() {
+      assert.deepEqual(toAscii(Bitmap.fromRaster(Uint8Array.from([0xff]), 8, 3)), ['########', '........', '........']);
+    });
+
+    it('should clear the padding dots past the width of every row', function() {
+      const bitmap = Bitmap.fromRaster(Uint8Array.from([0xff, 0xff, 0xff, 0xff]), 11, 2);
+
+      assert.deepEqual(toAscii(bitmap), ['###########', '###########']);
+
+      /* The five dots past the width are padding and have to be white, which
+         is the invariant every other operation relies on */
+
+      assert.deepEqual(Array.from(bitmap.data), [0xff, 0xe0, 0xff, 0xe0]);
+    });
+  });
+
+  describe('fromColumns()', function() {
+    it('should read one column after another, the top dot in the most significant bit', function() {
+      assert.deepEqual(toAscii(Bitmap.fromColumns(Uint8Array.from([0x80, 0x40, 0x20, 0x10]), 4, 8)), [
+        '#...',
+        '.#..',
+        '..#.',
+        '...#',
+        '....',
+        '....',
+        '....',
+        '....',
+      ]);
+    });
+
+    it('should read the bytes of a column under each other', function() {
+      assert.deepEqual(toAscii(Bitmap.fromColumns(Uint8Array.from([0x80, 0x01, 0x00, 0x80]), 2, 16)), [
+        '#.',
+        ...new Array(7).fill('..'),
+        '.#',
+        ...new Array(6).fill('..'),
+        '#.',
+      ]);
+    });
+
+    it('should be the transpose of the raster format', function() {
+      const raster = Bitmap.fromRaster(Uint8Array.from([0b10110010, 0b01001101]), 8, 2);
+      const columns = Bitmap.fromColumns(Uint8Array.from([0x80, 0x40, 0x80, 0x80, 0x40, 0x40, 0x80, 0x40]), 8, 2);
+
+      assert.deepEqual(toAscii(columns), toAscii(raster));
+    });
+
+    it('should leave the rest white when the data is too short', function() {
+      assert.deepEqual(toAscii(Bitmap.fromColumns(Uint8Array.from([0xff]), 3, 8)), [
+        ...new Array(8).fill('#..'),
+      ]);
+    });
+  });
+
   describe('rotate180()', function() {
     const bitmap = fromAscii([
       '#..#',

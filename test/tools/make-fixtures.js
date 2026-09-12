@@ -584,6 +584,120 @@ function rasterBlock(left, bytes, rows) {
 
 const NATIONAL = '#$@[\\]^`{|}~';
 
+/*
+    The image the image commands of section 13 print.
+
+    It is the same picture the image fixtures print, dithered by the encoder
+    itself: the fixture takes the raster image out of the GS v 0 command the
+    encoder writes for it, so that every image command of section 13 carries
+    exactly the dots ESC * and GS v 0 carry, and the renders can be compared
+    dot for dot.
+*/
+
+/**
+ * The test picture, as the encoder dithers it
+ *
+ * @return {object}   The width in bytes of eight dots, the height in dots and the dots in raster format
+ */
+function picture() {
+  const encoder = new ReceiptPrinterEncoder({columns: COLUMNS, language: 'esc-pos', imageMode: 'raster'});
+  const bytes = encoder.initialize().image(IMAGE, IMAGE.width, IMAGE.height, 'atkinson').encode();
+
+  for (let index = 0; index + 8 <= bytes.length; index++) {
+    if (bytes[index] !== GS || bytes[index + 1] !== 0x76 || bytes[index + 2] !== 0x30) {
+      continue;
+    }
+
+    const width = bytes[index + 4] + bytes[index + 5] * 256;
+    const height = bytes[index + 6] + bytes[index + 7] * 256;
+
+    if (width * 8 !== IMAGE.width || height !== IMAGE.height) {
+      throw new Error(`The encoder wrote a raster image of ${width * 8} by ${height} dots`);
+    }
+
+    return {width, height, data: Array.from(bytes.subarray(index + 8, index + 8 + width * height))};
+  }
+
+  throw new Error('The encoder wrote no raster image');
+}
+
+const PICTURE = picture();
+
+/**
+ * The dots of the picture in column format, one column after another, every
+ * column a number of bytes of eight dots with the top dot in the most
+ * significant bit, which is how ESC *, GS *, FS q and the column graphics of
+ * GS ( L carry an image
+ *
+ * @param  {object}     image   The picture, in raster format
+ * @return {number[]}           The dots, in column format
+ */
+function columnFormat(image) {
+  const width = image.width * 8;
+  const bytes = (image.height + 7) >> 3;
+  const data = new Array(width * bytes).fill(0);
+
+  for (let x = 0; x < width; x++) {
+    for (let byte = 0; byte < bytes; byte++) {
+      let value = 0;
+
+      for (let bit = 0; bit < 8 && byte * 8 + bit < image.height; bit++) {
+        const dot = (image.data[(byte * 8 + bit) * image.width + (x >> 3)] >> (7 - (x & 7))) & 1;
+
+        if (dot) {
+          value |= 0x80 >> bit;
+        }
+      }
+
+      data[x * bytes + byte] = value;
+    }
+  }
+
+  return data;
+}
+
+const COLUMNS_OF_PICTURE = columnFormat(PICTURE);
+
+/* The size of the picture as the graphics functions of GS ( L count it, in
+   dots, and as GS * and FS q count it, in bytes of eight dots */
+
+const PICTURE_DOTS = [
+  PICTURE.width * 8 & 0xff, (PICTURE.width * 8) >> 8,
+  PICTURE.height & 0xff, PICTURE.height >> 8,
+];
+
+/**
+ * A function of the graphics group, under the two byte length of GS ( L
+ *
+ * @param  {number}     fn           The function code
+ * @param  {number[]}   parameters   The parameters of the function
+ * @return {number[]}                The bytes of the command
+ */
+function graphics(fn, parameters) {
+  const payload = [48, fn, ...parameters];
+
+  return [GS, 0x28, 0x4c, payload.length & 0xff, payload.length >> 8, ...payload];
+}
+
+/**
+ * The same function under the four byte length of GS 8 L, which is the form a
+ * definition of more than 65535 bytes has to use
+ *
+ * @param  {number}     fn           The function code
+ * @param  {number[]}   parameters   The parameters of the function
+ * @return {number[]}                The bytes of the command
+ */
+function largeGraphics(fn, parameters) {
+  const payload = [48, fn, ...parameters];
+  const length = payload.length;
+
+  return [
+    GS, 0x38, 0x4c,
+    length & 0xff, (length >> 8) & 0xff, (length >> 16) & 0xff, (length >> 24) & 0xff,
+    ...payload,
+  ];
+}
+
 const raw = {
   /*
       ESC ! n against the individual commands. The two streams set the same
@@ -800,6 +914,149 @@ const raw = {
         raster('D', 1),
         ESC, 0x0c, EOT,
         ESC, '*rB',
+    ),
+  },
+
+  /*
+      GS ( L function 112, raster graphics into the print buffer, and function
+      50, which prints the buffer. The first image is stored under the two byte
+      length of GS ( L and the second one under the four byte length of GS 8 L,
+      with the horizontal scale bx of 2, which doubles every dot.
+  */
+
+  'graphics-raster': {
+    'esc-pos': stream(
+        ESC, '@',
+        ESC, 'a', 1,
+        graphics(112, [48, 1, 1, 49, ...PICTURE_DOTS, ...PICTURE.data]),
+        graphics(50, []),
+        ESC, 'a', 0,
+        'Raster graphics, printed from the buffer', LF,
+        ESC, 'a', 1,
+        largeGraphics(112, [48, 2, 1, 49, ...PICTURE_DOTS, ...PICTURE.data]),
+        largeGraphics(50, []),
+        ESC, 'a', 0,
+        'The same image under GS 8 L, bx of two', LF,
+    ),
+  },
+
+  /*
+      GS ( L function 113, the same picture in column format, which is the
+      transpose of the raster data of the fixture above and has to render to
+      the same dots.
+  */
+
+  'graphics-column': {
+    'esc-pos': stream(
+        ESC, '@',
+        ESC, 'a', 1,
+        graphics(113, [48, 1, 1, 49, ...PICTURE_DOTS, ...COLUMNS_OF_PICTURE]),
+        graphics(50, []),
+        ESC, 'a', 0,
+        'Column graphics, printed from the buffer', LF,
+    ),
+  },
+
+  /*
+      The NV graphics: function 67 defines the picture under the key code AB,
+      69 prints it, and a print of a key the printer never got a definition for
+      leaves the paper untouched. Function 66 deletes the key, after which the
+      print does nothing either.
+  */
+
+  'graphics-nv': {
+    'esc-pos': stream(
+        ESC, '@',
+        largeGraphics(67, [48, 0x41, 0x42, 1, ...PICTURE_DOTS, 49, ...PICTURE.data]),
+        ESC, 'a', 1,
+        graphics(69, [0x41, 0x42, 1, 1]),
+        ESC, 'a', 0,
+        'Printed from the NV memory', LF,
+        graphics(69, [0x5a, 0x5a, 1, 1]),
+        'A key the printer does not hold prints nothing', LF,
+        graphics(66, [0x41, 0x42]),
+        graphics(69, [0x41, 0x42, 1, 1]),
+        'And nothing again once the key is deleted', LF,
+    ),
+  },
+
+  /*
+      The download graphics: function 83 defines the picture under the key code
+      CD, 85 prints it at its own size and at double height, and function 81
+      deletes every download definition.
+  */
+
+  'graphics-download': {
+    'esc-pos': stream(
+        ESC, '@',
+        largeGraphics(83, [48, 0x43, 0x44, 1, ...PICTURE_DOTS, 49, ...PICTURE.data]),
+        ESC, 'a', 1,
+        graphics(85, [0x43, 0x44, 1, 1]),
+        ESC, 'a', 0,
+        'Printed from the download memory', LF,
+        ESC, 'a', 1,
+        graphics(85, [0x43, 0x44, 1, 2]),
+        ESC, 'a', 0,
+        'The same image at double height', LF,
+        graphics(81, [0x43, 0x4c, 0x52]),
+        graphics(85, [0x43, 0x44, 1, 1]),
+        'Nothing is left after the delete', LF,
+    ),
+  },
+
+  /*
+      GS * and GS /, the downloaded bit image: the picture in column format, 25
+      bytes of eight dots wide and 12 bytes of eight dots tall, printed at its
+      own size and in the quadruple mode of GS / 3.
+  */
+
+  'download-bit-image': {
+    'esc-pos': stream(
+        ESC, '@',
+        GS, '*', PICTURE.width, PICTURE.height / 8, COLUMNS_OF_PICTURE,
+        ESC, 'a', 1,
+        GS, '/', 0,
+        ESC, 'a', 0,
+        'The downloaded bit image', LF,
+        ESC, 'a', 1,
+        GS, '/', 3,
+        ESC, 'a', 0,
+        'The same image at quadruple size', LF,
+    ),
+  },
+
+  /*
+      FS q and FS p, the NV bit images: one image defined in the stream and
+      printed by its number, and a print of an image the stream never defined,
+      which leaves the paper untouched.
+  */
+
+  'nv-bit-image': {
+    'esc-pos': stream(
+        ESC, '@',
+        FS, 'q', 1, [PICTURE.width, 0, PICTURE.height / 8, 0], COLUMNS_OF_PICTURE,
+        ESC, 'a', 1,
+        FS, 'p', 1, 0,
+        ESC, 'a', 0,
+        'NV bit image number one', LF,
+        FS, 'p', 2, 0,
+        'Image two was never defined', LF,
+    ),
+  },
+
+  /*
+      ESC GS S, the StarPRNT raster image: the same picture, 25 bytes of eight
+      dots wide and 96 dots tall, drawn as a block and centred the way ESC GS a
+      says.
+  */
+
+  'star-raster-image': {
+    'star-prnt': stream(
+        ESC, '@',
+        ESC, 0x1d, 'a', 1,
+        ESC, 0x1d, 'S', 1, [PICTURE.width, 0, PICTURE.height, 0, 0], PICTURE.data,
+        ESC, 0x1d, 'a', 0,
+        'The Star raster image', LF,
     ),
   },
 };

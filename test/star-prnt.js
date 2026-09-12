@@ -1602,4 +1602,162 @@ describe('StarPrntRenderer', function() {
       });
     }
   });
+
+  describe('the image commands of section 13', function() {
+    /* The same picture the ESC/POS image tests use: 16 by 24 dots, a whole
+       number of bytes in both directions and different in every row and
+       column, so that a transposed decoding shows up */
+
+    const PICTURE_WIDTH = 16;
+    const PICTURE_HEIGHT = 24;
+
+    const raster = [];
+
+    for (let y = 0; y < PICTURE_HEIGHT; y++) {
+      raster.push((y * 37 + 11) & 0xff, (y * 151 + 5) & 0xff);
+    }
+
+    const columns = [];
+
+    for (let x = 0; x < PICTURE_WIDTH; x++) {
+      for (let byte = 0; byte < PICTURE_HEIGHT / 8; byte++) {
+        let value = 0;
+
+        for (let bit = 0; bit < 8; bit++) {
+          if ((raster[(byte * 8 + bit) * 2 + (x >> 3)] >> (7 - (x & 7))) & 1) {
+            value |= 0x80 >> bit;
+          }
+        }
+
+        columns.push(value);
+      }
+    }
+
+    /* ESC GS S m n1 n2 n3 n4 n5 d.., the width in bytes and the height in dots */
+
+    const image = [PICTURE_WIDTH / 8, 0, PICTURE_HEIGHT, 0, 0];
+
+    it('should draw the raster image as a block of its own', function() {
+      const items = render(stream(ESC, '@', ESC, GS, 'S', 1, image, raster));
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, PICTURE_HEIGHT);
+      assert.equal(ink(stitch(items, {width: WIDTH}), 0, PICTURE_HEIGHT).max, PICTURE_WIDTH - 1);
+    });
+
+    it('should print the same dots as the column image of ESC X', function() {
+      const image24 = render(stream(ESC, '@', ESC, GS, 'S', 1, image, raster));
+      const strip = render(stream(ESC, '@', ESC, '0', ESC, 'X', [PICTURE_WIDTH, 0], columns, LF));
+
+      assert.equal(
+          dots(stitch(image24, {width: WIDTH})),
+          dots(stitch(strip, {width: WIDTH})),
+      );
+    });
+
+    it('should align the raster image the way ESC GS a says', function() {
+      const paper = stitch(render(stream(
+          ESC, '@', ESC, GS, 'a', 2, ESC, GS, 'S', 1, image, raster,
+      )), {width: WIDTH});
+
+      assert.equal(ink(paper, 0, PICTURE_HEIGHT).max, WIDTH - 1);
+      assert.equal(ink(paper, 0, PICTURE_HEIGHT).min, WIDTH - PICTURE_WIDTH);
+    });
+
+    it('should commit the pending line before the image', function() {
+      const items = render(stream(ESC, '@', 'Hi', ESC, GS, 'S', 1, image, raster));
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 32 + PICTURE_HEIGHT);
+    });
+
+    it('should take the ASCII digit of the mode as well', function() {
+      assert.equal(
+          dots(stitch(render(stream(ESC, '@', ESC, GS, 'S', 0x31, image, raster)), {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', ESC, GS, 'S', 1, image, raster)), {width: WIDTH})),
+      );
+    });
+
+    it('should report a mode it does not know and consume the data', function() {
+      const items = render(stream(
+          ESC, '@', ESC, GS, 'S', 2, image, raster, 'Hi', LF,
+      ), {commands: ['unknown']});
+
+      const unknown = items.filter((item) => item.type === 'unknown');
+
+      assert.equal(unknown.length, 1);
+      assert.equal(unknown[0].data.length, 3 + 6 + raster.length);
+
+      assert.equal(
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should draw the quadruple density bit image of ESC k', function() {
+      const strip = new Array(PICTURE_WIDTH).fill(0xff);
+
+      const quadruple = render(stream(ESC, '@', ESC, 'k', [PICTURE_WIDTH, 0], strip, LF));
+      const fine = render(stream(ESC, '@', ESC, 'L', [PICTURE_WIDTH, 0], strip, LF));
+
+      assert.equal(
+          dots(stitch(quadruple, {width: WIDTH})),
+          dots(stitch(fine, {width: WIDTH})),
+      );
+
+      assert.equal(ink(stitch(quadruple, {width: WIDTH}), 0, 8).max, PICTURE_WIDTH - 1);
+    });
+
+    it('should print nothing and report ESC FS p, the NV logo the printer holds', function() {
+      const items = render(stream(ESC, '@', ESC, FS, 'p', 1, 0, 'Hi', LF), {commands: ['unknown']});
+      const unknown = items.filter((item) => item.type === 'unknown');
+
+      assert.equal(unknown.length, 1);
+      assert.deepEqual(Array.from(unknown[0].data), [ESC, FS, 0x70, 1, 0]);
+
+      assert.equal(
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should print nothing and report ESC FS q, the logo definition', function() {
+      const definition = [ESC, FS, 0x71, 1, 1, 0, 1, 0, ...new Array(8).fill(0xff)];
+      const items = render(stream(ESC, '@', definition, 'Hi', LF), {commands: ['unknown']});
+      const unknown = items.filter((item) => item.type === 'unknown');
+
+      assert.equal(unknown.length, 1);
+      assert.deepEqual(Array.from(unknown[0].data), definition);
+
+      assert.equal(
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+      );
+    });
+
+    const truncated = [
+      ['ESC GS S without its size', [ESC, GS, 0x53, 1, 2, 0]],
+      ['ESC GS S with data missing', [ESC, GS, 0x53, 1, 2, 0, 24, 0, 0, 0xff]],
+      ['ESC k without its length', [ESC, 0x6b, 4]],
+      ['ESC k with data missing', [ESC, 0x6b, 4, 0, 0xff]],
+      ['ESC FS p', [ESC, FS, 0x70, 1]],
+      ['ESC FS q without its count', [ESC, FS, 0x71]],
+      ['ESC FS q with data missing', [ESC, FS, 0x71, 1, 1, 0, 1, 0, 0xff]],
+    ];
+
+    for (const [name, bytes] of truncated) {
+      it(`should stop cleanly on a truncated ${name}`, function() {
+        let items;
+
+        assert.doesNotThrow(() => {
+          items = render(stream(ESC, '@', 'Hi', LF, bytes), {commands: COMMANDS});
+        });
+
+        assert.equal(
+            dots(stitch(items, {width: WIDTH})),
+            dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+        );
+      });
+    }
+  });
 });

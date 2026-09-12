@@ -18,6 +18,7 @@ Render the ESC/POS and StarPRNT commands created by [ReceiptPrinterEncoder](http
   - [QR codes](#qr-codes)
   - [PDF417](#pdf417)
   - [Images](#images)
+  - [Graphics](#graphics)
   - [Cut and drawer](#cut-and-drawer)
   - [Printer state and status](#printer-state-and-status)
   - [Not supported yet](#not-supported-yet)
@@ -32,7 +33,7 @@ This page lists every ESC/POS command `EscPosRenderer` recognises, what it does 
 
 The renderer emulates an Epson ESC/POS printer. It interprets the bytes the way the firmware does, including the cases where the firmware prints nothing at all: a barcode with invalid data, a symbol wider than the paper, an argument outside the range of its command. It does not improve on the printer, so `ESC 4` italic is ignored exactly as an Epson ignores it.
 
-It deliberately differs from the hardware in a few places, each of them because the behaviour is not on the wire and no hardware check settled it. They are marked in the notes below, and these are all of them: the four dot gap between the bars of a barcode and its human readable text, the approximations of `ESC J` and `ESC d`, the default horizontal motion unit of `GS P`, a QR model 1 drawn as a model 2 symbol, the basic 43 character set of Code 93, the minimum of three data codewords of a PDF417 symbol, the placeholder cells of the Kanji group, the initial code system of `FS C`, `FS ( C` and with it UTF-8 not being decoded, sets 16 and 17 of `ESC R` replacing nothing, the feed order of `ESC { n`, and the argument lengths of `DLE DC4 3` and `DLE DC4 7`.
+It deliberately differs from the hardware in a few places, each of them because the behaviour is not on the wire and no hardware check settled it. They are marked in the notes below, and these are all of them: the four dot gap between the bars of a barcode and its human readable text, the approximations of `ESC J` and `ESC d`, the default horizontal motion unit of `GS P`, a QR model 1 drawn as a model 2 symbol, the basic 43 character set of Code 93, the minimum of three data codewords of a PDF417 symbol, the placeholder cells of the Kanji group, the initial code system of `FS C`, `FS ( C` and with it UTF-8 not being decoded, sets 16 and 17 of `ESC R` replacing nothing, the feed order of `ESC { n`, the argument lengths of `DLE DC4 3` and `DLE DC4 7`, the images of the graphics print buffer drawn under each other, the download graphics and the downloaded bit image of `GS *` surviving an `ESC @`, a multiple tone image drawn as its first colour, and the reference dot density of function `49`, which is consumed and not honoured.
 
 <br>
 
@@ -229,15 +230,40 @@ A symbol never holds fewer than three data codewords: one codeword of data and t
 | `ESC * m nL nH d..` | column mode image | Rendered | `nL + nH * 256` columns. `m` of `0` and `1` are the eight dot modes, one byte per column, `32` and `33` the 24 dot modes, three bytes per column, the most significant bit of the first byte at the top. The single density modes, `0` and `32`, print every column twice, so the image keeps its proportions at half the resolution. The strip goes into the line that is being composed, like one wide cell, and the `LF` behind it commits the line; the encoder sets the line spacing to 24 dots around an image so the strips join up. Any other `m` is read as an eight dot mode, doubled unless `m` is `1`, since its length has to be guessed either way. The encoder only emits `ESC * 33`. |
 | `GS v 0 m xL xH yL yH d..` | raster image | Rendered | `xL + xH * 256` bytes per row, eight dots per byte, and `yL + yH * 256` rows. `m` of `0` normal, `1` double width, `2` double height and `3` both, by repeating dots, and `48` to `51` for the same four. Any other value prints the image unscaled. Drawn as a block of its own, aligned the way `ESC a` says. |
 | `GS v m ..` | anything that is not `GS v 0` | Reported | The command is only defined with a `0` behind it, so the renderer reports it instead of drawing whatever follows. |
-| `GS ( L pL pH ..` | graphics | Reported | Raster and column graphics, NV and download graphics. [Section 13](#not-supported-yet). |
-| `GS 8 L p1 p2 p3 p4 ..` | graphics, long form | Reported | The same group under its four byte length prefix, consumed with that length. [Section 13](#not-supported-yet). |
-| `GS * x y d..` | define downloaded bit image | Reported | Consumed with its `x * y * 8` data bytes. [Section 13](#not-supported-yet). |
-| `GS / m` | print downloaded bit image | Reported | [Section 13](#not-supported-yet). |
+| `GS ( L pL pH 48 fn ..` | graphics | Rendered | The graphics group, whose functions are listed under [Graphics](#graphics). `pL + pH * 256` counts everything behind the two length bytes, so a function the renderer does not know is still consumed whole. An `m` that is not `48` is not this group and is reported. |
+| `GS 8 L p1 p2 p3 p4 48 fn ..` | graphics, long form | Rendered | The same group under a four byte length, which is the form a definition of more than 65535 bytes has to use. The functions and their parameters are the same, only the length is longer. **The reference reserves this form for the functions that carry data, `67`, `68`, `83`, `84`, `112` and `113`; this renderer accepts every function of the group under it, which costs nothing and keeps a stream that uses it in sync.** |
+| `GS * x y d..` | define the downloaded bit image | Rendered | `x` bytes of eight dots wide and `y` bytes of eight dots tall, `x * y * 8` data bytes in column format: one column after another, `y` bytes per column, the most significant bit of the first byte at the top. There is one downloaded bit image, so a definition replaces the one before it. `x` runs from 1 to 255, `y` from 1 to 48, and `x * y` is at most the 1536 bytes the memory of the printer holds; a size outside those ranges makes the printer ignore the command, so the image that was downloaded before it stays where it is. |
+| `GS / m` | print the downloaded bit image | Rendered | `m` of `0` normal, `1` double width, `2` double height and `3` both, and `48` to `51` for the same four, exactly as `GS v 0` scales its image. A mode the command does not define makes the printer ignore it, unlike `GS v 0`, which carries its image in the same command and prints it unscaled. Drawn as a block of its own, aligned the way `ESC a` says. A printer that was never given a definition prints nothing at all and the command is reported. |
+| `FS q n [xL xH yL yH d..]..` | define NV bit images | Rendered | `n` images, each `x` bytes of eight dots wide and `y` bytes of eight dots tall, `x * y * 8` data bytes in the column format of `GS *`. The command replaces every NV bit image the printer held, so the images of an earlier definition are gone; an `n` of `0` is outside the range of the command and is ignored, which deletes nothing. The images are numbered 1 to `n`, which is what `FS p` addresses them with. The encoder never sends it. |
+| `FS p n m` | print an NV bit image | Rendered | Image `n` in the four modes of `GS /`, a mode outside them ignored the same way. An image the stream never defined prints nothing and the command is reported: a printer holds NV bit images that were put there by a utility, and the renderer has never seen them. |
 | `ESC / n` | print downloaded bitmap | Reported | |
-| `FS p n m` | print NV bit image | Reported | The image is held in the printer, so there is nothing to draw. [Section 13](#not-supported-yet). |
-| `FS q n [xL xH yL yH d..]..` | define NV bit image | Reported | The `n` images with their sizes are consumed, `x` bytes wide and `y` bytes of eight dots tall each, nothing is kept. The encoder never sends it. [Section 13](#not-supported-yet). |
+
+An image that is wider than the paper is drawn at the left of the print area and clipped at the right edge of the paper, the way a printer clips it. The barcode rule, which prints nothing at all when the symbol does not fit, is not applied to images: an image that is a few dots too wide still carries its message.
 
 <br>
+
+### Graphics
+
+The functions of the `GS ( L` and `GS 8 L` group, by their function code. Every function carries `m` of `48` in front of the function code.
+
+| Function | Name | Status | Notes |
+|---|---|---|---|
+| `112` | store raster graphics in the print buffer | Rendered | `a bx by c xL xH yL yH d..`. `a` of `48` is a monochrome image and `52` a multiple tone one, which is drawn as its first colour; any other value is reported. `bx` and `by` of `2` double the width and the height of the image by repeating its dots, exactly as `GS v 0` doubles, and any other value is read as `1`. `c` of `49` is colour 1, the black of a single colour printer; the data of another colour is consumed and nothing is drawn for it. `x` and `y` are the size of the image in dots, 1 to 8192 in the direction the data runs in and 1 to 2047 across it, so a raster image is at most 8192 dots wide and 2047 dots tall. The data is one row after another, `int((x + 7) / 8)` bytes per row, eight dots per byte. A `bx`, `by` or size outside its range makes the printer ignore the command, so nothing is stored and nothing is printed, and a command that carries fewer dots than its size asks for stores only the rows that are there. |
+| `113` | store column graphics in the print buffer | Rendered | The same parameters, with the dots one column after another, `int((y + 7) / 8)` bytes per column, the most significant bit of the first byte at the top, so the image is at most 2047 dots wide and 8192 dots tall. The same picture through `112` and `113` prints the same dots. |
+| `50` | print the graphics of the print buffer | Rendered | Draws what the store functions gathered as a block of its own, aligned the way `ESC a` says, and empties the buffer. **Images that were stored one after another are drawn under each other, which is a choice of this renderer: the reference does not say where a second store lands.** An empty buffer prints nothing and does not advance the paper. `ESC @` throws the buffer away, as it throws away the print buffer it is part of. |
+| `67`, `68` | define NV graphics, raster and column format | Rendered | `a kc1 kc2 b xL xH yL yH [c d..]1..[c d..]b`. The image is kept under the key code `kc1 kc2`, `b` is the number of colour blocks that follow the size, and each block is its colour byte and the dots of the image in the format of the function. Colour 1 is kept, the other blocks are consumed. The sizes are the ones of `112` and `113`, and a size outside its range, or a definition whose dots are missing, makes the command do nothing at all: the image that is under that key code stays where it is. The plan of section 13 had `68` and `84` parsed and skipped; they are rendered here, because the column format is the one of function `113` and the definition costs nothing extra. |
+| `83`, `84` | define download graphics, raster and column format | Rendered | The same parameters, in the download memory instead of the NV memory. The two memories have key codes of their own, so the same key code can hold a different image in each. |
+| `69` | print NV graphics | Rendered | `kc1 kc2 x y`, where `x` and `y` are `1` or `2`, the `2` doubling the width and the height by repeating dots. A parameter that is missing or outside that range makes the printer ignore the command. Drawn as a block of its own, aligned the way `ESC a` says. A key code the renderer never got a definition for prints nothing at all, does not advance the paper, does not commit the line that is being composed, and the command is reported. |
+| `85` | print download graphics | Rendered | The same, from the download memory. |
+| `65`, `81` | delete all NV, all download graphics | Rendered | Both take `d1 d2 d3` of `CLR`, the bytes `67 76 82`, and every image of that memory is forgotten. Any other parameter makes the printer ignore the command, so nothing is deleted by accident. |
+| `66`, `82` | delete one NV, one download image | Rendered | `kc1 kc2`. A key code that holds no image deletes nothing, as it does on a printer. |
+| `48`, `51`, `52` | transmit the memory capacities | Reported | The renderer has no channel back to the host, and the capacities do not change the paper, so the command is reported the way every other request for a status is. |
+| `49` | set the reference dot density | Parsed | `x y`, both `50` for 180 dpi and `51` for 360 dpi, which is the density the sizes of the graphics functions are counted in. Consumed and not honoured: this renderer draws one dot of an image on one dot of the paper, at the 203 dpi of both profiles, so a stream that asks for another density prints its image at the size its dots have. |
+| `64`, `80` | transmit the key code lists | Reported | The same, they answer the host. |
+| anything else | | Reported | Consumed with the length of the group. |
+
+An image a definition function stored stays in the painter for the life of the renderer: an `ESC @` does not delete it, and neither does the end of a stream, so a receipt that defines a logo once and prints it in every job after that renders the way it prints. **That is the NV memory of a printer exactly, and a deviation for the download memory and for the downloaded bit image of `GS *`, which a printer keeps in RAM and clears on `ESC @`.** A second renderer instance starts with nothing, the way a second printer does.
+
 
 ### Cut and drawer
 
@@ -285,12 +311,6 @@ These commands change nothing about the paper of the receipt that is being rende
 
 These are the common ESC/POS commands the renderer parses but does not render, and what is planned for them. The sections are the ones of the [implementation plan](implementation-plan.md).
 
-**Section 13, images.**
-
-- `GS ( L` and `GS 8 L` graphics: raster and column graphics into the print buffer, printed as a block, and NV and download graphics defined and printed by key code.
-- `GS * x y d..` and `GS / m`, the downloaded bit image, defined once and printed in the four modes of `GS v 0`.
-- `FS q n ..` and `FS p n m`, NV bit images defined in the stream and printed by number.
-
 **Section 14, GS1 DataBar.** The symbologies `75` to `78` of `GS k`, Omnidirectional, Truncated, Limited and Expanded, with the human readable text below them.
 
 **Not planned.**
@@ -298,6 +318,6 @@ These are the common ESC/POS commands the renderer parses but does not render, a
 - Page mode, `ESC L`, `ESC S`, `ESC T`, `ESC W`, `GS $` and `GS \`: the printer composes a page in memory and prints it in one go, which is a second layout engine next to the line one.
 - CJK fonts. The Kanji group draws placeholder cells, not glyphs; a receipt that needs real CJK text needs a printer with the font. UTF-8 through `FS ( C` is not decoded either, for the same reason and because the layout of that group is not settled here.
 - User defined characters, `ESC %`, `ESC ?`, `FS 2` and `FS ?`: glyphs downloaded into the printer.
-- NV logos: images stored in the printer, which the renderer has never seen and cannot draw.
+- NV logos and graphics that a utility put in the printer before the stream. An image the stream defines itself is drawn, see [Images](#images) and [Graphics](#graphics); a print of a key code or an image number the stream never defined prints nothing and is reported, because the renderer has never seen what the printer holds.
 - Status and settings commands, `GS I`, `GS r`, `GS a`, `ESC u`, `ESC v`, `GS j`, `GS z`, `FS g`, the `DLE` real time commands and the rest of [Printer state and status](#printer-state-and-status): there is no channel back to the host, and the settings do not change the paper.
 - Maxicode and the composite symbologies, the other selectors of the `GS ( k` group.

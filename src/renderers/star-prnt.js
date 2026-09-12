@@ -62,13 +62,20 @@ const MAX_RASTER_MOVE = 65535;
 
 const RASTER_DRAWERS = Object.assign(Object.create(null), {1: [0], 2: [1], 3: [0, 1]});
 
-/* A Star command is ESC and a command byte, or ESC GS or ESC RS and a command
-   byte. The three groups have their own table, keyed by the byte that follows
-   the prefix */
+/* A Star command is ESC and a command byte, or ESC GS, ESC RS or ESC FS and a
+   command byte. The four groups have their own table, keyed by the byte that
+   follows the prefix */
 
 const GROUP_ESC = 'esc';
 const GROUP_GS = 'esc gs';
 const GROUP_RS = 'esc rs';
+const GROUP_FS = 'esc fs';
+
+/* The byte behind the ESC that opens a group, and the group it opens */
+
+const GROUPS = Object.assign(Object.create(null), {
+  [GS]: GROUP_GS, [RS]: GROUP_RS, [FS]: GROUP_FS,
+});
 
 /* The codepage a Star printer starts in, when the mapping has no entry 0, and
    the one an unknown codepage number falls back to */
@@ -328,6 +335,59 @@ function bitImageArguments(bytes, index) {
 }
 
 /**
+ * Arguments of ESC GS S m n1 n2 n3 n4 n5 d1..dk, the raster image: the width of
+ * the image in bytes of eight dots, its height in dots, a fixed byte, and the
+ * dots in raster format
+ *
+ * @param  {Uint8Array}   bytes   The whole stream
+ * @param  {number}       index   Position of the first argument
+ * @return {number}               Number of argument bytes, or -1 when the stream is too short
+ */
+function rasterImageArguments(bytes, index) {
+  if (index + 6 > bytes.length) {
+    return -1;
+  }
+
+  const width = bytes[index + 1] + bytes[index + 2] * 256;
+  const height = bytes[index + 3] + bytes[index + 4] * 256;
+
+  return 6 + width * height;
+}
+
+/**
+ * Arguments of ESC FS q n [xL xH yL yH d1..dk]1..[..]n, the definition of n
+ * logos, each x bytes wide and y bytes of eight dots tall. The layout is the
+ * one of the ESC/POS command of the same name, see the notes of this command
+ * in documentation/commands-star-prnt.md.
+ *
+ * @param  {Uint8Array}   bytes   The whole stream
+ * @param  {number}       index   Position of the first argument
+ * @return {number}               Number of argument bytes, or -1 when the stream is too short
+ */
+function logoDefinitionArguments(bytes, index) {
+  if (index + 1 > bytes.length) {
+    return -1;
+  }
+
+  let length = 1;
+
+  for (let image = 0; image < bytes[index]; image++) {
+    const header = index + length;
+
+    if (header + 4 > bytes.length) {
+      return -1;
+    }
+
+    const width = bytes[header] + bytes[header + 1] * 256;
+    const height = bytes[header + 2] + bytes[header + 3] * 256;
+
+    length += 4 + width * height * 8;
+  }
+
+  return length;
+}
+
+/**
  * Arguments of ESC * r .., the raster mode commands of the TSP100 family. Most
  * of them carry their parameter as ASCII digits followed by a NUL byte, the
  * ones that switch a mode carry nothing, and the margins have a second letter.
@@ -389,7 +449,11 @@ const UNKNOWN_ARGUMENTS = {
     0x29: 1, /* cancel character expansion */
     0x31: 0, /* select 1/8 inch line spacing, legacy */
     0x63: 1, /* select character set */
-    0x6b: bitImageArguments, /* bit image, quadruple density */
+  },
+
+  [GROUP_FS]: {
+    0x70: 2, /* ESC FS p n m, print an NV logo the printer holds */
+    0x71: logoDefinitionArguments, /* ESC FS q n .., define logos, see the notes */
   },
 
   [GROUP_GS]: {
@@ -700,17 +764,17 @@ class StarPrntRenderer {
       return -1;
     }
 
-    /* ESC GS and ESC RS are prefixes of their own group, everything else is a
-       command of the ESC group */
+    /* ESC GS, ESC RS and ESC FS are prefixes of their own group, everything
+       else is a command of the ESC group */
 
     const prefix = bytes[index + 1];
-    const grouped = prefix === GS || prefix === RS;
+    const grouped = prefix === GS || prefix === RS || prefix === FS;
 
     if (grouped && index + 3 > bytes.length) {
       return -1;
     }
 
-    const group = grouped ? (prefix === GS ? GROUP_GS : GROUP_RS) : GROUP_ESC;
+    const group = GROUPS[prefix] || GROUP_ESC;
     const code = grouped ? bytes[index + 2] : prefix;
     const start = index + (grouped ? 3 : 2);
 
@@ -775,12 +839,14 @@ class StarPrntRenderer {
         0x64: {args: 1, run: (a) => this.#cut(a[0])},
         0x68: {args: 1, run: (a) => this.#height(a[0])},
         0x69: {args: 2, run: (a) => this.#size(a[0], a[1])},
+        0x6b: {args: bitImageArguments, run: (a) => this.#bitImage(a, 1)}, /* bit image, quadruple density */
         0x6c: {args: 1, run: (a) => this.#leftMargin(a[0])},
         0x7a: {args: 1, run: (a) => this.#lineSpacing(a[0])},
       },
 
       [GROUP_GS]: {
         0x50: {args: 1, run: null}, /* print mode, the encoder flushes with it, no effect on paper */
+        0x53: {args: rasterImageArguments, run: (a, consumed) => this.#rasterImage(a, consumed)},
         0x61: {args: 1, run: (a) => this.#align(a[0])},
         0x74: {args: 1, run: (a) => this.#selectCodepage(a[0])},
         0x78: {args: pdf417Arguments, run: (a) => this.#pdf417Symbol(a)},
@@ -790,6 +856,11 @@ class StarPrntRenderer {
       [GROUP_RS]: {
         0x46: {args: 1, run: (a) => this.#font(a[0])},
       },
+
+      /* ESC FS p prints a logo the printer holds and ESC FS q defines one,
+         neither of which this renderer draws, see the reference page */
+
+      [GROUP_FS]: {},
     };
   }
 
@@ -974,21 +1045,43 @@ class StarPrntRenderer {
      * @return {object}                 The strip, eight rows per byte
      */
   #strip(data, columns, bytes) {
-    const strip = Bitmap.create(columns, bytes * 8);
+    return Bitmap.fromColumns(data, columns, bytes * 8);
+  }
 
-    for (let column = 0; column < columns; column++) {
-      for (let byte = 0; byte < bytes; byte++) {
-        const value = data[column * bytes + byte];
-
-        for (let bit = 0; bit < 8; bit++) {
-          if (value & (0x80 >> bit)) {
-            Bitmap.setPixel(strip, column, byte * 8 + bit, 1);
-          }
-        }
-      }
+  /**
+     * ESC GS S m n1 n2 n3 n4 n5 d.., the raster image the Star SDKs print an
+     * image with: `m` of 1 is the raster bit image, `n1 + n2 * 256` is the width
+     * of the image in bytes of eight dots, `n3 + n4 * 256` its height in dots,
+     * and `n5` is a fixed byte the command carries. The dots follow in raster
+     * format, one row after another, the way GS v 0 carries them on ESC/POS.
+     *
+     * The image is drawn as a block of its own, aligned the way ESC GS a says,
+     * and inside the print area of ESC l and ESC Q, like every other block.
+     *
+     * Any other `m` is a variant of the command this renderer does not know, so
+     * it is reported; the data is consumed either way, because the length bytes
+     * sit in the same place.
+     *
+     * @param  {Uint8Array}   args       The arguments of the command
+     * @param  {Uint8Array}   consumed   The whole command, for the unknown item
+     */
+  #rasterImage(args, consumed) {
+    if (args[0] !== 1 && args[0] !== 49) {
+      this.#unknown(consumed);
+      return;
     }
 
-    return strip;
+    const width = args[1] + args[2] * 256;
+    const height = args[3] + args[4] * 256;
+
+    /* An image without dots is not an image, and drawing it as a block would
+       commit the line that is being composed for nothing */
+
+    if (width === 0 || height === 0) {
+      return;
+    }
+
+    this.#painter.block(Bitmap.fromRaster(args.subarray(6), width * 8, height));
   }
 
   /**
