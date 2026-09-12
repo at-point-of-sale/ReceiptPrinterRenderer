@@ -430,6 +430,449 @@ Acceptance:
 
 <br>
 
+## Sections 16 to 20: fixtures from the wild, a display list and the vector formats
+
+The renderer covers what the encoder emits and the common commands of other producers, and it produces one thing: 1-bit images. These five sections widen both ends. Section 16 checks the renderer against byte streams that other libraries produce, so that the reference pages say which commands are seen in the wild and a regression shows up as a changed picture. Section 17 splits the painter into a layout engine that produces a display list and a bitmap back-end that consumes it, and makes the display list a public output next to the item stream. Sections 18 and 19 add two packages that consume the display list, an SVG writer and a PDF writer. Section 20 adds a package that turns receipt markup, the receiptline language and a Markdown subset, into calls on the encoder, and uses the renderer to check its output against receiptline itself.
+
+The order is 16, then 17, 18, 19, then 20. Each section runs through the working method at the top of this document: an implementer, a bug-check, an orchestrator review with fix rounds, then a commit. The effort estimates are for one implementer with the reviews included.
+
+Rules that apply to all five:
+
+- The item stream, the renderer options and every golden fixture of sections 2 to 14 stay exactly as they are. Section 17 in particular is a refactor with a proof, not a change of output.
+- No new runtime dependencies in this package. The three new packages have no runtime dependencies at all, with one exception this block names: the format packages of sections 18 and 19 need the glyph outlines, and where those live is an open decision of section 17. The markup package drives an encoder instance the application constructs, so it does not depend on the encoder either.
+- The new packages are scaffolded like MeowPrinterEncoder and StarGraphicsPrinterEncoder: rollup with UMD, ESM, CJS and MJS builds, bundled declarations from JSDoc through tsc, eslint with the Google config, mocha and chai, MIT, 2 space indent and `#private`, a README that opens with the @point-of-sale line and documents the whole public API, and a `test:types` smoke test. Their fixtures follow this repository: golden files reviewed by eye before they are frozen, and a diff on failure.
+- Everything that is checked against another implementation, receiptline in 16 and 20, a rasterizer in 18 and a PDF reader in 19, is a dev dependency of the test suite alone.
+- Every contract in this block is written down as typedefs in `src/types.js` of the package that owns it before the code that uses it, so that the declarations are complete and the other packages can be written against them.
+- The design document follows: an architecture line for the display list, a section for it, and a "Related packages" list that names the three new packages the way it names the two wire format packages today.
+
+<br>
+
+## Section 16: external fixtures, a visual regression suite
+
+The fixtures so far come from ReceiptPrinterEncoder and from hand assembled streams. This section adds byte streams produced by other open source ESC/POS and StarPRNT libraries, kept in the repository with their provenance and rendered to golden images, so that the renderer is checked against what real producers send, the reference pages can say which commands are seen in the wild, and a regression shows up as a changed picture. The first library is receiptline, because one document gives ESC/POS, StarPRNT and Star Line for the same input plus an SVG preview to review against. The second is python-escpos, because it uses the widest set of commands.
+
+Rules:
+
+- Fixtures live in `test/fixtures/external/<library>/<example>.bin` with `<example>.pbm`, `<example>.items.json` and `<example>.json`. The `.pbm` is the paper and the `.items.json` holds the items that are not images, exactly as the other fixtures do. The last file is the provenance, with these fields and no others:
+
+  ```json
+  {
+    "source": "https://github.com/receiptline/receiptline",
+    "file": "example/data/en/receipt.receipt",
+    "commit": "0123abcd",
+    "licence": "Apache-2.0",
+    "command": "node tools/external/receiptline.js receipt escpos 48",
+    "version": "4.0.4",
+    "language": "esc-pos",
+    "columns": 48,
+    "width": 576,
+    "codepageMapping": "epson",
+    "captured": "2026-09-14",
+    "unknown": 0,
+    "notes": "The example receipt of the README. Reviewed against the SVG preview."
+  }
+  ```
+
+  `command` is the exact invocation that produced the bytes, so a stream can be captured again when the library changes. `unknown` is the number of `unknown` items the renderer produced for the stream when the fixture was frozen. `language`, `columns`, `width` and `codepageMapping` are what the library assumed, and they are what the renderer is constructed with.
+- Only libraries under a permissive licence are captured: MIT, BSD and Apache 2.0. The licence text of a library is kept once, in `test/fixtures/external/<library>/LICENSE`, together with the copyright line of that library. A library under a copyleft licence is not captured at all, not even from its tests.
+- The example scripts and documents themselves are not copied. What is stored is the byte stream the library produced and our rendering of it; the provenance links to the input by repository, file and commit.
+- A capture script per Node library lives in `tools/external/<library>.js`, with the library as a dev dependency, so the streams can be regenerated. For libraries that need Python, PHP or .NET the capture is documented in `command` and the stream is stored as captured; nothing in `npm test` runs them.
+- Every fixture is rendered with the unified renderer using the language, width and mapping of its provenance and `commands: ['cut', 'pulse', 'feed', 'unknown']`. Three checks per fixture: the paper equals the golden PBM, the items equal `items.json`, and the `unknown` count of the provenance equals the number of unknown items in `items.json`, so the two files cannot drift apart. A newly supported command therefore changes the recorded count and is reviewed like a fixture change, and a command that is not supported is visible from the first capture.
+- The first golden image of every fixture is reviewed by eye before it is frozen, with the renderer's output next to whatever preview the library offers where it has one. What the review found goes into `notes`.
+- `npm run contact-sheet` renders every external fixture to PNG under `build/contact-sheet/` and writes an `index.html` next to them that lists every fixture with its provenance, and for receiptline the SVG preview of the same document next to the render. The page, the PNGs and the SVGs are generated on demand and not committed; `build/` goes into `.gitignore`.
+- A stream that prints an NV logo the printer holds, or asks for a status, produces an `unknown` item and nothing on paper, which is the renderer's rule. The fixture keeps it and `notes` says so.
+
+Libraries, in order:
+
+1. **receiptline** (Apache 2.0, Node, 4.0.4 at the time of writing). Its markup language generates ESC/POS, StarPRNT and Star Line for the same document across its command sets, and an SVG preview. The command sets that matter here are `escpos` and `epson`, rendered as `esc-pos` with the `epson` mapping, `generic`, which prints its images with `GS v 0` instead of the graphics group, `starsbcs`, rendered as `star-prnt` with the `star` mapping, `starlinesbcs`, rendered as `star-line`, and `stargraphic`, which is the TSP100 raster mode of section 12 and renders as `star-prnt`. The printer object gives the width: `cpl` 48 is 576 dots and `cpl` 32 is 384, the 80 and 58 mm papers. The documents are the English examples in `example/data/en`, twenty one of them: the receipt of the README, a second receipt, the credit card slips, the guest check, the kitchen ticket, the column width, column border, text wrap, text decoration, line align and line width examples. The Japanese examples are out of scope, the renderer draws CJK as placeholders. The capture script writes the bytes per document, command set and width, and writes the SVG of the same document for the contact sheet. The parity test extends to these: the same document in every language must render the same paper, with the profile normalised as `test/parity.js` does it, and with an exception list where receiptline itself emits different content per language, each entry with its reason.
+2. **python-escpos** (MIT, Python). The widest command usage: `ESC !` print modes, tabs and absolute positions, its three image implementations `bitImageRaster`, `bitImageColumn` and `graphics`, codepage switching through its magic encode, barcodes and QR codes. Its `Dummy` printer collects the bytes of a script without a device, so the capture is a throwaway virtual environment, one script per example, the exact commands in the provenance. The examples are the scripts of its `examples` directory that run without hardware or network.
+3. **escpos-php** (MIT, PHP). Its example receipts: the demo, the receipt with a logo, the character encodings, the bit image and graphics examples, the barcode and QR code examples. Captured through its `FilePrintConnector` where PHP is available, otherwise from the streams its tests carry.
+4. **ESCPOS_NET** (MIT, .NET). Its tests hold literal byte arrays; those are taken as they are, without running anything, and the provenance names the test file and the test.
+5. **react-thermal-printer** and **node-escpos** (MIT, Node), for their examples. `render()` of the first returns the bytes; the second needs an adapter that collects them.
+
+Deliverables:
+
+- The directory layout, the provenance format, the capture scripts for the Node libraries and the fixture test in `test/external.js`.
+- The receiptline and python-escpos sets captured, reviewed and frozen. The other three libraries follow in the same section when they cost less than a day together, and in a follow-up section otherwise; nothing above changes for that.
+- `npm run contact-sheet`.
+- A "Seen in the wild" note in `commands-esc-pos.md` and `commands-star-prnt.md` on every command an external fixture exercises, naming the library, so that the pages say which commands are covered by real producers.
+- A summary in the notes of this section: per library how many fixtures, how many unknown items in total and which commands they are, as the input for deciding what to support next.
+
+Acceptance:
+
+- At least the receiptline and python-escpos sets are captured, reviewed and frozen, and every fixture passes all three checks.
+- The parity test holds over the receiptline fixtures, with its exceptions listed with reasons.
+- `npm test` passes without the contact sheet, and the contact sheet builds and shows every external fixture with its provenance.
+- No `unknown` count in the provenance disagrees with `items.json`, and the notes say what every unknown item is.
+- Version stays 0.3.0.
+
+Effort: 3 to 4 days.
+
+Open decisions:
+
+- **Which receiptline command sets and widths.** The recommendation: all twenty one documents through `escpos` and `starsbcs` at 48 columns, which gives the parity pairs, and a subset of five documents, the two receipts, the guest check, the column border and the text decoration example, through `generic`, `starlinesbcs` and `stargraphic` and at 32 columns. That is 42 plus 40 fixtures. Every document through every set at both widths would be 252, more than an eye review can carry.
+- **Which encoding for the receiptline capture.** `cp437` for the English documents, plus one document with `multilingual`, so that the codepage switching is exercised.
+- **How many python-escpos examples.** The recommendation: every script of its `examples` directory that runs against the `Dummy` printer without hardware or network, which is about eight, and none of the byte strings of its unit tests, which are single commands rather than receipts.
+- **Whether receiptline's SVG previews are committed.** The recommendation: no, they are what the contact sheet regenerates, and `notes` records that the review used them.
+
+<br>
+
+## Section 17: the display list
+
+The painter does two things at once: it lays out cells, lines, blocks and margins, and it rasterizes them into a row buffer, tracks blank rows and cuts image items from it. This section splits the two. A layout engine produces a display list of positioned operations, and back-ends consume it. The bitmap painter becomes the first back-end and must produce byte-identical output: every fixture unchanged. The display list is exposed as a public output next to the item stream, `renderer.layout(bytes)`, and it is what the SVG and PDF packages of sections 18 and 19 consume. The generate step additionally emits the glyph outlines those packages draw text with, kept out of the main bundle.
+
+The parsers do not change. They call the painter interface of this document, and the layout engine implements it.
+
+### The display list
+
+```js
+{
+  version: 1,
+  language: 'esc-pos',
+  width: 576,           // the paper in dots
+  height: 1412,         // total height in dots, from the first row to the last
+  dpi: 203,
+  operations: [ ... ]
+}
+```
+
+Coordinates and units. Everything is in dots, as integers. The origin is the top left corner of the paper, `x` runs to the right from the left edge of the paper and `y` runs down from the first row. Margins, alignment, the print area and the character spacing are already applied: the `x` of an operation is where its ink lands. `dpi` is the resolution of the profile, 203 for both built in profiles, so that a back-end can convert to physical units: one dot is `25.4 / dpi` millimetres and `72 / dpi` points. `height` is the height of the paper as `stitch()` would produce it, the feeds included.
+
+Operations:
+
+| Type | Fields | Meaning |
+|---|---|---|
+| `line` | `y`, `height` | The start of a line box: a text line, or a block on a line of its own. Everything that follows up to the next `line` belongs to it. |
+| `text` | `x`, `y`, `width`, `height`, `codepoint`, `font`, `cell`, `glyph`, `scale`, `style`, `rotated` | One cell of text. |
+| `rect` | `x`, `y`, `width`, `height` | A filled black rectangle. The bars of a barcode, the modules of a QR code, a PDF417 symbol and a DataBar. |
+| `image` | `x`, `y`, `width`, `height`, `data` | A 1-bit bitmap in the format of the output contract, at paper resolution. |
+| `feed` | `y`, `height` | Rows the stream advanced without printing on them. |
+| `cut` | `y`, `value` | The paper is cut between row `y - 1` and row `y`. `full` or `partial`. |
+| `pulse` | `y`, `device`, `on`, `off` | The drawer opens when the paper is at row `y`. |
+| `unknown` | `y`, `data` | A command that was not understood, with its bytes. |
+
+Text. `codepoint` is the Unicode code point the parser decoded, U+FFFD for a byte the codepage does not map and for the placeholder cells of multibyte text. `font` is `A` or `B`. `cell` is the unscaled cell of the profile, `{width: 12, height: 24}` for font A, `{width: 9, height: 17}` or `{width: 9, height: 24}` for font B, and `glyph` is the unscaled glyph box centred in it, `{width: 12, height: 24}` or `{width: 8, height: 16}`. `scale` is `{x, y}`, 1 to 8, and `width` and `height` are the cell times the scale, so a back-end that only wants boxes needs nothing else. `style` is `{bold, underline, upperline, invert}`: `bold` a boolean, drawn as the glyph twice with a horizontal offset of one glyph dot, which is `scale.x` paper dots; `underline` and `upperline` 0, 1 or 2, the thickness in dots of a line along the bottom or the top of the scaled cell, across the whole cell width; `invert` a boolean, the cell black and the glyph white, and an inverted cell is not underlined, which is the rule of section 1. The code points U+2500 to U+259F are drawn to the edges of the cell instead of inside the glyph box, as the bitmap font stretches them. Every text operation carries its whole style; there are no state changes in the list, so a consumer never has to track anything, and a consumer that wants runs merges neighbouring cells itself.
+
+Rotation. `rotated` is true on the cells of a line that was committed upside down. The box of such a cell is already where the rotation puts it, mirrored over the width of the paper, and the cell is drawn turned by 180 degrees about the centre of its own box; the two together are exactly the rotation of the line. A rectangle rotated by 180 degrees is the same rectangle, and the data of an image operation is rotated by the engine, so only text carries the flag.
+
+Blocks. A barcode is the `rect` of every bar, over the full height of the bars, and the `text` cells of its human readable text. A QR code, a PDF417 symbol and a DataBar are `rect` operations with adjacent black modules of a row merged into one rectangle. Raster and column images, the graphics of section 13 and the kept images are `image` operations with the scaling of their command already applied, one dot on one dot; a strip of a column mode image is an `image` inside the text line it sits in. The Star raster mode produces one `image` per flushed buffer. The data of an image operation is a copy the layout owns, never a view on the bytes of the stream.
+
+Feeds. A `feed` marks rows the stream advanced without printing: an empty line, the feed of `ESC J` and `ESC d` beyond the height of the line, a raster move. The gap the line spacing leaves below a line is not a feed, it belongs to the line. The marker draws nothing; the `y` of everything behind it already accounts for the rows. The bitmap back-end does not read it: its feed items come from the blank rows it rasterizes, under the `feedThreshold` rule, exactly as today.
+
+Ordering. The operations are in paper order, the order a printer prints them: the `y` of the line boxes and of the markers never decreases, the operations of a line come after its `line` operation and before the next one, and within a line they are in the order the cells were placed, which is the order a later cell overprints an earlier one when the cursor moved back. A marker stands at the `y` the paper has when its command arrives, so a cut after the last line stands at `height`. An operation never refers to a later one, so a consumer can stream.
+
+Filtering. The display list is not filtered by the `commands` option: every cut, pulse, feed and unknown command is in it. `commands` decides what reaches the item stream, and nothing else.
+
+Versioning. `version` is an integer, 1 for this section. A field or an operation type that is added does not change it, and a consumer ignores fields and types it does not know. A change in the meaning of an existing field changes it. The format packages check the version and throw on one they do not know, and `documentation/display-list.md` is the reference page, with the same status column the command references have.
+
+### The engine and the back-ends
+
+```js
+renderer.layout(bytes) → Layout                  // on ReceiptPrinterRenderer and on both renderers
+renderer.render(bytes) → RenderItem[]            // unchanged, the engine streaming into the bitmap back-end
+rasterize(layout, options) → RenderItem[]        // named export and static; options: commands, maxHeight, feedThreshold
+```
+
+`src/layout.js` is the engine. It implements every method of the painter interface and keeps every piece of printer state the painter keeps today, the kept images included, since those are the memory of the printer. It knows the cell sizes of the profile and nothing about glyphs: wrapping, tabs, margins and alignment need widths, not dots, so the engine has no font at all. It emits operations to a sink as lines are committed, so a line is final when it is emitted and `write()` and `end()` stay possible without a redesign.
+
+`src/backends/bitmap.js` is the bitmap back-end, the rasterizing half of today's painter: the row buffer, the cells drawn from the packed font with the cache, the blank runs, the `maxHeight` splitting, the fallback table and the flush on a supported command. `render()` feeds the engine into it directly, so the memory profile of a render is what it is today, rows packed as they are committed and never the whole list in memory. `rasterize()` feeds a finished list through the same back-end, which is how the tests prove the two paths equal. `src/painter.js` goes away, and `test/painter.js` splits along the same line.
+
+### Outlines
+
+`tools/generate.js` also writes `generated/outlines.js`: for every code point of `tools/codepoints.js` the outline of its glyph as compact path data, from the same subset font and the same fitting rule as the bitmaps, the advance scaled to the 12 dot cell and the baseline on row 18, so that an outline sits exactly over its bitmap. There is one set, in the 12 by 24 cell in dot units; font B is the same outline scaled by two thirds into its 8 by 16 glyph box, which is how its bitmap is made. The box drawing and block characters are not in the face, they are drawn on the dot grid by `tools/box-drawing.js`, so the tool emits them as the rectangles it draws, for each of the three cells, 12 by 24, 9 by 17 and 9 by 24. The format:
+
+```js
+{
+  version: 1,
+  cell: {width: 12, height: 24},
+  baseline: 18,
+  glyphs: {65: 'M1.2 18L5.4 3.1 ...Z', ...},    // SVG path syntax, absolute commands, tenths of a dot
+  box: {'12x24': {9472: 'M0 11h12v2H0Z', ...}, '9x17': {...}, '9x24': {...}},
+  fallback: 65533,
+}
+```
+
+Only the outlines reach the format packages; the main bundle of the renderer does not contain them. Where they are published is an open decision below.
+
+Deliverables:
+
+- `src/layout.js`, `src/backends/bitmap.js`, the typedefs of the display list in `src/types.js`, `layout()` on the three classes, `rasterize()` as a named export and a static, and the removal of `src/painter.js`.
+- `generated/outlines.js` from `tools/generate.js`, and the packaging of it that the open decision picks.
+- `test/layout.js`: for every fixture of both languages and of the raw and external directories, the list is in paper order, every operation lies inside the paper, `height` equals the height of the stitched paper, and the markers are the items of `items.json` at the right rows. For the `text`, `styles`, `sizes`, `fonts`, `alignment`, `upside-down`, `margins` and `tabs` fixtures the cells are checked for their `x`, `y`, `font`, `scale` and `style` against numbers written out in the test. For the barcode, QR code, PDF417, DataBar and image fixtures the rectangles and images are checked against the bitmaps the symbologies produce.
+- `test/rasterize.js`: for every fixture, `rasterize(layout(bytes), options)` deep equals `render(bytes)`, items and image bytes, for the default options, with `feed` and a low threshold, and with `maxHeight`.
+- `test/outlines.js`: every code point of the codepoints list has an outline, the box drawing set covers all 75 code points for the three cells, every path parses, and for a sample of glyphs the outline filled at one dot per unit with the 0.45 coverage rule of the generator gives the bitmap glyph.
+- Golden layouts for three fixtures, `receipt`, `upside-down` and `graphics-raster` in ESC/POS, as `<name>.layout.json` next to the fixture with image data in base64, to freeze the format.
+- `documentation/display-list.md`, a section in `usage.md`, the architecture and the file tree of `design.md`, and the TypeScript smoke test extended with `layout()`, the `Layout` type and `rasterize()`.
+
+Acceptance:
+
+- Every `.pbm` and `.items.json` of the repository is unchanged, byte for byte, and `npm test`, `npm run build`, `npm run test:types` and `npm run test:umd` pass.
+- `render()` and `rasterize(layout())` agree on every fixture under every option combination the test lists.
+- The parity test and the external fixtures of section 16 are untouched.
+- The minified UMD bundle grows by no more than a few kilobytes, and `test:umd` asserts the outlines are not in it.
+- The bug-check reads the display list of the `receipt` fixture by hand against its paper: every line, cell, bar and marker where the paper has it.
+- Version 0.4.0.
+
+Effort: 4 to 5 days.
+
+Open decisions:
+
+- **Where the outlines are published.** Either a sub-entry of this package, `@point-of-sale/receipt-printer-renderer/outlines`, built by rollup as its own ESM and CJS output with the `exports` map pointing at it, which the format packages take as a peer dependency, or a copy inside each format package, generated by this repository and committed there. The recommendation is the sub-entry: the subset font and the fitting rule live here, both packages need identical data, and a font change is then one regenerate instead of three commits. The size is about 150 kB of source and 40 kB gzipped, none of it in the main bundle either way.
+- **The `line` operation.** It is what lets the PDF writer break pages between lines and lets a consumer group a line, at the cost of one operation per line. Keep it, or drop it and let consumers group by `y`.
+- **Path precision.** Tenths of a dot, as above, or whole dots, which is smaller and coarser than the bitmaps were rasterized from.
+- **The name.** `layout()` for the method and `Layout` for the type, or `display()` and `DisplayList`, which is what this document calls the concept.
+- **A `character` field.** Whether a text operation carries the character as a string next to `codepoint`, for consumers that build text runs.
+
+<br>
+
+## Section 18: SVG
+
+A separate package in the ecosystem that turns a display list into an SVG document: paths for text from the generated outlines, rectangles for bars and modules, an embedded PNG for every image, one document per receipt at dot size with a `viewBox`, cut markers optional. It consumes the display list of section 17 and nothing else of the renderer, so it has no runtime dependency apart from the outlines.
+
+Contract:
+
+```js
+import { toSvg } from '@point-of-sale/receipt-printer-svg';
+
+const svg = toSvg(layout, {
+  units: 'dots',        // 'dots', 'mm', 'pt' or 'px' for the width and height attributes; the viewBox is always dots
+  cutMarker: false,     // a dashed line at every cut
+  background: '#fff',   // or null for a transparent paper
+  ink: '#000',
+});
+```
+
+`toSvg()` is synchronous and returns a string. The document is `<svg xmlns="http://www.w3.org/2000/svg" width height viewBox="0 0 W H">` with `W` and `H` from the layout, a background rectangle unless `background` is null, a `<defs>` with one `<path id="g-A-41">` per distinct glyph the receipt uses, and one `<g>` per `line` operation holding its operations in order:
+
+- A text cell is a `<use href="#g-A-41" transform="translate(x y) scale(sx sy)">`, with a second `<use>` one glyph dot to the right for bold, a `<rect>` of the underline or upperline thickness across the scaled cell, and for an inverted cell a black `<rect>` of the cell first and the glyph in the background colour. Font B uses the same path under a scale of two thirds, translated to the centre of its cell. A rotated cell gets `rotate(180 cx cy)` about the centre of its box. A box drawing code point uses the path of its cell size from the `box` set.
+- A `rect` is a `<rect>` with `shape-rendering="crispEdges"`, so that a bar on integer coordinates stays a bar at every zoom.
+- An `image` is an `<image x y width height href="data:image/png;base64,...">` with `image-rendering: pixelated`, the PNG written by the package itself with stored deflate blocks, so that the helper needs no `CompressionStream` and stays synchronous. A logo is a few kilobytes larger than compressed, which does not matter in a document that is text.
+- A `cut` is a dashed `<line>` across the paper when `cutMarker` is on, nothing otherwise. `pulse`, `feed` and `unknown` produce nothing.
+
+Deliverables:
+
+- The package, `ReceiptPrinterSvg` on GitHub, `@point-of-sale/receipt-printer-svg` on npm, version 1.0.0, scaffolded per the rules of this block, with `toSvg()` as the default and a named export and the options typedef in `src/types.js`.
+- The PNG writer with stored blocks and its CRC, and a check in the tests that `node:zlib` inflates its output to the rows of the bitmap.
+- `test/tools/make-fixtures.js` of the package: the receipts of this repository are not published, so the script encodes receipts of its own with ReceiptPrinterEncoder and lays them out with ReceiptPrinterRenderer, both dev dependencies, and freezes `test/fixtures/<name>.svg`. The receipts cover text in both fonts and every style, sizes, alignment, a table, a box, a rule, a barcode with its text, a QR code, a PDF417 symbol, an image, an upside down line, a cut and a pulse.
+- A README that documents the options, the structure of the document, the glyph reuse and the version of the display list it accepts, and shows the encoder, renderer and this package together in ten lines.
+
+Fixtures and tests:
+
+- The golden SVG files, reviewed by eye in a browser before they are frozen, with a screenshot next to the bitmap preview of the same receipt, as section 5 checked its example.
+- `test/svg.js`: every fixture equals its golden file; the document is well formed, checked with a small XML parser that is a dev dependency; a layout with a version the package does not know throws; the counts of `<use>`, `<rect>` and `<image>` elements of a hand built layout match its operations; the bold, underline, invert and rotation cases are checked element by element.
+- The rasterized check, if the open decision takes it: every fixture rendered at one dot per unit with a rasterizer and compared with the bitmap of the renderer, the rectangles and images dot for dot and the text within a tolerance, since an outline filled by a rasterizer and a bitmap made with the 0.45 coverage rule differ at the edges of a stroke.
+
+Acceptance:
+
+- Every fixture opens in a browser and reads as the receipt the bitmap preview shows, checked by the implementer with a headless browser screenshot and by the reviewer.
+- The SVG of the full receipt is under 60 kB with its glyph definitions, and a receipt of text only is under 20 kB.
+- `npm test`, `npm run build` and `npm run test:types` pass, and the UMD build exposes the function as its global.
+
+Effort: 2 to 3 days.
+
+Open decisions:
+
+- **The package name.** `receipt-printer-svg` keeps the `receipt-printer` prefix of the encoder and the renderer; `receipt-svg-renderer` says what it does. The same choice applies to section 19.
+- **Where the outlines come from**, the decision of section 17: a peer dependency on the renderer's sub-entry, or a copy inside this package.
+- **The rasterized check.** `@resvg/resvg-wasm` renders SVG in Node without a native module and would compare the vector output with the bitmap fixtures; it is a wasm dev dependency of a few megabytes and its tolerance for text has to be settled by trying. Without it the tests are structural only.
+- **Physical units.** Whether `units` defaults to `dots`, which gives a document of `576` by `1412` user units, or to `mm`, which gives a paper of the size it is.
+- **Per-line groups.** Whether every line becomes a `<g>`, which doubles as documentation of the layout, or the operations are written flat, which is smaller.
+
+<br>
+
+## Section 19: PDF
+
+A separate package with a minimal PDF writer: objects, a cross reference table, one content stream per page with path operators, image XObjects for bitmaps, deflate through `CompressionStream`, and a page the size of the receipt by default with an option for a standard page. Text is drawn as paths from the outlines in this version; embedding the subset font as TrueType, so that the text of a receipt can be selected and searched, is a later refinement and not part of this section. It consumes the display list and nothing else of the renderer.
+
+Contract:
+
+```js
+import { toPdf } from '@point-of-sale/receipt-printer-pdf';
+
+const pdf = await toPdf(layout, {
+  page: 'receipt',      // 'receipt', 'a4', 'letter' or {width, height} in points
+  margin: 36,           // points around the receipt on a standard page
+  align: 'center',      // where the receipt sits on a standard page, 'left', 'center' or 'right'
+  cutMarker: false,
+  title: undefined,     // the /Title of the document information dictionary
+});
+```
+
+`toPdf()` is asynchronous, because the content streams and the images are deflated with `CompressionStream`, the way `toPng()` of the renderer is, and it returns a `Uint8Array`. The file is `%PDF-1.4`, the binary comment line, the catalog, the page tree, one page object per page with its content stream and resources, one form XObject per distinct glyph, one image XObject per image, the document information dictionary, the cross reference table with its ten digit offsets, the trailer, `startxref` and `%%EOF`. Nothing else: no fonts, no encryption, no incremental updates, no object streams.
+
+Coordinates. PDF user space is points with the origin at the bottom left. Every page starts with a `cm` that scales dots to points, `72 / dpi`, and flips the vertical axis, so that the operations are written in the dot coordinates of the display list and the numbers stay integers. Text cells are the glyph form XObjects invoked with `Do` under a `cm` of the scale and the position, bold a second `Do` one glyph dot to the right, underline, upperline and the box of an inverted cell `re f`, an inverted glyph filled with `1 g`, a rotated cell a `cm` that turns it about the centre of its box. A `rect` is `re f`. An `image` is an image XObject with `/ImageMask true`, `/BitsPerComponent 1` and `/Decode [1 0]`, so that a set bit paints with the fill colour, placed with a `cm` of its size and position. A `cut` is a dashed line when `cutMarker` is on. `pulse`, `feed` and `unknown` produce nothing.
+
+Pages. With `page: 'receipt'` the MediaBox is the width and the height of the layout in points and the document has one page. With a standard page the receipt sits `margin` points from the top, aligned as `align` says, and a receipt that is longer than the page continues on the next one: the break falls between two `line` operations, and a single line box taller than a page, which only an image can be, is drawn on both pages under a clip rectangle. Nothing is scaled.
+
+Deliverables:
+
+- The package, `ReceiptPrinterPdf` on GitHub, `@point-of-sale/receipt-printer-pdf`, version 1.0.0, per the rules of this block, `toPdf()` as the default and a named export, the options typedef in `src/types.js`.
+- The writer as a module of its own inside the package, `src/writer.js`, with objects, streams, the cross reference table and the trailer, so that the document assembly reads as what it is; it is not exported.
+- The fixture script as in section 18, freezing `test/fixtures/<name>.pdf` for the same receipts, plus a long receipt on A4 with a page break and the same receipt with a tall image across the break.
+- A README that documents the options, the page rules, the structure of the file, the display list version it accepts, and that text is not selectable in this version.
+
+Fixtures and tests:
+
+- The golden PDF files, reviewed by eye in Preview and in a browser before they are frozen: the receipt, the page break and the clipped image.
+- `test/pdf.js`: every fixture equals its golden file byte for byte, which needs the output to be deterministic, so the writer uses no dates and no random ids; every offset of the cross reference table points at `n 0 obj` and `/Size` is right; every stream inflates with `node:zlib` and the content stream holds the operators the test expects for a hand built layout; the data of an image XObject inflates to the rows of the bitmap; the page count and the MediaBox for every `page` option; a layout with an unknown version throws.
+- `pdfjs-dist`, a dev dependency, loads every fixture and walks the operator list of every page, which works in Node without a canvas: the number of path fills and image draws matches the operations of the layout.
+- `npm run check:qpdf` runs `qpdf --check` over the fixtures when the tool is installed, outside `npm test`.
+
+Acceptance:
+
+- Every fixture opens without a warning in Preview, in Chrome and in pdf.js, and the receipt reads as the bitmap preview shows it.
+- The PDF of the full receipt is under 50 kB.
+- A receipt of two thousand rows on A4 breaks between lines and loses nothing, checked by the reviewer against the SVG of the same layout.
+- `npm test`, `npm run build` and `npm run test:types` pass.
+
+Effort: 3 to 4 days.
+
+Open decisions:
+
+- **The package name**, as in section 18.
+- **Where the outlines come from**, the decision of section 17.
+- **Long receipts on a standard page.** Break between lines and continue on the next page, as above, or scale the receipt down to fit one page. The recommendation is to break; a receipt is read at its size.
+- **The default margin and placement** on a standard page: 36 points and centred, or at the left.
+- **The PDF version.** 1.4 uses nothing the file does not need; 1.7 is what tools expect to see today. The content is the same.
+
+<br>
+
+## Section 20: receipt markup
+
+A separate package with two parsers, one for the receiptline language and one for a subset of GitHub Flavored Markdown, both producing the same intermediate block structure, and one translator that maps that structure onto calls on ReceiptPrinterEncoder. The package drives an encoder instance the application constructs, so the language, the printer model, the columns and the codepage mapping stay the application's choice, and it returns the bytes the encoder produces. The renderer is what tests it: the same document through this package and through receiptline itself, both rendered, and the images compared. The package is named for the format, not for the receiptline project, and its README says that it implements the receiptline language and credits the project.
+
+Contract, the API:
+
+```js
+import ReceiptMarkupEncoder from '@point-of-sale/receipt-markup-encoder';
+import ReceiptPrinterEncoder from '@point-of-sale/receipt-printer-encoder';
+
+const encoder = new ReceiptPrinterEncoder({ language: 'esc-pos', printerModel: 'epson-tm-t88vi' });
+const markup = new ReceiptMarkupEncoder({ language: 'receiptline', encoder });
+
+const bytes = await markup.encode(document);
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `language` | required | `receiptline` or `markdown`. `ReceiptMarkupEncoder.languages` lists both. |
+| `encoder` | required for `encode()` | The ReceiptPrinterEncoder instance the calls go to. Its `columns` decide the widths. |
+| `cut` | `partial` | What a cut in the document becomes, `full`, `partial` or `false` to leave cuts out, which is receiptline's `cutting: false`. |
+| `codepage` | `auto` | The codepage the translator selects at the start of a document, or `false` to leave the codepage to the application. |
+| `images` | none | An async function from an image source to something `encoder.image()` accepts, for Markdown images whose source is not a data URL. |
+| `dithering` | `threshold` | The algorithm for images, one of the encoder's. |
+
+`encode(document)` returns a promise of the bytes, because images have to be decoded first. `parse(document)` returns the block structure synchronously and is what the playground will use for a preview, and `ReceiptMarkupEncoder.translate(blocks, encoder)` is the translator on its own, so an application can build blocks itself. A base64 PNG, the form receiptline carries images in, is decoded by the package's own decoder: non interlaced, 1 and 8 bit greyscale, RGB, RGBA and palette, inflated with `DecompressionStream`; anything else throws with a message that says so, and receiptline recommends monochrome images with critical chunks only for the same reason. Each call to `encode()` starts with `encoder.initialize()`, so a document is a receipt.
+
+Contract, the block structure. Both parsers produce it, the translator does not know which language a block came from, and it is the typedef set of `src/types.js`:
+
+```js
+Document = Block[]
+
+Block =
+  { type: 'paragraph', align, lines: Inline[][] }              // one entry per line, a hard break starts a new one
+  { type: 'heading', level, inlines: Inline[] }                 // 1 to 6
+  { type: 'table', columns: Column[], rows: Inline[][][], border }   // border 'none', 'space' or 'line'
+  { type: 'list', ordered, start, items: Inline[][] }
+  { type: 'rule', style }                                       // 'single' or 'double'
+  { type: 'cut', value }                                        // 'full' or 'partial'
+  { type: 'pulse', device, on, off }
+  { type: 'barcode', data, symbology, width, height, text, align }
+  { type: 'qrcode', data, size, errorlevel, model, align }
+  { type: 'pdf417', data, columns, rows, errorlevel, width, height, truncated, align }
+  { type: 'image', png, src, align, width }                      // png a Uint8Array, or src a string for the images option
+  { type: 'blank', count }
+  { type: 'raw', data }                                         // a Uint8Array, language specific, the author's responsibility
+
+Column = { width, align, wrap }              // width a number of characters or 'auto', align 'left', 'center' or 'right'
+Inline = { type: 'text', value, style } | { type: 'break' }
+Style  = { bold, italic, underline, invert, font, width, height }   // resolved per run, no nesting; font 'A' or 'B', sizes 1 to 8
+```
+
+The translator maps blocks onto the encoder in one pass: a paragraph is `text()` per run with the style set around it through `bold()`, `italic()`, `underline()`, `invert()`, `font()` and `size()`, `align()` around the block and `newline()` per line; a heading of level one is the paragraph at `size(2, 2)` in bold, of level two in bold, and of level three and below plain; a table is `table()` with the column widths and alignments, `overflow: 'clip'` for a column that does not wrap, and a bordered table gets a one character column holding U+2502 between its columns and the same at both edges; a list is a paragraph per item with the marker in front, `-` for an unordered item and the number for an ordered one; a rule is `rule()`; cut, pulse, barcode, qrcode, pdf417, image and raw are the encoder commands of the same name; a blank is `newline(count)`. Every encoder call the translator makes is one the encoder documents, so the mapping table in the README is also the list of what the package needs from the encoder.
+
+The receiptline language, and what it maps to:
+
+| receiptline | Block | Notes |
+|---|---|---|
+| a line of text | `paragraph` | Alignment from the spaces around the pipes: `\| text \|` centred, `\| text` left, `text \|` right, a bare line left. |
+| `a \| b \| c` | `table`, one row | Consecutive column lines with the same number of columns and the same properties form one table. Widths from `width`, `auto` and `*` are fill columns, a number is characters; a set of widths that does not fit is reduced the way receiptline reduces it, the widest first, so that `table()` never throws. |
+| `{width: ...; align: ...; border: ...; text: ...}` | properties of the table or the block | `border: line` or `2` is a bordered table, `space` or `1` one space between columns, `none` or `0` no gap. `text: nowrap` is a column that does not wrap. A property block is valid on a single column line only, as in receiptline. |
+| `-` | `rule`, single | Only the last character of a run counts, as receiptline reads it. |
+| `=` | `cut` | The `cut` option decides the type and whether it is emitted. |
+| `_`, `"`, `` ` `` | underline, bold, invert toggled in the style | Toggles that hold until the same marker or the end of the line, which is how receiptline reads them. |
+| `^` to `^^^^^^^` | width and height of the style | The mapping of receiptline: one is double width, two double height, three is 2 by 2, and each further caret one more, up to 6 by 6; the same count again returns to normal. Above the size a language allows, StarPRNT stops at 6, the encoder clips. |
+| `~`, `\`, `\n`, `\xnn` | text | A space, the escapes, a hard break, and a character by its code. |
+| `{image: base64}` | `image` | Decoded from the PNG, printed at its own size, aligned as `align` says, centred by default. |
+| `{code: data; option: ...}` | `barcode` or `qrcode` | `upc` is UPC-A or UPC-E by length, `ean` and `jan` EAN-13 or EAN-8 by length, `code39`, `itf`, `codabar` and `nw7`, `code93`, `code128`; the module width 2 to 4 becomes the encoder's width 1 to 3, the height in dots is the height, `hri` and `nohri` are `text`. `qrcode` with a cell size of 3 to 8 is `size` and `l`, `m`, `q`, `h` the error level. The defaults are receiptline's, `code128 2 72 nohri 3 l`. |
+| `{command: ...}` | `raw` | The text with its escapes decoded, passed to `raw()`. It is language specific in receiptline as well. |
+| `{comment: ...}` | nothing | |
+| `cpl` of the printer object | the columns of the encoder | The application's, through the encoder it constructs. |
+| `encoding` | `codepage` | `multilingual` is `auto`, a named codepage is that codepage. |
+| `gradient`, `threshold` | `dithering` and the threshold of `image()` | `gradient: true` is `floydsteinberg`, `false` is `threshold` with the value. |
+| `cutting: false` | `cut: false` | |
+
+What cannot be mapped, and is listed as such in the README: the vertical rule junctions of a bordered table, `vrhr` in receiptline, where a rule inside a bordered table meets the borders, which the encoder's `rule()` cannot draw, so the rule is a plain one; `upsideDown`, `spacing`, `margin` and `marginRight`, which are printer settings the encoder has no command for; `gamma`, which the encoder's dithering has no parameter for; the `width` property on an image or a code line, which reserves space in receiptline and does nothing here, an image prints at its own size and is scaled down by the encoder when it is wider than the paper; and the `command` property of a document written for another command set than the encoder's language, which is passed through as it is.
+
+The Markdown subset, GFM, and what it maps to:
+
+| Markdown | Block | Notes |
+|---|---|---|
+| `#`, `##`, `###` and deeper | `heading` | Level one prints at double size in bold, level two in bold, three and deeper plain. |
+| a paragraph | `paragraph` | Lines joined and wrapped by the encoder; a blank line between paragraphs is a `blank`. |
+| a hard break, two spaces or a backslash | `break` | |
+| `*text*`, `_text_` | italic | Which most printers do not print, as the encoder's documentation says. |
+| `**text**` | bold | |
+| `__text__` | underline | A deviation from GFM, where it is strong; a receipt needs an underline more than a second way to write bold. |
+| `` `code` `` | font B | |
+| a pipe table | `table` | Alignment from the colons of the delimiter row, widths from the content and the paper, see the open decision. |
+| `---`, `***`, `___` | `rule` | Single. |
+| `![alt](src)` | `image` | A `data:image/png;base64,` source is decoded by the package, any other source goes through the `images` option and throws without it. |
+| `-`, `*`, `+` items and `1.` items | `list` | Nested lists are flattened with two spaces of indent per level. |
+| ```` ```qrcode ````, ```` ```barcode ````, ```` ```pdf417 ````, ```` ```cut ````, ```` ```pulse ````, ```` ```raw ```` | the block of the same name | The extension for receipt only features. The tag is the first word of the info string, the options follow as `key=value` pairs, and the body is the data; for `raw` the body is hexadecimal. A fence with any other tag, or none, prints as font B text. |
+| block quotes, HTML, links, autolinks, strikethrough, task lists, footnotes | not supported | A link prints its text, a block quote its content, HTML is dropped. The README lists these. |
+
+Compatibility tests, through the renderer:
+
+- `test/documents/<name>.receipt`, documents written for this package, one per row of the receiptline table above and a few whole receipts, and `test/documents/<name>.md` for the Markdown rows. The receiptline examples are not copied, for the reasons of section 16; if the open decision takes them, they are read from the receiptline dev dependency at test time.
+- For every `.receipt` document, two paths: through this package into an encoder for `esc-pos` at 48 columns, and through `receiptline.transform(document, {command: 'escpos', cpl: 48, encoding: 'cp437'})`, both rendered by ReceiptPrinterRenderer with the `epson` mapping. The comparison is on ink bands: each paper is cut into bands of consecutive rows with ink, separated by blank rows, both must have the same number of bands, and each pair of bands must be identical dot for dot. The blank rows between bands are not compared, because the two producers do not use the same line spacing, and the cuts are compared as items. A document that cannot match, because the mapping table says the feature differs, is in an exception list at the top of the test with its reason, the way `test/parity.js` does it.
+- The encoder and the renderer are dev dependencies; every document is also encoded for `star-prnt` and `star-line` and rendered, without a comparison, so that a document never throws in a language.
+
+Fixtures and tests:
+
+- `test/fixtures/<name>.blocks.json`, the block structure of every document, golden, reviewed by reading it; the parser tests compare against it.
+- `test/fixtures/<name>.pbm`, the paper of every document through this package, the encoder and the renderer, golden and reviewed as ASCII art, for the Markdown documents and for the receiptline documents alike.
+- `test/receiptline.js` for the parser, the escapes, the toggles, the caret sizes, the property blocks and the width reduction; `test/markdown.js` for the subset and for what is not supported; `test/translate.js` with a fake encoder that records its calls, so that the mapping is checked call by call; `test/compat.js` for the bands; `test/png.js` for the decoder against `node:zlib` and a set of small PNGs of every colour type it accepts.
+
+Deliverables:
+
+- The package, version 1.0.0, per the rules of this block, with `ReceiptMarkupEncoder` as the default export and the UMD global, `parse()`, `encode()`, the static `translate()` and `languages`, the typedefs of the block structure and the options in `src/types.js`.
+- The two parsers, the translator and the PNG decoder as modules of their own.
+- A README that documents the API, both languages with the two mapping tables above, the list of what cannot be mapped, the fence extension, and that the receiptline language is the work of the receiptline project, with a link.
+- A mention in the README of the playground that a markup input mode is planned; the playground itself is not part of this section.
+
+Acceptance:
+
+- Every row of both mapping tables has a document, and the compatibility test passes for every receiptline document, the exceptions listed with reasons and none of them a text feature.
+- The receipt of receiptline's README, written into `test/documents`, renders through both paths to the same bands.
+- Every document encodes in all three languages without throwing.
+- The Markdown fixtures are reviewed as ASCII art: the heading sizes, the styles, the table columns aligned as the colons say, the list markers, the rule, the image, the QR code and the barcode of the fence extension.
+- `npm test`, `npm run build` and `npm run test:types` pass in the package.
+
+Effort: 6 to 8 days. If that is too long for one round of the working method, the section splits in two: 20a is the block structure, the Markdown parser, the translator and the PNG decoder, with the Markdown fixtures; 20b is the receiptline parser and the compatibility tests. Nothing above changes for the split.
+
+Open decisions:
+
+- **The table width heuristic** for a pipe table, which carries no widths. The recommendation: every column gets the width of its longest cell in characters, with one space between columns; when that does not fit in the columns of the encoder, the column with the longest cells becomes a fill column and wraps; when even that does not fit, because the other columns alone are too wide, the widths are scaled down proportionally with at least one character each. A column whose cells are all numbers is right aligned when the delimiter row does not say.
+- **The fence tags and their syntax.** The recommendation above: `qrcode`, `barcode`, `pdf417`, `cut`, `pulse` and `raw`, options as `key=value` on the info string, the data in the body. The alternative is options as `key: value` lines in the body, which is what receiptline does with its property block.
+- **The package name.** `ReceiptMarkupEncoder`, `@point-of-sale/receipt-markup-encoder`, follows the `*Encoder` names of the ecosystem, since it produces bytes; `ReceiptMarkup`, `@point-of-sale/receipt-markup`, is shorter and does not claim to be an encoder itself.
+- **What `=` becomes.** A partial cut, which is what receiptline's ESC/POS command set sends, or a full one; the `cut` option lets an application choose either way, this is about the default.
+- **Whether `encode()` is always asynchronous**, which is simpler, or synchronous for a document without images, which is friendlier but gives the method two return types.
+- **Whether the receiptline example documents are run through the compatibility test** from the dev dependency, in addition to the documents of this package.
+- **Whether the translator selects the codepage** with `codepage('auto')` by default, or leaves it to the application.
+
+<br>
+
 ## Notes per section
 
 Filled in during implementation.
