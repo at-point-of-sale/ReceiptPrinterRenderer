@@ -5,6 +5,7 @@ import {itf} from './itf.js';
 import {codabar} from './codabar.js';
 import {code93} from './code93.js';
 import {code128, code128auto, gs1128} from './code128.js';
+import {databarOmni, databarTruncated, databarLimited, databarExpanded} from './databar.js';
 
 /**
  * @typedef {import('./pattern.js').Barcode} Barcode
@@ -29,6 +30,10 @@ const SYMBOLOGIES = {
   'code128': code128,
   'gs1-128': gs1128,
   'code128-auto': code128auto,
+  'gs1-databar-omni': databarOmni,
+  'gs1-databar-truncated': databarTruncated,
+  'gs1-databar-limited': databarLimited,
+  'gs1-databar-expanded': databarExpanded,
 };
 
 /**

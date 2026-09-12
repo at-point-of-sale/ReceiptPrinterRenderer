@@ -761,17 +761,55 @@ describe('StarPrntRenderer', function() {
       assert.equal(dots(stitch(gs1, {width: WIDTH})), dots(stitch(known, {width: WIDTH})));
     });
 
-    it('should report the GS1 DataBar symbologies as unknown', function() {
-      const items = render(
-          stream(ESC, '@', ESC, 'b', [10, 1, 2, 40], '12345', [RS]),
-          {commands: ['unknown']},
-      );
+    /* The GS1 DataBar family, symbologies 10 to 13. The heights of the
+       specification are in modules and follow the width of a module, and
+       Truncated and Limited have a height of their own that n4 does not
+       change */
 
-      assert.equal(items.filter((item) => item.type === 'image').length, 0);
-      assert.deepEqual(
-          Array.from(items.find((item) => item.type === 'unknown').data),
-          [ESC, 0x62, 10, 1, 2, 40, 0x31, 0x32, 0x33, 0x34, 0x35, RS],
-      );
+    it('should draw a GS1 DataBar Omnidirectional of ninety six modules', function() {
+      const paper = stitch(render(stream(
+          ESC, '@', ESC, 'b', [10, 1, 2, 120], '0952123454321', [RS],
+      )), {width: WIDTH});
+
+      assert.equal(paper.height, 120);
+      assert.equal(ink(paper, 0, 120).max - ink(paper, 0, 120).min + 1, 95 * 3);
+    });
+
+    it('should give the four variants the heights of the specification', function() {
+      const height = (symbology, dots) => stitch(render(stream(
+          ESC, '@', ESC, 'b', [symbology, 1, 2, dots], '0952123454321', [RS],
+      )), {width: WIDTH}).height;
+
+      assert.equal(height(10, 20), 33 * 3);
+      assert.equal(height(10, 120), 120);
+      assert.equal(height(11, 120), 13 * 3);
+      assert.equal(height(12, 120), 10 * 3);
+    });
+
+    it('should draw a GS1 DataBar Expanded of the element string it is given', function() {
+      const paper = stitch(render(stream(
+          ESC, '@', ESC, 'b', [13, 1, 1, 60], '(01)90614141000015(3103)000123', [RS],
+      )), {width: WIDTH});
+
+      assert.equal(paper.height, 34 * 2);
+      assert.equal(ink(paper, 0, 34 * 2).max - ink(paper, 0, 34 * 2).min + 1, 149 * 2);
+    });
+
+    it('should print nothing for a GS1 DataBar the data is not valid for', function() {
+      for (const [symbology, data] of [
+        [10, '123456789012'],
+        [10, '09521234543210'],
+        [11, '09521234A4321'],
+        [12, '2952123454321'],
+        [13, '01)90614141000015'],
+      ]) {
+        const items = render(stream(
+            ESC, '@', 'A', ESC, 'b', [symbology, 1, 2, 60], data, [RS], LF,
+        ));
+
+        assert.equal(items.length, 1, `${symbology} ${data}`);
+        assert.equal(items[0].height, 32);
+      }
     });
 
     it('should draw a QR code of the size the commands ask for', function() {
@@ -1743,6 +1781,11 @@ describe('StarPrntRenderer', function() {
       ['ESC FS p', [ESC, FS, 0x70, 1]],
       ['ESC FS q without its count', [ESC, FS, 0x71]],
       ['ESC FS q with data missing', [ESC, FS, 0x71, 1, 1, 0, 1, 0, 0xff]],
+      ['ESC b 10 without its record separator', [ESC, 0x62, 10, 1, 2, 60, 0x30, 0x39]],
+      ['ESC b 11 without its record separator', [ESC, 0x62, 11, 1, 2, 60, 0x30, 0x39]],
+      ['ESC b 12 without its record separator', [ESC, 0x62, 12, 1, 2, 60, 0x30, 0x39]],
+      ['ESC b 13 without its record separator', [ESC, 0x62, 13, 1, 2, 60, 0x28, 0x30, 0x31, 0x29]],
+      ['ESC b 13 without its parameters', [ESC, 0x62, 13, 1]],
     ];
 
     for (const [name, bytes] of truncated) {

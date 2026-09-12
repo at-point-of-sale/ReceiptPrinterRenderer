@@ -691,7 +691,21 @@ class Painter {
     }
 
     const moduleWidth = Math.max(1, request.moduleWidth || 1);
-    const height = Math.max(1, request.height || 1);
+
+    /* The height of the command, unless the specification of the symbology
+       fixes the height of its symbol or gives it a least height, which the GS1
+       DataBar family does. Those heights are in modules, so they grow with the
+       width of a module, the way a printer draws them */
+
+    let height = Math.max(1, request.height || 1);
+
+    if (code.height && code.height.fixed) {
+      height = code.height.fixed * moduleWidth;
+    }
+
+    if (code.height && code.height.minimum) {
+      height = Math.max(height, code.height.minimum * moduleWidth);
+    }
 
     if (code.bars.reduce((total, width) => total + width, 0) * moduleWidth > this.#width) {
       return;

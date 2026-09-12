@@ -715,14 +715,91 @@ describe('EscPosRenderer', function() {
       assert.equal(items[0].height, 30);
     });
 
-    it('should report the GS1 DataBar symbologies as unknown', function() {
-      const items = render(barcode(GS, 'k', 75, 5, '12345'), {commands: ['unknown']});
+    /* The GS1 DataBar family, symbologies 75 to 78. The heights of the
+       specification are in modules, so they follow the width of a module of
+       GS w, and Truncated and Limited have a height of their own that GS h
+       does not change */
 
-      assert.equal(items.filter((item) => item.type === 'image').length, 0);
-      assert.deepEqual(
-          Array.from(items.find((item) => item.type === 'unknown').data),
-          [GS, 0x6b, 75, 5, 0x31, 0x32, 0x33, 0x34, 0x35],
-      );
+    it('should draw a GS1 DataBar Omnidirectional of ninety six modules', function() {
+      const paper = stitch(render(stream(
+          ESC, '@', GS, 'h', 120, GS, 'w', 3, GS, 'k', 75, 13, '0952123454321',
+      )), {width: WIDTH});
+
+      /* The symbol is ninety six modules, of which the space in front of the
+         left guard bar is not printed */
+
+      assert.equal(paper.height, 120);
+      assert.equal(ink(paper, 0, 120).max - ink(paper, 0, 120).min + 1, 95 * 3);
+    });
+
+    it('should give Omnidirectional the least height of the specification', function() {
+      const tall = stitch(render(stream(
+          ESC, '@', GS, 'h', 120, GS, 'w', 3, GS, 'k', 75, 13, '0952123454321',
+      )), {width: WIDTH});
+
+      const short = stitch(render(stream(
+          ESC, '@', GS, 'h', 20, GS, 'w', 3, GS, 'k', 75, 13, '0952123454321',
+      )), {width: WIDTH});
+
+      assert.equal(tall.height, 120);
+      assert.equal(short.height, 33 * 3);
+    });
+
+    it('should give Truncated and Limited the height of the specification', function() {
+      const truncated = stitch(render(barcode(GS, 'k', 76, 13, '0952123454321')), {width: WIDTH});
+      const limited = stitch(render(barcode(GS, 'k', 77, 13, '0952123454321')), {width: WIDTH});
+
+      assert.equal(truncated.height, 13 * 3);
+      assert.equal(limited.height, 10 * 3);
+    });
+
+    it('should draw Truncated with the bars of Omnidirectional', function() {
+      const row = (bitmap) => {
+        let result = '';
+
+        for (let x = 0; x < bitmap.width; x++) {
+          result += Bitmap.getPixel(bitmap, x, 0) ? '1' : '0';
+        }
+
+        return result;
+      };
+
+      const omni = stitch(render(barcode(GS, 'k', 75, 13, '0952123454321')), {width: WIDTH});
+      const truncated = stitch(render(barcode(GS, 'k', 76, 13, '0952123454321')), {width: WIDTH});
+
+      assert.equal(row(truncated), row(omni));
+    });
+
+    it('should draw a GS1 DataBar Expanded of the element string it is given', function() {
+      const paper = stitch(render(stream(
+          ESC, '@', GS, 'h', 60, GS, 'w', 2,
+          GS, 'k', 78, 30, '(01)90614141000015(3103)000123',
+      )), {width: WIDTH});
+
+      /* Six symbol characters of seventeen modules and three finder patterns
+         of fifteen, with the guards, is 149 modules on the paper. The bars are
+         the least height of the specification, 34 modules */
+
+      assert.equal(paper.height, 34 * 2);
+      assert.equal(ink(paper, 0, 34 * 2).max - ink(paper, 0, 34 * 2).min + 1, 149 * 2);
+    });
+
+    it('should print nothing for a GS1 DataBar the data is not valid for', function() {
+      for (const [symbology, data] of [
+        [75, '123456789012'],
+        [75, '09521234543210'],
+        [76, '09521234A4321'],
+        [77, '2952123454321'],
+        [78, '01)90614141000015'],
+      ]) {
+        const items = render(stream(
+            ESC, '@', 'A', GS, 'h', 60, GS, 'w', 3,
+            GS, 'k', symbology, data.length, data, LF,
+        ));
+
+        assert.equal(items.length, 1, `${symbology} ${data}`);
+        assert.equal(items[0].height, 30);
+      }
     });
 
     it('should draw a QR code of the size the commands ask for', function() {
@@ -2473,6 +2550,11 @@ describe('EscPosRenderer', function() {
       ['FS p', [FS, 0x70, 1]],
       ['FS q without its count', [FS, 0x71]],
       ['FS q with data missing', [FS, 0x71, 1, 2, 0, 3, 0, 0xff]],
+      ['GS k 75 without its length', [GS, 0x6b, 75]],
+      ['GS k 75 with data missing', [GS, 0x6b, 75, 13, 0x30, 0x39]],
+      ['GS k 76 with data missing', [GS, 0x6b, 76, 13, 0x30, 0x39]],
+      ['GS k 77 with data missing', [GS, 0x6b, 77, 13, 0x30, 0x39]],
+      ['GS k 78 with data missing', [GS, 0x6b, 78, 30, 0x28, 0x30, 0x31, 0x29]],
     ];
 
     for (const [name, bytes] of truncated) {

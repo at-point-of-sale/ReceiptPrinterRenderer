@@ -104,9 +104,7 @@ const SIZE = Object.assign(Object.create(null), {
   48: 1, 49: 2, 50: 3, 51: 4, 52: 5, 53: 6,
 });
 
-/* The symbologies of ESC b n1, by the value of n1. The ones that are not in
-   this table are the GS1 DataBar family, 10 to 13, which version 1 does not
-   render.
+/* The symbologies of ESC b n1, by the value of n1.
 
    StarPRNT has no way to select a Code 128 code set, the encoder strips the
    selection, so a Star Code 128 is encoded the way the automatic variant of
@@ -123,6 +121,10 @@ const SYMBOLOGIES = Object.assign(Object.create(null), {
   7: 'code93',
   8: 'codabar',
   9: 'gs1-128',
+  10: 'gs1-databar-omni',
+  11: 'gs1-databar-truncated',
+  12: 'gs1-databar-limited',
+  13: 'gs1-databar-expanded',
 });
 
 /* The width of the narrowest bar in dots, by the value of n3 of ESC b.
@@ -874,8 +876,7 @@ class StarPrntRenderer {
   }
 
   /**
-     * ESC b n1 n2 n3 n4 d.. RS, a barcode. The GS1 DataBar symbologies are not
-     * rendered in version 1 and report an unknown command.
+     * ESC b n1 n2 n3 n4 d.. RS, a barcode.
      *
      * @param  {Uint8Array}   args       The arguments of the command
      * @param  {Uint8Array}   consumed   The whole command, for the unknown item

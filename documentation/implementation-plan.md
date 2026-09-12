@@ -2093,6 +2093,206 @@ Acceptance:
   `npm run test:umd` pass. The fixtures of the encoder and of section 12 did
   not change a dot. Version stays 0.3.0, nothing committed.
 
+### Section 14
+
+Implemented on 2026-09-12. Files: `src/symbologies/databar.js` (new),
+`src/symbologies/index.js`, `src/symbologies/pattern.js`, `src/painter.js`,
+`src/renderers/esc-pos.js`, `src/renderers/star-prnt.js`, `test/databar.js`
+(new), `test/symbologies.js`, `test/esc-pos.js`, `test/star-prnt.js`,
+`test/parity.js`, `test/tools/make-fixtures.js`, the five hand assembled
+fixtures in `test/fixtures/<language>/raw`, `documentation/design.md`,
+`documentation/commands-esc-pos.md`, `documentation/commands-star-prnt.md`,
+`documentation/usage.md`, `README.md`.
+
+The symbology:
+
+- **One module for the four variants**, because they are one construction. A
+  number is split over data characters, a character is a number of modules over
+  a number of elements, and the value of a character says which combination of
+  widths those modules take. `getWidths()` computes that combination, the way
+  the specification describes it and the way every implementation of it does,
+  and the tables per variant say how many modules and elements each subset of a
+  character has, how a value splits over the two subsets and which subset must
+  hold a narrow element. Nothing but those tables, the weights of the checksums
+  and the finder patterns is data; the widths themselves are computed.
+- **The tables came from BWIPP**, which is MIT licensed and is the source the
+  PDF417 symbol characters came from as well. They are the tables of ISO/IEC
+  24724: `databaromni.tab164` and `tab154` for Omnidirectional, `tab267` for
+  Limited, `tab174` for Expanded, with the checksum weights and the finder
+  patterns of each. The Expanded table was confirmed a second time against the
+  reader of ZXing, whose `SYMBOL_WIDEST`, `EVEN_TOTAL_SUBSET` and `GSUM` hold
+  the same numbers in the decode direction.
+- **Omnidirectional** takes thirteen digits, or fourteen with the check digit,
+  which is validated: a wrong one prints nothing. The thirteen digit value is
+  split into a left and a right half over 4537077, each half into an outside
+  character of sixteen modules and an inside one of fifteen over 1597, and the
+  checksum is the element widths of the four characters weighted with the table
+  of the specification, modulo 79. Two of the eighty one pairs of finder
+  patterns do not exist, so the checksum is bumped past 8 and past 72, and the
+  quotient and the remainder over nine pick the left and the right finder. The
+  symbol is 96 modules: a guard of a space and a bar, the outside character,
+  the left finder, the inside character reversed, the right inside character,
+  the right finder reversed, the right outside character reversed, and a guard.
+  The space of the left guard is a quiet zone module that `toBars()` drops, so
+  95 modules land on the paper.
+- **Truncated is the same symbol**, thirteen modules tall instead of at least
+  thirty three. There is no second encoder for it: the bars are the bars of
+  Omnidirectional, and the test asserts exactly that.
+- **Limited** takes a GTIN that starts with a zero or a one, splits it over
+  2013571 into two data characters of 26 modules in seven elements per subset,
+  and weights their 28 element widths modulo 89. The check character is not a
+  data character: the 89 values of the checksum select a value from a table of
+  the specification, whose quotient and remainder over 21 are the values of the
+  six spaces and the six bars of eight modules each, with a space and a bar of
+  one module behind them, 18 modules in all. The symbol is 79 modules, of which
+  73 are printed: the module in front of the left guard bar and the five module
+  space of the right guard are quiet zone and are not drawn.
+- **Expanded** takes a GS1 element string with its application identifiers in
+  parentheses, which is the form both specifications give for the data of this
+  symbology and the form the encoder passes through untouched. The element
+  string is split into identifiers and values, and an identifier whose first
+  two digits are not one of the 22 predefined length prefixes is closed with a
+  separator when data follows it, which is the rule of the GS1 General
+  Specifications and the table BWIPP uses.
+- **Every encodation method of the specification is implemented**, not only the
+  general one: `1` for AI (01) with a field behind it, `00` for anything else,
+  `0100` for a weight in AI (3103), `0101` for AI (3202) and (3203), the eight
+  seven bit methods of a weight in AI (3100) to (3109) or AI (3200) to (3209)
+  with an optional date in AI (11), (13), (15) or (17), and `01100` and `01101`
+  for the price of AI (392x) and the rate of AI (393x). **The seven bit methods
+  hold those twenty identifiers and nothing else of the 31xx and 32xx blocks**;
+  the review of this section found the first version testing the whole two
+  blocks, which encoded 540 of the 800 element strings of that space the wrong
+  way. The test now sweeps all of 31xx and 32xx, with and without a date. The selection rules, the limits on each
+  weight and the layout of each compressed field are the ones of the reference
+  encoder, and every one of them is compared with it in the test. The general
+  purpose field behind them is the numeric, alphanumeric and ISO 646 compaction
+  of the specification with its latches, its run length rules for latching back
+  to numeric compaction, and the four to six bit form of a last digit that fits
+  in what is left of the symbol.
+- **The check character of Expanded is a data character**, the first one of the
+  symbol: the element widths of the data characters are weighted with the
+  weights of the finder sequence, skipping the eight that belong to the check
+  character itself, modulo 211, plus 211 for every character above three. The
+  finder sequence is the table of the specification, indexed by the number of
+  symbol characters, and the characters are drawn forwards and backwards by
+  turns with a finder pattern in front of every pair.
+- **Stacked and composite are out of scope**, as the plan says. The two
+  dimensional GS1 DataBar of `GS ( k` keeps its `unknown` item.
+- **Data that is not valid prints nothing**, which is the rule the other
+  symbologies already follow: a length that is not thirteen or fourteen digits,
+  a character that is not a digit, a check digit that does not match, a Limited
+  GTIN that starts with something else, an element string that is not in the
+  parentheses form, a character that no compaction method of Expanded holds,
+  such as `@`, and data that does not fit in the 22 symbol characters of a one
+  row symbol.
+
+The painter and the parsers:
+
+- **The height of a symbol can come from the symbology.** `Barcode` gained an
+  optional `height` of `{fixed}` or `{minimum}` modules, which only this family
+  sets, and `painter.barcode()` turns it into dots with the module width: the
+  height of Truncated is 13 modules and of Limited 10, whatever `GS h` or `n4`
+  says, and Omnidirectional is at least 33 modules and Expanded at least 34.
+  The alternative was to put the rule in both parsers, which would have meant
+  the parsers knowing what a symbology number means. **ISO/IEC 24724 words all
+  four of those numbers as minimums, and the printer notes of both languages
+  are remembered as the height command having no effect on this family at all.
+  No hardware check settled either reading here. The split above is the one
+  this implementation chose: Truncated and Limited fixed, so that a tall
+  `GS h` does not turn a Truncated symbol back into the Omnidirectional one it
+  has the bars of and the two stay visibly different, and Omnidirectional and
+  Expanded as minimums, so that a receipt can still ask for taller bars.** It
+  is in the deviation lists of both reference pages.
+- **The symbology numbers are the ones of the two references**, 75 to 78 of
+  `GS k` and 10 to 13 of `ESC b`, taken from the encoder's own tables. They go
+  through the same path as every other symbology, so the module width of `GS w`
+  and of `n3`, the human readable text of `GS H` and the alignment work the way
+  they already did. The `unknown` item these numbers used to produce is gone.
+- **The human readable text is the element string in parentheses**, `(01)` and
+  the fourteen digits of the GTIN for the first three variants, and the element
+  string as it was given for Expanded, which is what a printer prints under
+  these symbols.
+
+Testing:
+
+- **bwip-js is the reference encoder.** Its raw output for these symbologies is
+  the element widths of the symbol, which is the shape this package produces,
+  so a comparison covers the tables, the checksum, the finder patterns, the
+  compaction and the layout in one assertion. Its GS1 linter is turned off with
+  `dontlint` and `lintreqs`: it refuses element strings that no shop would
+  print, and a printer encodes whatever the stream asks for.
+- **The counts.** 982 symbols of the generator are compared with bwip-js: 8
+  GTINs for Omnidirectional and the same 8 for Truncated, 6 for Limited, 30
+  element strings for Expanded, at least one per encodation method and one per
+  compaction method with the identifiers of the 31xx and 32xx blocks that have
+  no compressed method among them, a generated batch of 920, which is 120
+  element strings over the general purpose methods with every run length that
+  decides a latch and 800 over the whole 31xx and 32xx space with and without a
+  date, and the ten of the five pairs that pin the weight range. The same
+  values are then rendered through both parsers and read off the paper, 102
+  symbols, and the ten symbols of the five fixtures in the two languages are
+  read off the paper as well. Every one of the 1094 matches module for module.
+  A sweep of 600 random GTINs and 500 generated element strings was run against
+  bwip-js while the symbology was written, with the same result; it is not in
+  the test suite, where the fixed batches cover the same ground in a second.
+- **ZXing reads RSS-14.** `RSS14Reader` decodes all 36 Omnidirectional and
+  Truncated symbols of the test back to their fourteen digit GTIN, from the
+  paper of both languages and from the fixtures, with the white margin a
+  printer does not print. Its finder pattern search is a heuristic that a data character
+  sometimes satisfies before the finder does, and the reader gives up instead
+  of looking further; of the values that were tried, `0361234567890` and
+  `0614141999996` are two it cannot read, and it cannot read the symbols
+  bwip-js produces for them either, so the test uses values it reads.
+- **ZXing cannot read the other two.** There is no reader for Limited at all.
+  There is an `RSSExpandedReader`, but the port of it in `@zxing/library`
+  0.21.3 reads nothing: it finds no pair in a symbol at all, so its finder
+  pattern search is what fails first. Behind that failure sit two faults that
+  are just as fatal but never reached: `checkChecksum()` calls `get()` and
+  `size()`, the methods of a Java `List`, on a plain array, and
+  `decodeDataCharacter()` computes its group as `(13 - oddSum) / 2`, which is
+  never a whole number for a seventeen module character and indexes the group
+  tables with a fraction. Its decoders, which can be driven by hand, do read
+  the structure of a symbol but append the digits of a value with a string
+  builder that turns a number into the character of that code point, so
+  `(01)9` comes out followed by the characters 61, 414, 100 and 1. The reader
+  reads no symbol bwip-js produces either, which is how the fault was placed
+  with the reader and not with this encoder. Both variants are therefore
+  checked against bwip-js only, which the plan allows for Limited and which is
+  the same evidence the other three have: the modules of a second, independent
+  encoder.
+- **The fixtures** are five hand assembled receipts in both languages,
+  `databar-omni`, which prints the symbol with and without its text,
+  `databar-truncated`, `databar-limited`, `databar-expanded` and
+  `databar-coupon`, a coupon receipt of a header, an offer, a DataBar Expanded
+  of AI (8110) and a line of small print. The encoder can write these commands,
+  but only for a printer profile that lists the symbology, so the streams are
+  written out by hand like the ones of sections 12 and 13. All five have parity
+  between the languages, with a module width the encoder itself would not
+  pair: it passes its width option through unchanged, as `GS w n` on ESC/POS,
+  where this family is the exception that does not add one, and as `n3` on
+  StarPRNT, which this renderer reads as 2, 3 or 4 dots, so the same option
+  draws a Star symbol one dot wider per module. The fixtures pair the values
+  that land on the same dots instead, `GS w 3` with an `n3` of 2 and `GS w 2`
+  with an `n3` of 1, which a hand assembled stream is free to do.
+- **Reviewed as ASCII art before they were frozen**: the bars of every variant
+  with the element string readable under them, `(01)09521234543213` under the
+  first three and `(8110)106141410123456101100` under the coupon, the Truncated
+  symbol thirteen modules tall next to the Omnidirectional one at a hundred
+  dots, the Limited symbol ten modules tall, and the coupon receipt with its
+  bold header above the symbol and its small print below it.
+- **The parsers** gained the argument length and truncated stream tests of the
+  four new symbology values in both languages, next to the ones of sections 12
+  and 13, and the rendering tests of the heights, the module widths and the
+  data that prints nothing.
+
+Acceptance:
+
+- `npm test` 1554 passing, `npm run build` clean, `npm run test:types` and
+  `npm run test:umd` pass. The fixtures of the encoder and of sections 12 and
+  13 did not change a dot, and the Section 4 barcode tests and the parity test
+  are unchanged. Version stays 0.3.0, nothing committed.
+
 ### Fixtures regenerated with encoder 4.0.0, 2026-09-12
 
 The golden fixtures were regenerated with ReceiptPrinterEncoder 4.0.0, linked from the local checkout before it was published. 38 byte streams changed, because version 4 emits fewer style commands, orders a pending font change before the alignment padding and no longer feeds after lines that only change printer state. On paper 36 fixtures changed: every block fixture lost the blank line that used to precede the block, 30 dots on ESC/POS and 32 on StarPRNT, and the `receipt` and `hri` fixtures kept their height but gained a centred first line, which the encoder's initialize fix made possible. The text fixtures are byte for byte the same paper as before, which is the end-to-end check of both libraries the design asked for.

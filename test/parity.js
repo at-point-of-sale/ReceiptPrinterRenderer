@@ -181,14 +181,19 @@ describe('parity of the hand assembled fixtures', function() {
       exist in the language that has the command, so only the ones that exist
       in both are compared here: the print mode against the individual Star
       commands, the international character sets both languages number the same
-      way, the tab stops, which are the same command in both, and the margins,
-      which ESC/POS counts in dots and StarPRNT in characters.
+      way, the tab stops, which are the same command in both, the margins,
+      which ESC/POS counts in dots and StarPRNT in characters, and the five GS1
+      DataBar receipts, which both languages print from their own symbology
+      number.
   */
 
   const shared = names('esc-pos/raw').filter((name) => names('star-prnt/raw').includes(name));
 
   it('should have fixtures in both languages to compare', function() {
-    assert.deepEqual(shared, ['international', 'margins', 'print-mode', 'tabs']);
+    assert.deepEqual(shared, [
+      'databar-coupon', 'databar-expanded', 'databar-limited', 'databar-omni', 'databar-truncated',
+      'international', 'margins', 'print-mode', 'tabs',
+    ]);
   });
 
   for (const name of shared) {

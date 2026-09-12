@@ -89,14 +89,15 @@ describe('symbologies', function() {
       for (const name of [
         'upca', 'upce', 'ean13', 'ean8', 'code39', 'itf',
         'codabar', 'code93', 'code128', 'gs1-128', 'code128-auto',
+        'gs1-databar-omni', 'gs1-databar-truncated', 'gs1-databar-limited', 'gs1-databar-expanded',
       ]) {
         assert.isTrue(supports(name), name);
       }
     });
 
     it('should not have a symbology it cannot draw', function() {
-      assert.isFalse(supports('gs1-databar-omni'));
-      assert.isNull(barcode('gs1-databar-omni', '12345'));
+      assert.isFalse(supports('maxicode'));
+      assert.isNull(barcode('maxicode', '12345'));
     });
   });
 

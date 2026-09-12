@@ -33,7 +33,7 @@ This page lists every command `StarPrntRenderer` recognises, what it does to the
 
 The renderer emulates a Star printer. It interprets the bytes the way the firmware does, including the cases where the firmware prints nothing at all: a barcode with invalid data, a symbol wider than the paper, an argument outside the range of its command, which leaves the setting as it was rather than clipping it.
 
-It deliberately differs from the hardware in a few places, each of them because the behaviour is not on the wire and no hardware check settled it. They are marked in the notes below, and these are all of them: the module widths of `ESC b`, the line spacing of an `ESC z n` that is not `0` or `1`, the feeds of `ESC I`, `ESC J` and `ESC a`, the four dot gap between the bars of a barcode and its human readable text, the reading of `ESC GS x S 0`, a QR model 1 drawn as a model 2 symbol, the basic 43 character set of Code 93, the minimum of three data codewords of a PDF417 symbol, the reading of `ESC h n` and `ESC Q n`, `ESC R n` leaving the sets above 13 alone, `ESC SP n`, whose length and effect are both unsettled, the tear bar mode of raster mode read as a partial cut, the quadruple density of `ESC k` drawn at the resolution of the head, the layout of `ESC GS S` and its alignment, and the assumed layout of `ESC FS q`.
+It deliberately differs from the hardware in a few places, each of them because the behaviour is not on the wire and no hardware check settled it. They are marked in the notes below, and these are all of them: the module widths of `ESC b`, the line spacing of an `ESC z n` that is not `0` or `1`, the feeds of `ESC I`, `ESC J` and `ESC a`, the four dot gap between the bars of a barcode and its human readable text, the reading of `ESC GS x S 0`, a QR model 1 drawn as a model 2 symbol, the basic 43 character set of Code 93, the minimum of three data codewords of a PDF417 symbol, the reading of `ESC h n` and `ESC Q n`, `ESC R n` leaving the sets above 13 alone, `ESC SP n`, whose length and effect are both unsettled, the tear bar mode of raster mode read as a partial cut, the quadruple density of `ESC k` drawn at the resolution of the head, the layout of `ESC GS S` and its alignment, the assumed layout of `ESC FS q`, and the heights of the GS1 DataBar family, which are a reading of the specification pending a hardware check.
 
 Two differences are the printer itself rather than the renderer, and both show up when the same receipt is printed in both languages: a pulse to the second drawer is fixed at 200 ms on and 200 ms off, because the width is not on the wire, and the size multipliers of `ESC i` stop at six where `GS ! n` of ESC/POS goes to eight.
 
@@ -147,6 +147,10 @@ The bars are drawn as a block of their own: the pending line is committed first,
 
 Data that is not valid for the symbology prints nothing at all and does not advance the paper, which is what printer firmware does. The same goes for a barcode whose bars are wider than the print area: the printer prints nothing rather than a barcode no reader can read. The human readable text is not part of that rule, it is centred under the bars and clipped when it is wider than the paper.
 
+The GS1 DataBar family is the one family whose height is not only the height of `n4`. ISO/IEC 24724 gives all four variants a height: thirteen modules for Truncated, ten for Limited, thirty three for Omnidirectional and thirty four for Expanded, in modules, so they follow the width of a module of `n3`. **The specification words all four as minimums, and the printer notes of this family are remembered as the height command having no effect on it at all, which no hardware check settled here. This renderer reads the heights of Truncated and Limited as fixed, so that a large `n4` does not turn a Truncated symbol back into the Omnidirectional one it has the bars of, and the heights of Omnidirectional and Expanded as minimums, so that a taller `n4` still makes those symbols taller.** The human readable text of these symbols is the element string with its application identifiers in parentheses.
+
+Omnidirectional is ninety six modules wide, of which ninety five are printed, and Limited is seventy nine, of which seventy three are printed: the module in front of the left guard bar, and the five module space behind the right guard bar of Limited, are quiet zone and a printer does not print them either. The parenthesised notation of Expanded has no escape for a parenthesis inside a value, so an `(` in the data always starts the next application identifier, which is what BWIPP and the reference encoders do with it as well.
+
 The human readable text is one line of cells in font A, drawn without any style, so it is never affected by the bold, underline, invert or size of the text around it. Between the bars and the text sits a gap of four dots, because the cell of the font has no room of its own above a capital and the text would otherwise touch the bars. **That gap is a legibility choice of this renderer, not a number from a specification, and it has not been compared with what a Star printer puts on paper.**
 
 <br>
@@ -167,7 +171,10 @@ The human readable text is one line of cells in font A, drawn without any style,
 | `7` | Code 93 | Rendered | Two check characters are computed and drawn. Only the basic 43 character set is encoded, the full ASCII variant is not implemented, as printer firmware does not implement it either; a character outside the set prints nothing. |
 | `8` | Codabar | Rendered | The start and stop characters are `A` to `D`. Data without them gets an `A` on both sides, data with only one of the two, or with one of those letters in the middle, prints nothing. They are part of the human readable text, as the firmware prints them. A wide element is two modules. |
 | `9` | GS1-128 | Rendered | A Code 128 with FNC1 behind the start symbol and the code sets picked for the data. The encoder strips `(`, `)` and `*` from the value before it sends it. |
-| `10` to `13` | GS1 DataBar Omnidirectional, Truncated, Limited, Expanded | Reported | Not rendered in this version. The whole `ESC b` command is reported, since these symbologies print in one command. [Section 14](#not-supported-yet). |
+| `10` | GS1 DataBar Omnidirectional | Rendered | Thirteen digits, or fourteen with the check digit, which is validated; a wrong one prints nothing. The symbol is the RSS-14 of ISO/IEC 24724, ninety six modules of four data characters and two finder patterns. The height is at least thirty three modules, whatever `n4` says. |
+| `11` | GS1 DataBar Truncated | Rendered | The same data and the same bars as Omnidirectional, thirteen modules tall, which is the height the specification gives it and which `n4` does not change. |
+| `12` | GS1 DataBar Limited | Rendered | Thirteen or fourteen digits of a GTIN that starts with a zero or a one, seventy nine modules of two data characters with a check character between them. Ten modules tall, whatever `n4` says. |
+| `13` | GS1 DataBar Expanded | Rendered | A GS1 element string with its application identifiers in parentheses, `(01)90614141000015(3103)000123`, in four to twenty two symbol characters, with the compressed encodation methods of AI `(01)` where the element string allows them, a weight in AI `(3103)`, `(3202)` or `(3203)`, a weight in AI `(3100)` to `(3109)` or `(3200)` to `(3209)` with an optional date in AI `(11)`, `(13)`, `(15)` or `(17)`, and a price or a rate in AI `(392x)` or `(393x)`, and the general purpose method for everything else, the rest of the 31xx and 32xx blocks included. The height is at least thirty four modules. Data that is not an element string, or that holds a character no compaction method has, prints nothing. |
 | any other | — | Reported | |
 
 <br>
@@ -285,11 +292,7 @@ These commands change nothing about the paper of the receipt that is being rende
 
 ### Not supported yet
 
-These are the common StarPRNT and Star Line Mode commands the renderer parses but does not render, and what is planned for them. The sections are the ones of the [implementation plan](implementation-plan.md).
-
-**Section 14, GS1 DataBar.** The symbologies `10` to `13` of `ESC b`, Omnidirectional, Truncated, Limited and Expanded, with the human readable text below them.
-
-**Not planned.**
+These are the StarPRNT and Star Line Mode commands the renderer parses but does not render. Every command the [implementation plan](implementation-plan.md) planned for is rendered now; what is left is the list below, and none of it is planned.
 
 - Page mode. `ESC GS P` switches the printer between page and line units and is parsed; composing a page in memory is a second layout engine next to the line one and is not modelled.
 - CJK fonts. A receipt that needs real CJK text needs a printer with the font.

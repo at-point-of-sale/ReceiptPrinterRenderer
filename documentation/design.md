@@ -83,7 +83,7 @@ Out of scope for now:
 
 - Changes to ReceiptPrinterEncoder. In particular no UTF-8 mode, text is decoded with the same codepage mapping the encoder used.
 - ESC/POS and StarPRNT commands the encoder does not emit. The parsers are written so that more commands can be added, and they must skip unknown commands safely, but rendering them is not a goal.
-- The GS1 DataBar symbologies. They are parsed so that the stream stays in sync, but not rendered, see below.
+- The two dimensional GS1 DataBar and the composite symbologies of `GS ( k`. They are parsed so that the stream stays in sync, but not rendered, see below.
 - Dithering, resizing and other image processing. Images arrive in the byte stream already dithered by the encoder.
 
 Dependencies are kept to a minimum. Runtime dependencies are `@point-of-sale/codepage-encoder` for the codepage tables and `lean-qr` for QR codes, which is MIT licensed, has no dependencies and is under 4 kB compressed. No canvas, no image libraries, no barcode library. The one-dimensional barcodes and PDF417 are implemented in this package.
@@ -355,12 +355,19 @@ The values the encoder can emit and what the renderer does with them.
 | 72 | Code 93 | rendered |
 | 73 | Code 128 | rendered, including the `{A` `{B` `{C` set selection the encoder passes through |
 | 74 | GS1-128 | rendered, as Code 128 with FNC1 |
-| 75 to 78 | GS1 DataBar | not rendered, `unknown` item |
+| 75 | GS1 DataBar Omnidirectional | rendered, from thirteen digits or from fourteen with the check digit, ISO/IEC 24724 |
+| 76 | GS1 DataBar Truncated | rendered, the same bars, thirteen modules tall |
+| 77 | GS1 DataBar Limited | rendered, from a GTIN that starts with a zero or a one, ten modules tall |
+| 78 | GS1 DataBar Expanded | rendered, from a GS1 element string with its application identifiers in parentheses |
 | 79 | Code 128 auto | rendered, the renderer picks the code sets |
 
 Function A, `m` below 65, and function B, `m` of 65 to 71, select the same symbology and render the same.
 
 Check digits are computed when the data lacks them, and validated when present, the way Epson firmware does. Invalid data prints nothing, which also matches the firmware.
+
+The GS1 DataBar family takes its height from the specification and not only from the command: the height of Truncated is thirteen modules and of Limited ten, whatever `GS h` asks for, and Omnidirectional is at least thirty three modules and Expanded at least thirty four. The heights are in modules, so they follow the width of a module of `GS w`. ISO/IEC 24724 words all four as minimums and the printer notes are remembered as `GS h` having no effect on this family at all; the split above is a reading pending a hardware check, chosen so that symbology 75 and symbology 76 stay visibly different, and it is in the deviation lists of both reference pages.
+
+Omnidirectional is ninety six modules wide, of which ninety five are printed, and Limited seventy nine, of which seventy three are printed: the module in front of the left guard bar, and the five module space behind the right guard of Limited, are quiet zone. The human readable text is the element string with the application identifiers in parentheses, which is what a printer prints under these symbols, and that notation has no escape for a parenthesis inside a value, so an `(` in the data of an Expanded symbol always starts the next application identifier.
 
 The human readable text is one line of cells of the HRI font, centred over the bars, and the block is the bars plus that line, or two of them when the text is printed above and below. Barcodes carry no quiet zone, a printer does not add one either.
 
@@ -445,7 +452,7 @@ The commands of section 12, which the encoder does not emit.
 | `ESC d n` | cut | 0 full, 1 partial, 2 full with feed, 3 partial with feed. |
 | `ESC BEL n1 n2` then `BEL` or `SUB` | pulse | `n1` on time and `n2` off time in units of 10 ms, for the first drawer only. `BEL` and `FS` pulse drawer 1 with that width, `SUB` and `EM` pulse drawer 2 for the fixed 200 ms on and 200 ms off of the specification. |
 
-The Star barcode symbology numbers the encoder emits and the GS1 DataBar variants follow the same rendered and not rendered split as the ESC/POS table.
+The Star barcode symbology numbers map onto the same generators as the ESC/POS ones: 0 to 9 are UPC-E, UPC-A, EAN-8, EAN-13, Code 39, ITF, Code 128, Code 93, Codabar and GS1-128, and 10 to 13 are GS1 DataBar Omnidirectional, Truncated, Limited and Expanded, with the same data rules and the same heights as the ESC/POS table describes.
 
 <br>
 
@@ -701,7 +708,8 @@ The TSP100LAN, TSP143IIILAN and TSP143IIIW speak the same raster protocol over a
 4. **WebBluetoothReceiptPrinter, branch meow.** Option contract, profile graphics section, cat printer wrapper, verified on a GB and a GT model.
 5. **NetworkReceiptPrinter.** Same option and wrapper as the USB branch.
 6. **PDF417.** The complete symbology in this package, in both languages, read back with a barcode reader in the tests.
-7. **Later.** The TSP100 profile moves to the StarPRNT renderer, a UTF-8 mode in the encoder for Unicode text on graphics printers, GS1 DataBar if there is demand, fonts for non-Latin codepages, incremental `write` and `end`.
+7. **GS1 DataBar.** Omnidirectional, Truncated, Limited and Expanded in this package, in both languages, compared with a second encoder and read back with a barcode reader in the tests.
+8. **Later.** The TSP100 profile moves to the StarPRNT renderer, a UTF-8 mode in the encoder for Unicode text on graphics printers, the stacked and composite forms of GS1 DataBar if there is demand, fonts for non-Latin codepages, incremental `write` and `end`.
 
 <br>
 

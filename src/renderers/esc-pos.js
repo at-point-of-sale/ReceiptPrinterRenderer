@@ -41,8 +41,7 @@ const DEFAULT_CODEPAGE = 'cp437';
 
 const UNDERLINE = Object.assign(Object.create(null), {0: 0, 1: 1, 2: 2, 48: 0, 49: 1, 50: 2});
 
-/* The symbologies of GS k m, by the value of m. The ones that are not in this
-   table are the GS1 DataBar family, 75 to 78, which version 1 does not render */
+/* The symbologies of GS k m, by the value of m */
 
 const SYMBOLOGIES = Object.assign(Object.create(null), {
   0: 'upca',
@@ -62,6 +61,10 @@ const SYMBOLOGIES = Object.assign(Object.create(null), {
   72: 'code93',
   73: 'code128',
   74: 'gs1-128',
+  75: 'gs1-databar-omni',
+  76: 'gs1-databar-truncated',
+  77: 'gs1-databar-limited',
+  78: 'gs1-databar-expanded',
   79: 'code128-auto',
 });
 
@@ -1561,8 +1564,7 @@ class EscPosRenderer {
 
   /**
      * GS k m .., a barcode. Function A, for m below 65, ends its data at a NUL
-     * byte, function B carries the length of the data. The GS1 DataBar
-     * symbologies are not rendered in version 1 and report an unknown command.
+     * byte, function B carries the length of the data.
      *
      * @param  {Uint8Array}   args       The arguments of the command
      * @param  {Uint8Array}   consumed   The whole command, for the unknown item

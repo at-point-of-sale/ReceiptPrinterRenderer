@@ -1,9 +1,22 @@
 /**
+ * The height a symbology asks for, in modules, for the symbologies whose
+ * specification says how tall their symbol is. GS1 DataBar Truncated and
+ * Limited have a height of their own, which the height of the command does not
+ * change, and Omnidirectional and Expanded have a least height a printer never
+ * goes below.
+ *
+ * @typedef {object} BarcodeHeight
+ * @property {number} [fixed]     The height of the symbol in modules
+ * @property {number} [minimum]   The least height of the symbol in modules
+ */
+
+/**
  * A barcode, as the symbology generators return it
  *
  * @typedef {object} Barcode
- * @property {number[]} bars   Module widths, alternating bar and space, starting with a bar
- * @property {string} text     The human readable text of this barcode, as it is printed
+ * @property {number[]} bars           Module widths, alternating bar and space, starting with a bar
+ * @property {string} text             The human readable text of this barcode, as it is printed
+ * @property {BarcodeHeight} [height]  The height the specification of the symbology gives the symbol
  */
 
 /**

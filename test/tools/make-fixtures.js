@@ -1045,6 +1045,139 @@ const raw = {
   },
 
   /*
+      The GS1 DataBar family, symbologies 75 to 78 of GS k and 10 to 13 of
+      ESC b. The encoder can write these commands, but only for a printer whose
+      profile lists the symbology, so the streams are written by hand here, the
+      way the two reference pages describe them.
+
+      The module width is chosen so that both languages draw the same symbol.
+      The encoder passes its width option, 1 to 3, straight through: as GS w n
+      on ESC/POS, where this family is the exception that does not add one, and
+      as n3 on StarPRNT, which this renderer reads as 2, 3 or 4 dots. The same
+      option therefore draws a barcode one dot wider per module on StarPRNT
+      than on ESC/POS, which no fixture can repair. These fixtures pair the
+      values that land on the same dots instead, GS w 3 with an n3 of 2 for
+      three dot modules and GS w 2 with an n3 of 1 for two dot ones, which is a
+      pairing the encoder does not emit but which is what parity needs, and
+      they are hand assembled anyway.
+
+      The heights are the ones of the specification: Omnidirectional is at
+      least 33 modules and Expanded at least 34, and Truncated and Limited have
+      a height of their own, 13 and 10 modules, whatever the command asks for.
+  */
+
+  'databar-omni': {
+    'esc-pos': stream(
+        ESC, '@',
+        ESC, 'a', 1,
+        GS, 'h', 100, GS, 'w', 3, GS, 'H', 2,
+        GS, 'k', 75, 13, '0952123454321',
+        GS, 'H', 0,
+        GS, 'k', 75, 13, '0952123454321',
+        ESC, 'a', 0,
+        'GS1 DataBar Omnidirectional', LF,
+    ),
+
+    'star-prnt': stream(
+        ESC, '@',
+        ESC, 0x1d, 'a', 1,
+        ESC, 'b', [10, 2, 2, 100], '0952123454321', RS,
+        ESC, 'b', [10, 1, 2, 100], '0952123454321', RS,
+        ESC, 0x1d, 'a', 0,
+        'GS1 DataBar Omnidirectional', LF,
+    ),
+  },
+
+  'databar-truncated': {
+    'esc-pos': stream(
+        ESC, '@',
+        ESC, 'a', 1,
+        GS, 'h', 100, GS, 'w', 3, GS, 'H', 2,
+        GS, 'k', 76, 13, '0952123454321',
+        ESC, 'a', 0,
+        'GS1 DataBar Truncated', LF,
+    ),
+
+    'star-prnt': stream(
+        ESC, '@',
+        ESC, 0x1d, 'a', 1,
+        ESC, 'b', [11, 2, 2, 100], '0952123454321', RS,
+        ESC, 0x1d, 'a', 0,
+        'GS1 DataBar Truncated', LF,
+    ),
+  },
+
+  'databar-limited': {
+    'esc-pos': stream(
+        ESC, '@',
+        ESC, 'a', 1,
+        GS, 'h', 100, GS, 'w', 3, GS, 'H', 2,
+        GS, 'k', 77, 13, '0123456789012',
+        ESC, 'a', 0,
+        'GS1 DataBar Limited', LF,
+    ),
+
+    'star-prnt': stream(
+        ESC, '@',
+        ESC, 0x1d, 'a', 1,
+        ESC, 'b', [12, 2, 2, 100], '0123456789012', RS,
+        ESC, 0x1d, 'a', 0,
+        'GS1 DataBar Limited', LF,
+    ),
+  },
+
+  /* Expanded with the two element strings the specification gives as examples:
+     a weight in kilograms, which the compressed method of AI (3103) carries,
+     and a production date, which the seven bit method carries */
+
+  'databar-expanded': {
+    'esc-pos': stream(
+        ESC, '@',
+        ESC, 'a', 1,
+        GS, 'h', 100, GS, 'w', 3, GS, 'H', 2,
+        GS, 'k', 78, 30, '(01)90614141000015(3103)000123',
+        ESC, 'a', 0,
+        'GS1 DataBar Expanded', LF,
+    ),
+
+    'star-prnt': stream(
+        ESC, '@',
+        ESC, 0x1d, 'a', 1,
+        ESC, 'b', [13, 2, 2, 100], '(01)90614141000015(3103)000123', RS,
+        ESC, 0x1d, 'a', 0,
+        'GS1 DataBar Expanded', LF,
+    ),
+  },
+
+  /* A coupon, which is what a shop prints a DataBar Expanded for: the offer in
+     AI (8110), a variable length identifier, so the general purpose field
+     carries the whole element string. The symbol is nine characters wide,
+     which only fits on the paper at two dots per module */
+
+  'databar-coupon': {
+    'esc-pos': stream(
+        ESC, '@',
+        ESC, 'a', 1,
+        ESC, 'E', 1, 'THE CORNER STORE', ESC, 'E', 0, LF,
+        'Save 1.00 on your next coffee', LF,
+        GS, 'h', 80, GS, 'w', 2, GS, 'H', 2,
+        GS, 'k', 78, 27, '(8110)106141410123456101100',
+        'Valid until 31 December', LF,
+        ESC, 'a', 0,
+    ),
+
+    'star-prnt': stream(
+        ESC, '@',
+        ESC, 0x1d, 'a', 1,
+        ESC, 'E', 'THE CORNER STORE', ESC, 'F', LF,
+        'Save 1.00 on your next coffee', LF,
+        ESC, 'b', [13, 2, 1, 80], '(8110)106141410123456101100', RS,
+        'Valid until 31 December', LF,
+        ESC, 0x1d, 'a', 0,
+    ),
+  },
+
+  /*
       ESC GS S, the StarPRNT raster image: the same picture, 25 bytes of eight
       dots wide and 96 dots tall, drawn as a block and centred the way ESC GS a
       says.
