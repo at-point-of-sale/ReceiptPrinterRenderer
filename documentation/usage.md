@@ -362,4 +362,14 @@ The renderer covers the commands ReceiptPrinterEncoder version 3 emits. A few th
 
 An `unknown` item only reaches you when `unknown` is in `commands`, otherwise it is dropped. It carries the bytes of the command, which makes it the place to look when something is missing from a render.
 
+<br>
+
+### Checking a render against other renderers
+
+The repository keeps byte streams other open source projects produced or ship as their own samples, in `test/fixtures/external`, each with its provenance and a golden image; the two command references say per command which of them sends it, under "Seen in the wild".
+
+`npm run contact-sheet` renders all of them to `build/contact-sheet/` and writes a page that puts every render next to its provenance. Where the tools are installed on the machine that builds the page it also shows what other renderers make of the same bytes: [thermal](https://github.com/zachzurn/thermal) and [ESCPost](https://github.com/receiptful/escpost) as images, `esc2html` of [escpos-tools](https://github.com/receipt-print-hq/escpos-tools) and [escpos-emulator](https://github.com/lezram/escpos-emulator) as HTML, with a coarse agreement metric per fixture. None of them is needed: a tool that is not there is a "not available" cell, and the page builds without any of them. What each one needs is written in its module under `tools/contact-sheet/references`.
+
+<br>
+
 The two command references list every command of a language, what it does to the paper and the values it accepts: [ESC/POS commands](commands-esc-pos.md) and [StarPRNT commands](commands-star-prnt.md).

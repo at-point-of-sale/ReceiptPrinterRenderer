@@ -330,52 +330,60 @@ These are the ESC/POS commands the renderer parses but does not render. Every co
 
 ### Seen in the wild
 
-The tables above say what the renderer does with a command. This one says which commands other producers actually send, taken from the external fixtures of [section 16 of the implementation plan](implementation-plan.md): byte streams that [receiptline](https://github.com/receiptline/receiptline), [python-escpos](https://github.com/python-escpos/python-escpos), [escpos-php](https://github.com/mike42/escpos-php) and [ESCPOS_NET](https://github.com/lukevp/ESC-POS-.NET) produced for their own examples and tests, kept in `test/fixtures/external` with their provenance and rendered to golden images.
+The tables above say what the renderer does with a command. This one says which commands other producers actually send, taken from the external fixtures of [section 16 and section 16b of the implementation plan](implementation-plan.md): byte streams that [receiptline](https://github.com/receiptline/receiptline), [python-escpos](https://github.com/python-escpos/python-escpos), [escpos-php](https://github.com/mike42/escpos-php) and [ESCPOS_NET](https://github.com/lukevp/ESC-POS-.NET) produced for their own examples and tests, plus the sample streams that two renderers ship to exercise a parser rather than an encoder, [ESCPost](https://github.com/receiptful/escpost) and [escpos-tools](https://github.com/receipt-print-hq/escpos-tools). They are kept in `test/fixtures/external` with their provenance and rendered to golden images.
 
 Every command below is exercised by at least one of those streams. A command that is not in this table is either only sent by ReceiptPrinterEncoder, which the fixtures of the other test files cover, or by nobody the fixtures have seen.
 
 | Command | Name | Status | Seen in |
 |---|---|---|---|
-| `ESC @` | initialize | Rendered | escpos-php, receiptline |
+| `ESC @` | initialize | Rendered | escpos-php, escpos-tools, escpost, receiptline |
 | `FS .` | cancel Kanji mode | Rendered | receiptline |
-| `ESC E n` | bold | Rendered | escpos-php, python-escpos, receiptline |
+| `ESC E n` | bold | Rendered | escpos-php, escpos-tools, escpost, python-escpos, receiptline |
 | `ESC G n` | double strike | Rendered | escpos-php |
-| `ESC - n` | underline | Rendered | escpos-php, python-escpos, receiptline |
-| `GS B n` | invert | Rendered | python-escpos, receiptline |
-| `GS ! n` | character size | Rendered | escpos-php, python-escpos, receiptline |
-| `ESC M n` | font | Rendered | escpos-php, python-escpos, receiptline |
-| `ESC ! n` | print mode | Rendered | escpos-php, python-escpos |
+| `ESC - n` | underline | Rendered | escpos-php, escpost, python-escpos, receiptline |
+| `GS B n` | invert | Rendered | escpost, python-escpos, receiptline |
+| `GS ! n` | character size | Rendered | escpos-php, escpost, python-escpos, receiptline |
+| `ESC M n` | font | Rendered | escpos-php, escpost, python-escpos, receiptline |
+| `ESC ! n` | print mode | Rendered | escpos-php, escpos-tools, escpost, python-escpos |
 | `ESC { n` | upside down printing | Rendered | python-escpos, receiptline |
-| `ESC 3 n` | line spacing | Rendered | python-escpos, receiptline |
-| `ESC d n` | print and feed n lines | Rendered | escpos-php, python-escpos |
+| `ESC 3 n` | line spacing | Rendered | escpost, python-escpos, receiptline |
+| `ESC 2` | default line spacing | Rendered | escpost |
+| `ESC d n` | print and feed n lines | Rendered | escpos-php, escpos-tools, escpost, python-escpos |
+| `ESC J n` | print and feed n dots | Rendered | escpost |
 | `ESC e n` | print and reverse feed n lines | Reported | escpos-php |
-| `ESC a n` | alignment | Rendered | escpos-php, python-escpos, receiptline |
-| `ESC SP n` | right side character spacing | Rendered | receiptline |
-| `ESC $ nL nH` | absolute print position | Rendered | receiptline |
-| `ESC \ nL nH` | relative print position | Rendered | receiptline |
-| `GS L nL nH` | left margin | Rendered | escpos-php, receiptline |
-| `GS W nL nH` | print area width | Rendered | escpos-php, receiptline |
+| `ESC a n` | alignment | Rendered | escpos-php, escpos-tools, escpost, python-escpos, receiptline |
+| `ESC SP n` | right side character spacing | Rendered | escpost, receiptline |
+| `ESC $ nL nH` | absolute print position | Rendered | escpost, receiptline |
+| `ESC \ nL nH` | relative print position | Rendered | escpost, both the positive and the negative movement, and receiptline |
+| `GS L nL nH` | left margin | Rendered | escpos-php, escpost, receiptline |
+| `GS W nL nH` | print area width | Rendered | escpos-php, escpost, receiptline |
+| `GS P x y` | motion units | Rendered | escpost, which sets them and then feeds in dots |
 | `ESC t n` | select codepage | Rendered | escpos-php, python-escpos, receiptline |
 | `FS C n` | Kanji code system | Rendered | receiptline |
 | `FS - n` | multi byte underline | Parsed | receiptline |
 | `FS S n1 n2` | Kanji character spacing | Parsed | receiptline |
 | `FS ( A pL pH fn m` | Kanji font | Reported | receiptline |
-| `GS h n` | barcode height | Rendered | escpos-php, python-escpos, receiptline |
-| `GS w n` | barcode module width | Rendered | escpos-php, python-escpos, receiptline |
-| `GS H n` | HRI position | Rendered | escpos-php, python-escpos, receiptline |
+| `GS h n` | barcode height | Rendered | escpos-php, escpost, python-escpos, receiptline |
+| `GS w n` | barcode module width | Rendered | escpos-php, escpost, python-escpos, receiptline |
+| `GS H n` | HRI position | Rendered | escpos-php, escpost, python-escpos, receiptline |
 | `GS f n` | HRI font | Rendered | python-escpos |
-| `GS k m d1..dk NUL` | barcode, function A | Rendered | python-escpos, with `m` of `4`, Code 39 |
-| `GS k m n d1..dn` | barcode, function B | Rendered | escpos-php, with `m` of `65` to `73`, and receiptline, with `69` and `73` |
-| `GS ( k pL pH 49 ..` | QR code | Rendered | escpos-net and escpos-php, functions `65`, `67`, `69`, `80` and `81` |
+| `GS k m d1..dk NUL` | barcode, function A | Rendered | python-escpos, with `m` of `4`, Code 39, and escpost, with `2`, EAN-13 |
+| `GS k m n d1..dn` | barcode, function B | Rendered | escpos-php, with `m` of `65` to `73`, receiptline, with `69` and `73`, and escpost, with `67` and with `75` to `78`, the GS1 DataBar family its own profiles refuse |
+| `GS ( k pL pH 49 ..` | QR code | Rendered | escpos-net, escpos-php and escpost, functions `65`, `67`, `69`, `80` and `81` |
 | `GS ( k pL pH 48 ..` | PDF417 | Rendered | escpos-php, functions `65`, `67`, `68`, `69`, `70`, `80` and `81` |
-| `GS v 0 m xL xH yL yH d..` | raster bit image | Rendered | python-escpos, receiptline |
-| `GS ( L pL pH 48 112 ..` | store the graphics buffer | Rendered | python-escpos |
+| `GS v 0 m xL xH yL yH d..` | raster bit image | Rendered | escpost, with every `m` it has, python-escpos, receiptline |
+| `ESC * m nL nH d..` | bit image | Rendered | escpost, with all four densities, `m` of `0`, `1`, `32` and `33` |
+| `GS ( L pL pH 48 112 ..` | store the graphics buffer | Rendered | escpos-tools, python-escpos |
 | `GS 8 L p1..p4 48 112 ..` | store the graphics buffer, long form | Rendered | receiptline |
-| `GS ( L pL pH 48 50` | print the graphics buffer | Rendered | python-escpos, receiptline |
-| `GS V m`, `GS V m n` | cut | Rendered | escpos-php, python-escpos, receiptline |
-| `ESC p m t1 t2` | pulse | Rendered | escpos-php |
+| `GS ( L pL pH 48 50` | print the graphics buffer | Rendered | escpos-tools, python-escpos, receiptline |
+| `GS V m`, `GS V m n` | cut | Rendered | escpos-php, escpos-tools, escpost, with the full and the partial cut and with function B, python-escpos, receiptline |
+| `ESC p m t1 t2` | pulse | Rendered | escpos-php, escpos-tools |
 | `GS a n` | automatic status back | Reported | receiptline |
 | `GS r n` | transmit status | Reported | receiptline |
 | `GS b n` | smoothing | Reported | python-escpos |
 
 Four of these are **Reported**, which is the interesting part of the table: `ESC e`, the reverse line feed the demo of escpos-php uses, and `GS a`, `GS r` and `GS b`, the status and smoothing commands receiptline and python-escpos put around a job. The three settings change nothing on paper, so reporting them is the whole behaviour; `ESC e` does move the paper on a printer, and a receipt that relies on it comes out taller here, see the notes of section 16 of the implementation plan.
+
+The last rows come from the sample streams of two renderers rather than from an encoder, which is why they reach commands no library above sends: the four bit image densities of `ESC *`, every scaling mode of `GS v 0`, `ESC 2`, `ESC J`, `GS P` and the GS1 DataBar selectors of `GS k`. A renderer writes those by hand to exercise a parser, so they are the part of the table that says what the wild does when it is not an encoder holding the pen.
+
+`npm run contact-sheet` can put the renderings of those projects next to ours, where the tools are installed on the machine that builds the page: thermal, ESCPost, `esc2html` of escpos-tools and escpos-emulator, each with a coarse agreement metric. See section 16b of the implementation plan for what the four disagree about and why.

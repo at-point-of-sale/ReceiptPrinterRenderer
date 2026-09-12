@@ -1,0 +1,16 @@
+{
+  "source": "https://github.com/receiptful/escpost",
+  "file": "crates/escpost-render/tests/cases/symbols/native-symbols-nt-5890k/databar-m77-unsupported-probe.hex",
+  "commit": "c4a766513c58cebf84bc4ec6c5da8514ae2e0d88",
+  "licence": "Apache-2.0",
+  "setup": "git clone https://github.com/receiptful/escpost build/external/escpost && git -C build/external/escpost checkout c4a7665",
+  "command": "node tools/external/escpost/capture.js symbols-databar-m77",
+  "version": "0.2.1",
+  "language": "esc-pos",
+  "columns": 32,
+  "width": 384,
+  "codepageMapping": "epson",
+  "captured": "2026-09-12",
+  "unknown": 0,
+  "notes": "Exercises GS k with m of 77, GS1 DataBar Limited. The case names the NT-5890K profile, whose printable_width_dots is 384. The stream is the hexadecimal file of the repository, not a run of the library. Reviewed as a PNG. ESCPost refuses the stream, \"GS1 DataBar Limited is not supported by printer profile NT-5890K\"; this renderer draws the symbol of section 14."
+}

@@ -1,4 +1,11 @@
 {
+  "ignorePatterns": [
+    "build/",
+    "dist/",
+    "generated/",
+    "node_modules/",
+    "test/fixtures/"
+  ],
   "parserOptions": {
     "ecmaVersion": "latest",
     "sourceType": "module"

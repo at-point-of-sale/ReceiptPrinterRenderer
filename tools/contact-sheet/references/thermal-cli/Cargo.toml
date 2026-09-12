@@ -1,0 +1,9 @@
+[package]
+name = "thermal-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+thermal_parser = { git = "https://github.com/zachzurn/thermal", rev = "9456874a850b8604d95eca428cca027750cd6188" }
+thermal_renderer = { git = "https://github.com/zachzurn/thermal", rev = "9456874a850b8604d95eca428cca027750cd6188" }
+png = "0.17"

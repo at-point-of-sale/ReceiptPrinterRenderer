@@ -1,0 +1,16 @@
+{
+  "source": "https://github.com/receiptful/escpost",
+  "file": "crates/escpost-render/tests/cases/motion/line-spacing-and-feed/input.hex",
+  "commit": "c4a766513c58cebf84bc4ec6c5da8514ae2e0d88",
+  "licence": "Apache-2.0",
+  "setup": "git clone https://github.com/receiptful/escpost build/external/escpost && git -C build/external/escpost checkout c4a7665",
+  "command": "node tools/external/escpost/capture.js motion-line-spacing-and-feed",
+  "version": "0.2.1",
+  "language": "esc-pos",
+  "columns": 32,
+  "width": 384,
+  "codepageMapping": "epson",
+  "captured": "2026-09-12",
+  "unknown": 0,
+  "notes": "Exercises ESC 2, ESC 3 and ESC d, the line spacing and the paper feeds. The case names the NT-5890K profile, whose printable_width_dots is 384. The stream is the hexadecimal file of the repository, not a run of the library. Reviewed against the expected PNG of the case. The four markers are at 0, 30, 38 and 48 here and at 0, 30, 40 and 60 there: the Epson profile of this renderer counts two vertical motion units per dot, so ESC 3 10 is five dots and not ten, and a line is never shorter than the eight dot band of ESC *. The NT-5890K profile of the case maps one unit to one dot."
+}

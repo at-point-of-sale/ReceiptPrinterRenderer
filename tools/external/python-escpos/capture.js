@@ -95,7 +95,9 @@ function notes(name, entry, unknown) {
       `the ${entry.columns} the profile reports; python-escpos lays its software columns out for ${entry.columns}.` :
       null,
     `Exercises ${entry.features.join(', ')}.`,
-    entry.usb ? 'The example constructs a Usb printer, which the capture replaced with a Dummy of the same profile.' : null,
+    entry.usb ?
+      'The example constructs a Usb printer, which the capture replaced with a Dummy of the same profile.' :
+      null,
     'Reviewed as a PNG against what the example prints.',
     unknown ? UNKNOWN : null,
   ].filter((note) => note).join(' ');

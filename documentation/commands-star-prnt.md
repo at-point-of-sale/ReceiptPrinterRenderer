@@ -315,6 +315,8 @@ The tables above say what the renderer does with a command. This one says which 
 
 receiptline is the only library of that set with a Star back end, and it has three: `starsbcs` is StarPRNT, `starlinesbcs` is Star Line Mode, and `stargraphic` is the raster mode of a TSP100. The same twenty one documents also go through its ESC/POS command sets, which is what the parity test of `test/external.js` compares.
 
+The sources of section 16b, the sample streams and the reference renderers, are ESC/POS only: thermal, ESCPost, escpos-tools and escpos-emulator neither write nor read a Star language, so this table is unchanged by them, and the reference renderings on the contact sheet leave the Star fixtures out for the same reason.
+
 | Command | Name | Status | Seen in |
 |---|---|---|---|
 | `ESC @` | initialize | Rendered | receiptline, every command set |

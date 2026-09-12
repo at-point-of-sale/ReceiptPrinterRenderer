@@ -1,0 +1,16 @@
+{
+  "source": "https://github.com/receiptful/escpost",
+  "file": "crates/escpost-render/tests/cases/motion/positioning-and-print-area/input.hex",
+  "commit": "c4a766513c58cebf84bc4ec6c5da8514ae2e0d88",
+  "licence": "Apache-2.0",
+  "setup": "git clone https://github.com/receiptful/escpost build/external/escpost && git -C build/external/escpost checkout c4a7665",
+  "command": "node tools/external/escpost/capture.js motion-positioning-and-print-area",
+  "version": "0.2.1",
+  "language": "esc-pos",
+  "columns": 32,
+  "width": 384,
+  "codepageMapping": "epson",
+  "captured": "2026-09-12",
+  "unknown": 0,
+  "notes": "Exercises ESC $, ESC \\, GS L and GS W, the print positions and the print area. The case names the NT-5890K profile, whose printable_width_dots is 384. The stream is the hexadecimal file of the repository, not a run of the library. Reviewed against the expected PNG of the case: the same 120 dots and the same 96 ink rows, and the first three markers on the same dots. The last two differ: the calibrated NT-5890K of the case ignores an ESC $ after printable data and a negative ESC \\, which its notes call a firmware quirk, so its markers form one block; this renderer follows the Epson baseline and draws them at x 40 and x 20."
+}

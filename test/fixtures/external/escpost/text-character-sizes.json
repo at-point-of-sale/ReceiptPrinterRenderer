@@ -1,0 +1,16 @@
+{
+  "source": "https://github.com/receiptful/escpost",
+  "file": "crates/escpost-render/tests/cases/text/character-sizes/input.hex",
+  "commit": "c4a766513c58cebf84bc4ec6c5da8514ae2e0d88",
+  "licence": "Apache-2.0",
+  "setup": "git clone https://github.com/receiptful/escpost build/external/escpost && git -C build/external/escpost checkout c4a7665",
+  "command": "node tools/external/escpost/capture.js text-character-sizes",
+  "version": "0.2.1",
+  "language": "esc-pos",
+  "columns": 48,
+  "width": 576,
+  "codepageMapping": "epson",
+  "captured": "2026-09-12",
+  "unknown": 0,
+  "notes": "Exercises GS ! over the width and height multipliers. The case names the REFERENCE profile, whose printable_width_dots is 576. The stream is the hexadecimal file of the repository, not a run of the library. Reviewed against the two expected PNGs of the case, which are the two sheets of its cut: stacked they are the same 1410 dots as this render, with 1327 ink rows against 1278 because their glyphs are heavier."
+}

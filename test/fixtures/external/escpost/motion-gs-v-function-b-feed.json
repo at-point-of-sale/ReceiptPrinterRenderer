@@ -1,0 +1,16 @@
+{
+  "source": "https://github.com/receiptful/escpost",
+  "file": "crates/escpost-render/tests/cases/motion/gs-v-function-b-feed/input.hex",
+  "commit": "c4a766513c58cebf84bc4ec6c5da8514ae2e0d88",
+  "licence": "Apache-2.0",
+  "setup": "git clone https://github.com/receiptful/escpost build/external/escpost && git -C build/external/escpost checkout c4a7665",
+  "command": "node tools/external/escpost/capture.js motion-gs-v-function-b-feed",
+  "version": "0.2.1",
+  "language": "esc-pos",
+  "columns": 32,
+  "width": 384,
+  "codepageMapping": "epson",
+  "captured": "2026-09-12",
+  "unknown": 0,
+  "notes": "Exercises GS V 66, the cut with a feed, on a profile without an autocutter. The case names the NT-5890K profile, whose printable_width_dots is 384. The stream is the hexadecimal file of the repository, not a run of the library. Reviewed against ESCPost's own render: the same 24 ink rows. It cuts the stream into two sheets of 134 dots together against 147 here, because a cut is an item here and a sheet boundary there."
+}

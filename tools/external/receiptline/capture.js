@@ -244,8 +244,8 @@ export function plain(capture) {
 /**
  * Capture one fixture
  *
- * @param  {object}   capture   One of captures()
- * @return {object}             What write() returned
+ * @param  {object}   item   One of captures()
+ * @return {object}          What write() returned
  */
 function capture(item) {
   const set = COMMAND_SETS[item.set];

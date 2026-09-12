@@ -1,0 +1,16 @@
+{
+  "source": "https://github.com/receiptful/escpost",
+  "file": "crates/escpost-render/tests/cases/graphics/gs-v0-all-scaling-modes/input.hex",
+  "commit": "c4a766513c58cebf84bc4ec6c5da8514ae2e0d88",
+  "licence": "Apache-2.0",
+  "setup": "git clone https://github.com/receiptful/escpost build/external/escpost && git -C build/external/escpost checkout c4a7665",
+  "command": "node tools/external/escpost/capture.js graphics-gs-v0-all-scaling-modes",
+  "version": "0.2.1",
+  "language": "esc-pos",
+  "columns": 32,
+  "width": 384,
+  "codepageMapping": "epson",
+  "captured": "2026-09-12",
+  "unknown": 0,
+  "notes": "Exercises GS v 0 with every m, the raster image at single and double scale. The case names the NT-5890K profile, whose printable_width_dots is 384. The stream is the hexadecimal file of the repository, not a run of the library. Reviewed against the expected PNG of the case: the same four images with the same 48 ink rows, but 138 dots here against 48 there. The case is rendered with the NT-5890K profile, whose firmware swallows the LF that follows a raster image; this renderer follows the Epson baseline, where that LF feeds a line, so the four images are 30 dots apart here and adjacent there."
+}

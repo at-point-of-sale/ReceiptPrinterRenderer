@@ -873,6 +873,65 @@ Open decisions:
 
 <br>
 
+## Section 16b: reference renderers
+
+Section 16 captures what four libraries produce. This addendum widens the suite at both ends. Part A adds the sample ESC/POS files that other open source renderers and emulators ship, so that the fixtures also carry streams that were written to exercise a renderer rather than to demonstrate an encoder. Part B puts those renderers next to this one on the contact sheet: where a tool runs on the machine that builds the sheet, its own rendering of the same stream is shown beside ours with a coarse agreement metric, so that a disagreement is something to look at rather than to argue about.
+
+Everything section 16 rules stays in force: the four files per fixture, the provenance with the fields of that section, the licence text of a source kept once in its directory, the three checks of `test/external.js`, the eye review of every golden image before it is frozen, no runtime dependencies, and nothing generated committed.
+
+**Part A: sample inputs from other renderers**
+
+A renderer's sample file is not the output of an encoder, it is a stream written by hand to exercise commands, so it reaches parts of the command set the four libraries of section 16 never send. The sources, in order:
+
+1. **zachzurn/thermal** (Rust, MIT and Apache 2.0). Its `sample_files` directory holds ESC/POS inputs, binary ones and ones in the project's own human readable format. Only real ESC/POS byte streams are captured; a sample in the human readable format is captured only when the project's own tool converts it here, see part B, and is skipped with a reason otherwise. The commit is pinned.
+2. **ESCPost** (Rust, Apache 2.0, `receiptful/escpost`), its example receipts and the inputs of its render cases, which are `.hex` files: whitespace separated hexadecimal bytes with blank lines between the blocks.
+3. **receipt-print-hq/escpos-tools** (MIT), the ESC/POS sample files of its repository and its tests.
+4. **escpos-emulator** (npm, MIT), its samples if it ships any.
+
+Rules on top of section 16:
+
+- **A sample is captured only when its licence is clear.** The licence of a source is the licence of the repository unless the sample directory says otherwise; a directory that disclaims the repository's licence, or a sample whose origin is another project, is not captured under that source. Where the same bytes are also carried by a source whose licence does cover them, they are captured there, once, and the notes say where else they turn up.
+- **The width is recorded.** Where a sample names a printer profile, the profile gives the print width and the provenance records both. Where a sample gives no width, the fixture is 576 dots, the 80 mm paper, and `notes` says the width was not given.
+- **One capture script per source** in `tools/external/<source>/capture.js`, the same shape as the scripts of section 16: `setup` clones the repository at the pinned commit under `build/`, `command` is the invocation that writes the fixture, and nothing of it runs during `npm test`.
+- **The eye review uses the source's own renderings where it ships them.** thermal carries its rendered PNG of every sample and ESCPost an expected PNG per render case; the review reads ours next to theirs and `notes` records what differs.
+
+**Part B: the reference renderings on the contact sheet**
+
+`npm run contact-sheet` grows a column per reference renderer. For every external fixture it runs the tools that are installed on the machine, shows what they made of the same stream next to our render, and writes an agreement metric into the page. A tool that is not installed is a "not available" cell, never a failure: the sheet is a review aid and has to build on a machine with none of them.
+
+Rules:
+
+- **One module per tool** in `tools/contact-sheet/references/<tool>.js`, with the pinned version, the exact commands and where the module looks for the tool written in its header, so that a maintainer can reproduce a rendering by hand. A module reports whether it is available, what it produced for a fixture and why it could not, and it never throws into the sheet.
+- **The tools**: thermal (PNG), ESCPost (PNG), `esc2html` of escpos-tools (HTML, converted to an image when a converter is present, linked otherwise) and escpos-emulator (HTML). A tool that needs a toolchain this machine does not have is built once into `build/references/` and found there; `build/` stays gitignored and out of the repository.
+- **escpos-emulator is a dev dependency** when it renders a stream without opening a port, and is driven from a capture module otherwise.
+- **One coarse agreement metric per fixture per reference** where both renderings are images: the reference is scaled to our width, and the page records the ink rows of both, the rows that carry any dark pixel, and the relative height difference. It is information, not a check: no test fails on it, and the numbers go into a small table in the contact sheet index and as a summary into the notes of this section, with the fixtures that disagree most and what the eye review says the reason is.
+- **No new runtime dependency**, and no reference tool is needed by `npm test`.
+
+Deliverables:
+
+- The new fixtures with their provenance and licences, and the capture scripts under `tools/external/<source>/`.
+- The reference modules under `tools/contact-sheet/references/` and the contact sheet extension that uses them, including the agreement table.
+- "Seen in the wild" updated on the two command pages with the commands the new fixtures exercise, naming the source.
+- A mention of the reference renderers in the README and in `documentation/usage.md`, so that a reader knows the sheet can be built with them.
+- Notes: per source the fixture count and the unknown items, which reference tools ran, and the agreement summary.
+
+Acceptance:
+
+- `npm test` passes and every new fixture passes the three checks of section 16.
+- `npm run contact-sheet` builds with the reference tools present and without them, and the page says "not available" instead of failing when one is missing.
+- No sample is committed whose licence is unclear, and the notes say which were skipped and why.
+- Version stays 0.3.0, nothing committed.
+
+Effort: 1 to 2 days.
+
+Open decisions:
+
+- **How many of ESCPost's render cases are captured.** The recommendation: its two example jobs, its calibration job and the inputs of its render cases, which are a handful each of text, graphics, motion, symbols and mechanism, rather than a selection, since they are small and each names the command group it exercises.
+- **Whether a reference rendering is cached.** The recommendation: no, the tools are fast enough and a stale cache is worse than a rebuild.
+- **Whether the agreement metric compares ink columns as well.** The recommendation: no, the row count and the height difference are enough to find the fixtures worth looking at, and a column count says little about a receipt.
+
+<br>
+
 ## Notes per section
 
 Filled in during implementation.
@@ -3022,4 +3081,255 @@ Acceptance:
   is the `ESC k` test of `test/star-prnt.js`, which now checks the band.
 - The contact sheet builds and shows all 104 fixtures with their provenance and,
   for receiptline, the SVG preview next to the render.
+- Version stays 0.3.0, nothing committed.
+
+### Section 16b
+
+Part A, the sample streams. **19 fixtures over two new sources, 0 unknown items in all
+of them**, which brings the external suite to 123 fixtures:
+
+| Source | Fixtures | Unknown items | What they carry |
+|---|---|---|---|
+| ESCPost 0.2.1, `c4a7665`, Apache 2.0 | 18 | 0 | the two example jobs, the calibration job of the profiles crate and the fifteen inputs of its eleven render cases |
+| escpos-tools `4311694`, MIT | 1 | 0 | the one ESC/POS sample of the repository, `receipt-with-logo.bin` |
+
+- **Nothing of zachzurn/thermal is captured, and the reason is its licence.**
+  `sample_files/in/README.md` of that repository is one line: "None of the files
+  in this directory are covered by this repositories license." The repository is
+  MIT or Apache 2.0, its sample directory is neither, and section 16 captures
+  only what a permissive licence covers, so the six binary samples are out. The
+  hunt for their origin found one of them: `test_receipt_2.bin` is byte for byte
+  `receipt-with-logo.bin` of escpos-tools, MD5 `72769732558bb9dc9ff97a49fcbe96b8`
+  for both, and that repository's MIT licence does cover it, so the stream is in
+  the suite once, under escpos-tools, and the capture script of that source says
+  where else it turns up. The other five are Epson demo receipts and one stream
+  that carries `https://nielsleenheer.com`, none of them with a licence to point
+  at. thermal is a reference renderer in part B instead, which needs no licence
+  for anything that is committed: its render of a fixture is generated into
+  `build/` and thrown away.
+- **The `.thermal` samples were not converted either.** The human readable
+  format has a converter in the project itself, `thermal_parser::thermal_file::parse_str`,
+  and the shim of part B could call it, so the "convert it if you can run it"
+  case is decided by the same licence line rather than by the toolchain: the
+  bytes it would produce are the bytes of a file that disclaims the licence.
+- **ESCPost ships more than example receipts.** `example-jobs` holds two `.hex`
+  jobs, and the eleven render cases of `escpost-render` hold fifteen more, four
+  of them the DataBar probes of one case, each with a
+  `case.toml` that names its printer profile, a `notes.md` that says which
+  commands it exercises and an expected PNG of ESCPost's own render. They are
+  written to walk a command group rather than to print a receipt, which is why
+  they reach commands no library of section 16 sends: every density of `ESC *`,
+  every scaling mode of `GS v 0`, `ESC 2`, `ESC J`, `GS P` and the GS1 DataBar
+  selectors of `GS k`. All fifteen inputs are captured, plus the two example jobs and
+  the calibration job of `escpost-profiles`, which is the sheet a new profile is
+  measured with. The two files that are duplicates of another case,
+  `crates/escpost/tests/fixtures/cases/{single,multi}-sheet/input.hex`, are not
+  captured twice, and neither is `render-workload.hex`, which is the calibration
+  job again.
+- **The width comes from the profile.** `printable_width_dots` of
+  `profiles/REFERENCE/profile.toml` is 576 and of `profiles/NT-5890K` 384, and
+  both give font A a twelve dot cell, so the fixtures are 48 and 32 columns. The
+  three samples that name no profile, the two example jobs and the calibration
+  job, are 576 dots and their notes say the sample gave no width, which is the
+  rule of this section.
+- **The escpos-tools sample names no width either** and is 576 dots for the same
+  reason; it is the output of the receipt-with-logo example of escpos-php, an
+  80 mm receipt, and its logo is a `GS ( L` graphic.
+- **escpos-emulator ships no samples.** The npm package is `dist` and nothing
+  else, and its repository has a `test-print.ts` that generates a receipt rather
+  than a sample file. It is a reference renderer in part B and contributes no
+  fixture.
+- **Not one of the nineteen produces an unknown item.** These streams are
+  written against renderers, so they stay inside the commands a renderer is
+  expected to have, and this one has all of them.
+
+The eye review of all nineteen, against ESCPost's expected PNGs, against thermal's
+own renders and as ASCII art, is in the `notes` of every provenance. Five of them
+found a real difference, and all five are properties of the other renderer's
+printer profile rather than of this renderer:
+
+- **`graphics-gs-v0-all-scaling-modes`**, 138 dots here against 48 there, with
+  the same 48 ink rows. The case runs on the NT-5890K profile, whose firmware
+  swallows the LF that follows a raster image; this renderer follows the Epson
+  baseline, where that LF feeds a line, so the four images are a line apart here
+  and adjacent there. ESCPost's own notes for the case describe both behaviours.
+- **`motion-line-spacing-and-feed`**, markers at 0, 30, 38 and 48 here against
+  0, 30, 40 and 60 there. Two causes: the Epson profile of this renderer counts
+  two vertical motion units per dot, so `ESC 3 10` is five dots and not ten, and
+  a line is never shorter than the eight dot band the `ESC *` of that line puts
+  on it.
+- **`motion-positioning-and-print-area`**, the same 120 dots and the same 96 ink
+  rows, with the last two markers in different columns: the calibrated NT-5890K
+  ignores an `ESC $` after printable data and a negative `ESC \`, which the case
+  calls a firmware quirk and which this renderer does not imitate.
+- **`mechanism-full-and-partial-cuts`**, 120 dots here against 280 there, same
+  ink rows. A cut is an item here and the paper stops; ESCPost makes a sheet per
+  cut and pads every sheet to the distance between the print head and the
+  cutter.
+- **`symbols-native`**, 600 against 592 dots with the same 374 ink rows and the
+  barcodes on the same dots. The QR symbol is the same version and size with a
+  different mask, which two encoders may choose differently.
+
+Part B, the reference renderers. **Two of the four ran here**, and the page
+degrades to "not available" for the other two:
+
+| Tool | Ran | What it needed | Fixtures rendered |
+|---|---|---|---|
+| thermal `9456874` | yes | a Rust toolchain and the shim crate of this repository | 76 of 76 ESC/POS fixtures |
+| ESCPost 0.2.1 | yes | a Rust toolchain, the workspace at `c4a7665` | 24 of 76, it refuses the rest |
+| esc2html `4311694` | no | php with imagick | 0 |
+| escpos-emulator 0.2.0 | yes | `npm install` | 66 of 76, 10 streams give it no receipt |
+
+- **There is no prebuilt binary for either Rust tool.** thermal has no releases
+  at all, and the three releases of ESCPost carry no assets, so the toolchain was
+  the only way. rustup was installed into the scratchpad alone, with `CARGO_HOME`
+  and `RUSTUP_HOME` pointed at it and `--no-modify-path`, never system wide and
+  with no shell profile touched; rustc 1.98.1. Both builds were minutes, not the
+  thirty that would have stopped this.
+- **ESCPost is built as a debug binary.** Its release profile has a `build.rs`
+  that refuses to build without `frontend/dist`, which only a Docker or `just`
+  build produces, and there is no Docker here. `cargo build --bin escpost`
+  skips that check, because only a release build embeds the web app, and renders
+  the same pixels. The module says so.
+- **thermal has no binary of its own**, it renders its samples from a test, so
+  `tools/contact-sheet/references/thermal-cli` is a ten line crate that calls
+  `ImageRenderer` and `HtmlRenderer` on a file. It pins the library by commit in
+  its `Cargo.toml`, so it builds without a checkout, and it is the only Rust in
+  this repository. Nothing in `npm test` or `npm run build` touches it.
+- **esc2html is skipped for imagick**, which is the documented skip: `php -m` on
+  this machine lists gd and not imagick, and every image command of the escpos-tools
+  parser, `ESC *`, `GS v 0` and the graphics group, builds its picture with
+  `new Imagick()`. The module checks php, the composer install and `php -m` in
+  that order and reports which of the three is missing, so the day imagick is
+  there the tool joins the page without a change. An HTML to image converter
+  would have given it an agreement metric as well; none of the headless browsers
+  is a dependency of this package, so the HTML is linked instead.
+- **escpos-emulator needs no port.** Its `dist/escpos-parser.js` is a module that
+  hands a receipt to a callback, so the reference module drives the parser
+  directly and writes the receipt out with the class names of the emulator's own
+  page: the parse is theirs, the page around it is ours, and the caption says so.
+  It is a dev dependency. One catch of this checkout: two dev dependencies are
+  local links that are not on the registry, so `npm install --save-dev` cannot
+  resolve the tree at all; the entry was added to `package.json` by hand and the
+  package unpacked into `node_modules`. `npm install --package-lock-only
+  --ignore-scripts` fails on the same 404, links or not, because the lock is
+  resolved against the registry, so the two entries the package needs were
+  written into `package-lock.json` by hand and checked: `escpos-emulator` 0.2.0
+  in the root `devDependencies` and as a package, with the integrity of the
+  published tarball, `sha512-2Iu+YvUf…`, verified against the sha512 of the file
+  npm pack downloaded, and its one dependency `ws` 8.20.0 next to it, so that
+  `npm ci` has nothing to complain about for this package. The lock is still
+  short of `@point-of-sale/star-graphics-printer-encoder`, which is a local link
+  and not on npm, which is what makes a normal install impossible here; the
+  whole lock gets refreshed with one `npm install` on the day the two encoder
+  packages are published.
+- **Every module reports, none of them throws.** A missing tool, a tool that
+  fails on a stream and a stream in a language the tool does not read are all a
+  cell that says "not available" with the reason. The last case is the largest
+  group on this page: the 47 StarPRNT, Star Line and Star raster fixtures of
+  receiptline are skipped by all four tools, which are ESC/POS only, 188 cells of
+  the page.
+
+Rebuilding the reference tools on another machine, in one place. Everything
+lands under `build/`, which is gitignored, and every module also takes an
+absolute path from an environment variable instead:
+
+```sh
+# a throwaway Rust toolchain, in a scratch directory and nowhere else
+export CARGO_HOME=/tmp/rpr-rust/cargo RUSTUP_HOME=/tmp/rpr-rust/rustup
+curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
+export PATH="$CARGO_HOME/bin:$PATH"          # rustc 1.98.1 here
+
+# thermal, through the shim crate of this repository, which pins the library
+# by commit 9456874a850b8604d95eca428cca027750cd6188 in its Cargo.toml
+cd tools/contact-sheet/references/thermal-cli
+CARGO_TARGET_DIR=../../../../build/references/thermal-cli cargo build --release
+cp ../../../../build/references/thermal-cli/release/thermal-cli \
+   ../../../../build/references/thermal-bin
+
+# ESCPost, the debug binary: the release profile wants a frontend bundle that
+# only a Docker or just build produces, and only a release build embeds it
+git clone https://github.com/receiptful/escpost build/references/escpost
+git -C build/references/escpost checkout c4a7665
+cd build/references/escpost && cargo build --bin escpost
+cp target/debug/escpost ../escpost-bin
+
+# esc2html, which then still needs an imagick in php -m
+git clone https://github.com/receipt-print-hq/escpos-tools build/references/escpos-tools
+git -C build/references/escpos-tools checkout 4311694
+composer install -d build/references/escpos-tools
+
+# escpos-emulator
+npm install
+```
+
+Where each module looks, in order, the first that exists winning:
+
+| Tool | Environment variable | Path under `build/references/` |
+|---|---|---|
+| thermal | `RENDERER_THERMAL` | `thermal-bin`, then `thermal-cli/release/thermal-cli` |
+| ESCPost | `RENDERER_ESCPOST` | `escpost-bin`, then `escpost/target/{debug,release}/escpost` |
+| esc2html | `RENDERER_ESC2HTML`, php at `RENDERER_PHP` | `escpos-tools/esc2html.php` |
+| escpos-emulator | none, it is a dev dependency | `node_modules/escpos-emulator` |
+
+The agreement metric, over the 100 fixture and reference pairs that are two
+images:
+
+| Reference | Pairs | Median height difference | Ink rows exactly equal |
+|---|---|---|---|
+| ESCPost | 24 | 1.9% | 15 of 24 |
+| thermal | 76 | 36.2% | 1 of 76 |
+
+- **ESCPost is the close one**, and where it disagrees the reason is one of the
+  five above, plus two of its own: it pads every sheet to the cutter, which is
+  every fixture with a cut, and it refuses a stream rather than skipping a
+  command it does not know. That refusal is why it rendered 24 of 76. All 37
+  ESC/POS fixtures of receiptline stop at `GS a`, the automatic status back
+  receiptline sends in its second byte. Six of the eight escpos-php fixtures stop
+  as well, each on something else: `ESC e`, a module width of one, a codepage of
+  255, a glyph its bundled font has not got, a QR model and a PDF417 parameter it
+  reads as a QR one. Three python-escpos fixtures stop at `ESC {`, the upside
+  down mode, two ESCPOS_NET fixtures at QR models 49 and 51, and its own four
+  DataBar probes at the selectors they were written to probe. The
+  biggest disagreements it does render are `mechanism-full-and-partial-cuts`,
+  +133%, three padded sheets against three cut items, and
+  `graphics-gs-v0-all-scaling-modes`, -65%, the swallowed LF, then
+  `python-escpos/software_columns` at -65%, where it prints three of the eight
+  rows of the example and gives up on the rest of the line.
+- **thermal disagrees everywhere, and the metric says less about it than about
+  the measurement.** It renders a wider paper than the print head, 649 dots for
+  an 80 mm receipt, with its own font and its own line height, so scaling it to
+  our width moves every row; the median of 36% is mostly that. Where it is
+  really different it is because it drops content: on
+  `receiptline/guest-escpos-32` it prints three lines and 156 dots against 528
+  here, after reporting `GS a`, `FS ( A`, `ESC SP`, `FS S` and `FS .` as unknown
+  commands, and the same happens to every receiptline fixture with a table. Its
+  own samples are the streams it renders whole, which is what its sample renders
+  are for and why the eye review of `escpos-tools/receipt-with-logo` used one.
+- **The metric never fails a test.** It is written into
+  `build/contact-sheet/index.html` as a table and into
+  `build/contact-sheet/agreement.json` next to it, both generated, and
+  `npm test` does not read either.
+
+Acceptance:
+
+- `npm test` 2113 passing, and the lint step now walks `src`, `test` and `tools`
+  whole rather than one directory deep. The fixtures of sections 2 to 16 did not
+  change a dot; the 19 new ones are additions, and the only changes to committed
+  files are the two lint fixes in the capture scripts of section 16.
+- **The lint script now reaches every directory.** Its globs used to stop at
+  `tools/**/*.js`, which the shell expands as one level, so nothing at
+  `tools/<directory>/<directory>/*.js` was linted: the capture scripts of
+  section 16 were already in that position and the reference modules of this
+  section are too. The script is `eslint --fix src test tools` now, directories
+  rather than globs, with `build/`, `dist/`, `generated/`, `node_modules/` and
+  `test/fixtures/` in the `ignorePatterns` of `.eslintrc.json` so that nothing
+  generated is linted. It turned up two findings in the capture scripts of
+  section 16, both fixed here: a 124 character line in python-escpos and a JSDoc
+  parameter named `capture` for an argument named `item` in receiptline.
+- `npm run contact-sheet` builds with the four tools present and with none of
+  them: hiding `build/references` and `node_modules/escpos-emulator` leaves a
+  page with the same 123 fixtures, every reference cell reading "not available"
+  with its reason, and the agreement table replaced by the line that says there
+  is nothing to compare.
 - Version stays 0.3.0, nothing committed.

@@ -1,0 +1,16 @@
+{
+  "source": "https://github.com/receiptful/escpost",
+  "file": "example-jobs/cafe-order-voucher.hex",
+  "commit": "c4a766513c58cebf84bc4ec6c5da8514ae2e0d88",
+  "licence": "Apache-2.0",
+  "setup": "git clone https://github.com/receiptful/escpost build/external/escpost && git -C build/external/escpost checkout c4a7665",
+  "command": "node tools/external/escpost/capture.js cafe-order-voucher",
+  "version": "0.2.1",
+  "language": "esc-pos",
+  "columns": 48,
+  "width": 576,
+  "codepageMapping": "epson",
+  "captured": "2026-09-12",
+  "unknown": 0,
+  "notes": "Exercises a raster logo, double size text, bold, alignment and a full cut. The sample names no profile and no width, so it is rendered on the 80 mm paper of the other fixtures, 576 dots. The stream is the hexadecimal file of the repository, not a run of the library. Reviewed as a PNG next to ESCPost's own render of the same job: the same blocks in the same order and 664 ink rows here against 651 there, with the paper 1240 dots against 1210 because ESCPost pads a sheet to its cutter."
+}
