@@ -794,8 +794,44 @@ Flow control:
 - **No polling.** The design describes the reference implementation polling every
   200 ms while paused. The driver does not poll: the printer sends the resume
   packet on the same characteristic, and the pause packet is matched on all nine
-  of its bytes, as is the resume packet. If a printer turns out to send a pause
-  without ever sending a resume, a timeout is the place to add.
+  of its bytes, as is the resume packet.
+- **A resume that never arrives opens the gate anyway.** A pause starts a timer of
+  `resumeTimeout` ms, a setting of the graphics section that the cat profile sets
+  to the default of 3000, after which the driver logs that no resume was received
+  and continues. A lost notification would otherwise stall a job forever. The
+  timer is cleared by the resume and by `#reset()`.
+- **Flow control is only read for a graphics printer.** The same `#handle()` serves
+  the status characteristic of an ordinary printer, whose status bytes must never
+  be mistaken for a pause, so the match is behind a test on `#graphics`.
+- **A failing notify subscription fails the connection** of a graphics printer,
+  as a `RendererError`, because flow control is not optional on this link.
+
+Failure and teardown:
+
+- **A rejecting callback does not wedge the queue.** `await callback()` is in a
+  try/catch that logs, so a failing Bluetooth write does not leave `_working`
+  true with the rest of the job stuck behind it.
+- **`clear()` empties the queue, resets the working flag and opens the gate**, and
+  a generation counter stops the run that is in flight, so a job that was waiting
+  on the gate does not carry on writing once the gate opens for the next
+  connection. `#reset()` calls it instead of a bare `resume()`.
+- **A pending `print()` always settles.** Each job registers a resolver, which the
+  queue calls at the end of the job and `#reset()` calls for whatever is left.
+  They **resolve** rather than reject: the paper is the only place to see what did
+  and did not print, and an application that never expected a rejection would get
+  an unhandled one on every disconnect. This is in the README.
+- **Writes are guarded**, `#write()` is a no-op once the print characteristic is
+  gone, so a callback that was already queued cannot throw on a null.
+- **The `disconnect` event of `navigator.bluetooth` calls `#reset()`** before it
+  emits `disconnected`, so an unexpected link drop leaves the driver in the same
+  state as a `disconnect()` the application asked for, rather than with a closed
+  gate and a queue full of writes to a printer that is gone.
+- **`#subscribe()` sets its flag last**, after `startNotifications()` resolved and
+  the listener is attached, so a subscription that failed can be tried again
+  instead of being remembered as one that succeeded.
+- **`#settings()`** evaluates every value of a graphics section against the device
+  before it is used, the same contract as the USB driver, so one profile can serve
+  models that differ in print width. The cat profile stays literal.
 
 Wrapper, `src/wrappers/meow.js`:
 
@@ -807,8 +843,11 @@ Wrapper, `src/wrappers/meow.js`:
   The renderer's rows are most significant bit first, the printer takes the least
   significant bit as the leftmost dot.
 - **Rows are padded, never truncated silently.** A row is `width / 8` bytes, 48
-  at 384 dots; an image item narrower than the print head is copied into a zeroed
-  row, a wider one is clipped to the print head.
+  at 384 dots, and a width that is not a multiple of eight throws. An image item
+  narrower than the print head is copied into a zeroed row; one that is wider
+  throws, rather than dropping the dots that fall off the paper. The renderer is
+  constructed with the width of the print head so the driver never produces one,
+  but the wrapper is exported.
 - **Every value that goes on the wire is clamped.** `clamp()` falls back to the
   default when the value is not a finite number and clamps a finite one into the
   field: speed to one byte, energy and the feeds to two bytes, and a feed item
@@ -843,8 +882,11 @@ Packet table, all checked against the protocol section of design.md:
 | pause | `51 78 ae 01 01 00 10 70 ff` | from the printer, stop writing |
 | resume | `51 78 ae 01 01 00 00 00 ff` | from the printer, continue |
 
-Tests: `npm test` runs mocha over `test/meow.js` and `test/callback-queue.js`,
-37 cases, all passing. The CRC8 is checked against three values computed by hand
+A pause that is not followed by a resume within `resumeTimeout` ms, 3000 by
+default, opens the gate anyway and logs that it did.
+
+Tests: `npm test` runs mocha over `test/meow.js`, `test/callback-queue.js` and
+`test/driver.js`, 63 cases, all passing. The CRC8 is checked against three values computed by hand
 in the header of the test file, `00` for `[00]`, `07` for `[01]` and `c0` for
 `'A'`, and against the two lattice payloads. The job sequence for a 384 by 2
 image with a known row pattern, a feed item, a feed item without a height, the
@@ -854,16 +896,23 @@ wrapper and the queue are modules without a `navigator.bluetooth` reference, so
 the tests need no browser. `npm run build` succeeds and the wrapper is in both
 bundles.
 
-The driver itself was exercised outside the test suite with a mock of the Web
-Bluetooth API: a cat printer without a renderer rejects and leaves GATT
-disconnected, a class without a static `language` rejects with the option
-message, a loader function resolves, the connected event carries `esc-pos`,
+`test/driver.js` mocks the Web Bluetooth API, which no test runner has, and
+drives the driver itself. A cat printer without a renderer rejects and leaves
+GATT disconnected, a class without a static `language` rejects with the option
+message, a notify characteristic that refuses to subscribe rejects and
+disconnects, a loader function resolves, the connected event carries `esc-pos`,
 `epson` and 32 columns, `rendererOptions` are merged underneath the driver's
 values, the notify characteristic is subscribed once during open and not again
-by `listen()`, a print produces eleven packets in the order of the table above,
-and the pause packet stops the writes until the resume packet arrives. The same
-mock confirms that a generic ESC/POS printer still reports no `columns`, still
-chunks a 250 byte job into 100, 100 and 50, and still emits `data` events.
+by `listen()`, a print produces the eleven packets of the table above, a job
+given as several buffers and as a `DataView` on a slice arrives at the renderer
+as one buffer, the pause packet stops the writes until the resume arrives, a
+pause with no resume continues after the timeout, and a `disconnect()` or a
+dropped link during a pause settles the pending job and writes nothing more,
+before or after. The same file confirms that an ordinary printer still reports
+no `columns`, still chunks a 250 byte job into 100, 100 and 50, subscribes to
+its status characteristic on `listen()` only, and does not read the cat printer
+pause bytes as flow control. The suite runs clean under
+`--unhandled-rejections=strict`.
 
 Version: 3.0.0, a major bump, because the passthrough of the `meow` language is
 gone. Optional peer dependency on `@point-of-sale/receipt-printer-renderer`
