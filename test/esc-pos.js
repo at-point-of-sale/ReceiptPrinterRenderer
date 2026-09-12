@@ -87,6 +87,30 @@ const GS = 0x1d;
 const LF = 0x0a;
 
 describe('EscPosRenderer', function() {
+  describe('FS q, define NV bit image', function() {
+    it('should consume every image of the definition and keep the text after it', function() {
+      const renderer = new EscPosRenderer({width: 576, commands: ['unknown']});
+
+      /* Two images: 1 x 1 bytes (8 data bytes) and 2 x 1 bytes (16 data bytes) */
+      const definition = [
+        0x1c, 0x71, 2, 1, 0, 1, 0, ...new Array(8).fill(0x41), 2, 0, 1, 0, ...new Array(16).fill(0x41),
+      ];
+      const items = renderer.render([0x1b, 0x40, ...definition, 0x42, 0x0a]);
+      const plain = new EscPosRenderer({width: 576}).render([0x1b, 0x40, 0x42, 0x0a]);
+
+      const unknown = items.filter((i) => i.type === 'unknown');
+
+      assert.equal(unknown.length, 1);
+      assert.equal(unknown[0].data.length, definition.length);
+      assert.deepEqual(items.filter((i) => i.type === 'image'), plain.filter((i) => i.type === 'image'));
+    });
+
+    it('should stop cleanly when the definition is cut off', function() {
+      const renderer = new EscPosRenderer({width: 576});
+      assert.doesNotThrow(() => renderer.render([0x1b, 0x40, 0x1c, 0x71, 1, 4, 0, 4, 0, 0x41]));
+    });
+  });
+
   describe('options', function() {
     it('should be the esc-pos language', function() {
       assert.equal(EscPosRenderer.language, 'esc-pos');
