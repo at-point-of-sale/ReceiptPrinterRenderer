@@ -1445,3 +1445,9 @@ Acceptance:
 
 - `npm test` 1047 passing, `npm run build` clean, `npm run test:types` and
   `npm run test:umd` pass. Version 0.3.0, nothing published, nothing committed.
+
+### Fixtures regenerated with encoder 4.0.0, 2026-09-12
+
+The golden fixtures were regenerated with ReceiptPrinterEncoder 4.0.0, linked from the local checkout before it was published. 38 byte streams changed, because version 4 emits fewer style commands, orders a pending font change before the alignment padding and no longer feeds after lines that only change printer state. On paper 36 fixtures changed: every block fixture lost the blank line that used to precede the block, 30 dots on ESC/POS and 32 on StarPRNT, and the `receipt` and `hri` fixtures kept their height but gained a centred first line, which the encoder's initialize fix made possible. The text fixtures are byte for byte the same paper as before, which is the end-to-end check of both libraries the design asked for.
+
+The devDependency range stays at `^3.0.0` until 4.0.0 is published, so a fresh `npm install` resolves; regenerating with 3.0.3 would revert these fixtures, so bump the range and regenerate together once the encoder is on npm.
