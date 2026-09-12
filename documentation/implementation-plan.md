@@ -600,13 +600,23 @@ not committed. Files: `src/wrappers/star-raster.js`, `src/main.js`,
 Choices made where the design was silent:
 
 - **The `graphics` section of a profile is keyed by language**, so the Star
-  profile carries `graphics: { 'star-graphics': { width, commands, wrapper } }`
-  and the driver looks up `profile.graphics[language]` after resolving the
-  language. The Star profile resolves five different languages from one entry,
-  so a flat section would have had to be guarded by a language test in the
-  driver. Keyed by language, a profile with a plain string language, such as the
-  cat printer profile of section 7, writes its own language as the single key
+  profile carries `graphics: { 'star-graphics': { width, commands, wrapper,
+  tearBar } }` and the driver looks up `profile.graphics[language]` after
+  resolving the language. The Star profile resolves five different languages from
+  one entry, so a flat section would have had to be guarded by a language test in
+  the driver. Keyed by language, a profile with a plain string language, such as
+  the cat printer profile of section 7, writes its own language as the single key
   and needs no special case in `#open()`.
+- **The values of a graphics section may be functions of the device**, the same
+  as `language` and `codepageMapping` already are. `#settings()` evaluates them
+  through the existing `#evaluate()` before the section is used. The TSP103 and
+  TSP113 have a tear bar instead of a cutter, and the only thing that tells them
+  apart from the TSP143 is the product name, so `tearBar` is
+  `device => /TSP1[01]3/.test(device.productName)`.
+- **A tear bar model cuts with FF mode 3.** The mode tables of `ESC * r F n NUL`
+  mark the cutter modes 9 and 13 invalid on a tear bar model and mode 3 invalid
+  on a cutter model, so both cut types become mode 3, which feeds the paper to
+  the tear bar. EOT mode 1 is valid on both and stays as it is.
 - **The wrapper returns one `Uint8Array`** holding the whole job, not a list of
   chunks. The existing `print()` sends the command it is given in a single
   `transferOut()`, and nothing in it chunks or paces, so the graphics path does
@@ -615,16 +625,26 @@ Choices made where the design was silent:
   receipt. Chunking belongs to the Bluetooth driver, where the link needs
   pacing, and there the wrapper returns packets instead.
 - **A renderer class is a function with a static `language` string**, anything
-  else that is a function is a loader and is called and awaited. The result must
-  be a class by that same rule, otherwise `#resolve()` throws with a message
-  about the option. This avoids calling a class as a function, which throws a
-  `TypeError` that says nothing useful.
-- **`connect()` only swallows the device selection.** The existing `try` around
-  the whole of `connect()` would have turned the missing renderer error into a
-  `console.log`, which is exactly the hard to diagnose situation the design wants
-  to avoid. The `try` now wraps `requestDevice()` alone, which is the call that
-  throws when the user cancels the dialog, and errors from `#open()` reach the
-  caller, the same as they already did in `reconnect()`.
+  else that is a function is a loader and is called and awaited. A class without
+  the property is therefore called as a loader, which throws a `TypeError` about
+  invoking a class constructor, so the whole resolution sits in a `try` and every
+  failure is rethrown as one `RendererError` that explains the option.
+- **Renderer and wrapper are resolved before the device is opened.** The profile
+  and the product name are all that the language, the graphics section and the
+  renderer depend on, and those are available on a `USBDevice` without opening
+  it. A missing renderer, a bad renderer option or a wrapper name that is not in
+  the table therefore leaves the device untouched instead of half open. An
+  unknown wrapper name throws a `RendererError` that names it.
+- **`connect()` keeps its old behaviour for everything but the renderer.**
+  Cancelling the dialog, a printer another application already claimed, a failing
+  `claimInterface()`, all of those are still logged and swallowed, as in 2.0.
+  Only a `RendererError` is rethrown, because that one is a mistake in the
+  application and the exact thing the design wants to be easy to diagnose. This
+  is one sentence in the README, in the connect section, and the version stays
+  2.1.0.
+- **`print()` takes the graphics path whenever `#graphics` is set**, so a
+  graphics printer can never silently fall back to sending raw bytes, which is
+  what prints garbage on a TSP100.
 - **`columns` is only reported for graphics printers.** For every other printer
   the driver does not know the print width, and inventing 42 or 48 would be a
   guess the application cannot tell apart from knowledge. The README says so.
@@ -635,19 +655,31 @@ Choices made where the design was silent:
 - **`width` and `commands` always come from the profile**, `rendererOptions` is
   merged underneath, so an application can pass `maxHeight` or a `font` but
   cannot break the agreement between the print width and the reported columns.
-- **An empty segment sends no FF mode.** The mode command is written lazily,
-  before the first row or feed of a segment, so a job that ends right after a cut
-  does not emit a stray `ESC * r F 1 NUL`, and a `cut` on an empty buffer sends
-  only `ESC FF NUL`, which the printer ignores, as the specification says it
-  does. The same flag decides whether a `pulse` is preceded by `ESC FF NUL`.
+- **A cut is never executed on an empty buffer.** `ESC FF NUL` is ignored when
+  there is no raster data, so a segment that has to cut but sent no rows gets one
+  blank row, `62 01 00 00`, after its FF mode and before the execute. That covers
+  a job that starts with a cut, two cuts in a row, and the common case of a feed
+  item followed by a cut, which is what the renderer produces for a receipt whose
+  blank rows before the cut became a feed item. The same applies at the end of
+  the job: a last segment with feeds but no rows gets a blank row before
+  `ESC FF EOT`, so a trailing feed still advances the paper.
+- **The wrapper tracks `rows` and `open` separately.** `open` says the FF mode of
+  the segment was written, `rows` says raster data was sent. A pulse executes the
+  FF mode only when rows were sent, because there is nothing to print otherwise,
+  while a cut executes it always, with the blank row above if needed.
 - **The wrapper takes an options object** which is the graphics section of the
-  profile. It reads `quality` and `pageLength` from it, defaulting to `0` and
-  `0`, the high speed and continuous settings of the design. Nothing in the
-  profile sets them today, but a model that needs a page length has a place to
-  say so.
-- **Pulse times that are absent or out of range** fall back to 20, the printer
-  default of 200 ms, and are clamped to the defined area of 1 to 127 units of
-  10 ms.
+  profile. It reads `quality`, `pageLength` and `tearBar` from it, defaulting to
+  `0`, `0` and `false`, the high speed and continuous settings of the design.
+  Only `tearBar` is set by the profile today, but a model that needs a page
+  length has a place to say so.
+- **`setting()` never writes a value that is not a number.** Anything
+  non-finite or negative becomes `0`, so a feed item without a height sends
+  `ESC * r Y 0 NUL` instead of the three letters of `NaN`.
+- **The pulse width comes from the first pulse item on device 0 only.**
+  `ESC BEL n1 n2` sets the timing of external device 1; the timing of device 2 is
+  fixed in the printer, so a job that only pulses device 2 sends no width at all.
+  Times that are absent or out of range fall back to 20, the printer default of
+  200 ms, and are clamped to the defined area of 1 to 127 units of 10 ms.
 - **`ESC * r D n NUL` takes `1` for device 0 and `2` for device 1**, any other
   device value falls back to drawer 1.
 
@@ -670,14 +702,18 @@ Byte sequences, all checked against star-graphics-mode.md:
 | pulse width | `1b 07 n1 n2` | `ESC BEL n1 n2` |
 
 The `n..` of the setting commands is ASCII decimal digits, so FF mode 13 is
-`31 33 00`. The pulse width is the only one with binary arguments.
+`31 33 00` and FF mode 3 is `33 00`. The pulse width is the only one with binary
+arguments.
 
-Tests: `npm test` runs mocha over `test/star-raster.js`, seven cases, all
+Tests: `npm test` runs mocha over `test/star-raster.js`, fourteen cases, all
 passing. Image then partial cut, image then pulse then image then full cut, feed
 items between images, an image with an all white row and a row with a white tail,
-an image ending without a cut, a pulse with no rows before it, and pulse width
-clamping on drawer 2. Every expectation is a literal byte array. The wrapper is
-its own module without a `navigator.usb` reference, so the tests need no browser.
+an image ending without a cut, a pulse with no rows before it, pulse width
+clamping, a pulse on device 1 without a width, the pipeline a real receipt
+produces of image then pulse then feed then cut, a job starting with a cut, two
+cuts in a row, a job of nothing but a feed, a feed item without a height, and a
+tear bar cut. Every expectation is a literal byte array. The wrapper is its own
+module without a `navigator.usb` reference, so the tests need no browser.
 `npm run build` succeeds and the wrapper is in both bundles.
 
 Not verified on hardware yet. The two things to confirm on a TSP100 are that
