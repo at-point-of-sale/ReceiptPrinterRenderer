@@ -609,6 +609,7 @@ Settled on 2026-09-11:
 - The TSP100 raster wrapper is taken from Star's CUPS driver, including a vertical feed command, so `feed` is supported there.
 - Hardware for verification: a TSP100 over USB, cat printers of the GB and GT series, and an Epson printer for the golden images. No LAN or WLAN TSP100.
 
+- Verified on paper on 2026-09-12 with a TSP143IIIU over USB through the local playground: text, table, rule, barcode, QR code, cut and drawer all print as intended with the ESC/POS renderer and the Star raster wrapper.
 - The TSP100 drawer is driven inside raster mode with `ESC * r D n NUL`, after printing the pending rows. The specification also revealed that mode commands are ignored while data is buffered, which the wrapper handles by setting the FF mode per segment.
 
 Still open:
