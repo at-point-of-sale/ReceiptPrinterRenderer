@@ -99,7 +99,16 @@ import {pdf417 as encodePdf417} from './symbologies/pdf417.js';
  * @property {boolean} invert      White on black
  * @property {number} width        Horizontal size multiplier, 1 to 8
  * @property {number} height       Vertical size multiplier, 1 to 8
+ * @property {boolean} rotate      Turn every character cell a quarter turn clockwise
  * @property {boolean} upsideDown  Rotate every committed line by 180 degrees
+ */
+
+/**
+ * Which set a user defined glyph belongs to, and how wide its cell is
+ *
+ * @typedef {object} GlyphRequest
+ * @property {boolean} [multibyte]   The glyph of a multibyte character code, drawn in a cell of two
+ *                                   characters, instead of a glyph of the current font
  */
 
 /**
@@ -147,7 +156,18 @@ const INITIAL_ROWS = 256;
 /* The style the human readable text of a barcode is drawn in, which is never
    the style of the text around it */
 
-const PLAIN = {bold: false, underline: 0, upperline: 0, invert: false, width: 1, height: 1};
+const PLAIN = {bold: false, underline: 0, upperline: 0, invert: false, width: 1, height: 1, rotate: false};
+
+/* The set the user defined glyphs of a multibyte character code belong to.
+   The glyphs of the single byte codes belong to the set of the font they were
+   defined in, 'A' or 'B', so this name is not one of those */
+
+const MULTIBYTE_GLYPHS = 'multibyte';
+
+/* How many characters wide the cell of a multibyte glyph is, which is the two
+   cells the placeholder of a multibyte character takes as well */
+
+const MULTIBYTE_CELLS = 2;
 
 /* The default tab stops of a printer, every eight characters of font A, and
    the most stops ESC D can set */
@@ -219,6 +239,8 @@ class Painter {
 
   #line;
   #definitions;
+  #glyphs;
+  #glyphSerial;
 
   #pageHeight;
   #pageSetup;
@@ -296,6 +318,14 @@ class Painter {
 
     this.#definitions = new Map();
 
+    /* The user defined glyphs are the other memory of the printer, and the
+       other lifetime: they live in RAM, so an initialize throws them away, see
+       reset(). The serial number changes with every definition, so that a cell
+       of a glyph that was redefined is never taken from the cache */
+
+    this.#glyphs = new Map();
+    this.#glyphSerial = 0;
+
     this.#clear();
     this.reset();
   }
@@ -338,7 +368,7 @@ class Painter {
 
     this.page(false);
 
-    this.#style = {bold: false, underline: 0, upperline: 0, invert: false, width: 1, height: 1};
+    this.#style = {bold: false, underline: 0, upperline: 0, invert: false, width: 1, height: 1, rotate: false};
     this.#font = 'A';
     this.#align = 'left';
     this.#lineSpacing = this.#defaultLineSpacing;
@@ -347,6 +377,12 @@ class Painter {
     this.#margins = {left: 0, width: null};
     this.#upsideDown = false;
     this.#line = this.#empty();
+
+    /* The glyphs a stream downloaded live in the RAM of the printer, which an
+       initialize clears, unlike the images of the graphics commands, which are
+       its NV memory and survive */
+
+    this.#glyphs.clear();
 
     /* The print area and the print direction of page mode are settings of the
        printer, not of one page: a stream sets them in standard mode or in page
@@ -407,12 +443,79 @@ class Painter {
   }
 
   /**
+     * Keep the glyph a stream downloaded for a character code, or cancel it
+     * again with a bitmap of null.
+     *
+     * A single byte glyph belongs to the font that is current when it is
+     * defined, so font A and font B hold a set of their own, and a multibyte
+     * glyph belongs to a set of its own. The dots are kept as they were
+     * defined; the cell they are drawn in is decided when they are printed,
+     * because the size, the style and the font of that moment decide it.
+     *
+     * @param  {number}         code       The character code the glyph belongs to
+     * @param  {Bitmap|null}    bitmap     The dots of the glyph, or null to cancel the definition
+     * @param  {GlyphRequest}   [options]  Which set the glyph belongs to
+     */
+  defineGlyph(code, bitmap, options) {
+    const key = this.#glyphKey(code, options);
+
+    if (!bitmap) {
+      this.#glyphs.delete(key);
+      return;
+    }
+
+    this.#glyphSerial++;
+    this.#glyphs.set(key, {bitmap, serial: this.#glyphSerial});
+  }
+
+  /**
+     * Whether a character code has a glyph a stream downloaded, in the set the
+     * options name
+     *
+     * @param  {number}         code        The character code
+     * @param  {GlyphRequest}   [options]   Which set to look in
+     * @return {boolean}                    True when the set holds a glyph for it
+     */
+  hasGlyph(code, options) {
+    return this.#glyphs.has(this.#glyphKey(code, options));
+  }
+
+  /**
+     * Append the glyph a stream downloaded for a character code, in the current
+     * style, the way text() appends a built in one. The dots are placed in the
+     * top left corner of the cell and the rest of the cell stays blank, which
+     * is what a glyph that is narrower or shorter than the cell prints like.
+     *
+     * @param  {number}         code        The character code
+     * @param  {GlyphRequest}   [options]   Which set the glyph belongs to
+     * @return {boolean}                    True when the set held a glyph and it was placed
+     */
+  glyph(code, options) {
+    const definition = this.#glyphs.get(this.#glyphKey(code, options));
+
+    if (!definition) {
+      return false;
+    }
+
+    const cells = options && options.multibyte ? MULTIBYTE_CELLS : 1;
+
+    /* The character spacing follows every cell the glyph takes, so a multibyte
+       glyph of two cells leaves the space placeholder(2) would have left */
+
+    this.#place(this.#glyphCell(definition, cells), this.#spacing * this.#style.width * cells);
+
+    return true;
+  }
+
+  /**
      * Change one or more style properties. Properties that are not given keep
      * their value.
      *
      * Upside down is not a property of a cell but of the line it lands on: it
      * rotates every line that is committed from here on, so it is kept apart
-     * from the style the cells are drawn in.
+     * from the style the cells are drawn in. The rotation of ESC V is the other
+     * way round, a property of the cell: every cell is turned a quarter turn
+     * clockwise and the cells still go left to right along the line.
      *
      * @param  {Partial<Style>}   changes   The properties to change
      */
@@ -421,7 +524,7 @@ class Painter {
       return;
     }
 
-    for (const property of ['bold', 'underline', 'upperline', 'invert', 'width', 'height']) {
+    for (const property of ['bold', 'underline', 'upperline', 'invert', 'width', 'height', 'rotate']) {
       if (typeof changes[property] !== 'undefined') {
         this.#style[property] = changes[property];
       }
@@ -1316,8 +1419,7 @@ class Painter {
     name = name || this.#font;
     style = style || this.#style;
 
-    const key = `${name}|${codepoint}|${style.bold ? 1 : 0}${style.underline}${style.upperline || 0}` +
-      `${style.invert ? 1 : 0}|${style.width}x${style.height}`;
+    const key = `${name}|${codepoint}|${this.#styleKey(style)}`;
 
     if (this.#cache.has(key)) {
       return this.#cache.get(key);
@@ -1335,12 +1437,95 @@ class Painter {
       underline: style.underline,
       upperline: style.upperline || 0,
       invert: style.invert,
+      rotate: this.#rotated(style),
       stretch: Font.isBoxDrawing(codepoint),
     });
 
     this.#cache.set(key, cell);
 
     return cell;
+  }
+
+  /**
+     * The cell of a glyph a stream downloaded, in the current style and the
+     * current font. The dots go in the top left corner of a cell of the font,
+     * which is then drawn by the font itself, so that a downloaded glyph is
+     * scaled, overstruck, underlined and inverted exactly as a built in one is.
+     *
+     * @param  {object}   definition   The glyph and the serial number of its definition
+     * @param  {number}   cells        Width of the cell in characters of the current font
+     * @return {Bitmap}                The cell
+     */
+  #glyphCell(definition, cells) {
+    const style = this.#style;
+    const key = `U|${this.#font}|${definition.serial}|${cells}|${this.#styleKey(style)}`;
+
+    if (this.#cache.has(key)) {
+      return this.#cache.get(key);
+    }
+
+    const font = this.#fonts[this.#font];
+    const size = this.#cells[this.#font];
+
+    /* A glyph that is narrower or shorter than the cell is placed at its top
+       left corner, and one that is larger is clipped by it: the cell of the
+       font is what a character takes on the line, whatever the stream defined */
+
+    const glyph = Bitmap.create(size.width * cells, size.height);
+
+    Bitmap.blit(definition.bitmap, glyph, 0, 0);
+
+    const cell = font.renderGlyph(glyph, {
+      cellWidth: glyph.width,
+      cellHeight: glyph.height,
+      widthMultiplier: style.width,
+      heightMultiplier: style.height,
+      bold: style.bold,
+      underline: style.underline,
+      upperline: style.upperline || 0,
+      invert: style.invert,
+      rotate: this.#rotated(style),
+    });
+
+    this.#cache.set(key, cell);
+
+    return cell;
+  }
+
+  /**
+     * The key a style is cached under, which is every property that changes a
+     * dot of a cell
+     *
+     * @param  {Style}    style   The style
+     * @return {string}           The key
+     */
+  #styleKey(style) {
+    return `${style.bold ? 1 : 0}${style.underline}${style.upperline || 0}${style.invert ? 1 : 0}` +
+      `${this.#rotated(style) ? 1 : 0}|${style.width}x${style.height}`;
+  }
+
+  /**
+     * Whether the cells of a style are turned a quarter turn clockwise, which
+     * is the rotation of ESC V. It is a standard mode command, so a page of
+     * page mode is laid out upright whatever the setting is.
+     *
+     * @param  {Style}     style   The style
+     * @return {boolean}           True when the cell is turned
+     */
+  #rotated(style) {
+    return style.rotate === true && !this.#page;
+  }
+
+  /**
+     * The key a user defined glyph is kept under: the set it belongs to and its
+     * character code
+     *
+     * @param  {number}         code        The character code
+     * @param  {GlyphRequest}   [options]   Which set the glyph belongs to
+     * @return {string}                     The key
+     */
+  #glyphKey(code, options) {
+    return `${options && options.multibyte ? MULTIBYTE_GLYPHS : this.#font}|${code}`;
   }
 
   /**

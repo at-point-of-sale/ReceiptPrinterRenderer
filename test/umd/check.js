@@ -37,7 +37,7 @@ assert.equal(typeof ReceiptPrinterRenderer, 'function', 'the global is the class
 /* The bundle runs in its own context, so its arrays have another Array
    prototype than this module's and are compared as text */
 
-assert.equal(ReceiptPrinterRenderer.languages.join(' '), 'esc-pos star-prnt star-line');
+assert.equal(ReceiptPrinterRenderer.languages.join(' '), 'esc-pos star-prnt star-line star-graphics');
 
 assert.equal(typeof ReceiptPrinterRenderer.EscPosRenderer, 'function');
 assert.equal(typeof ReceiptPrinterRenderer.StarPrntRenderer, 'function');
@@ -74,4 +74,4 @@ for (const language of ReceiptPrinterRenderer.languages) {
 
 assert.throws(() => new ReceiptPrinterRenderer({language: 'meow', width: 576}), /Unknown language meow/);
 
-console.log('UMD global is ReceiptPrinterRenderer, renders esc-pos, star-prnt and star-line');
+console.log('UMD global is ReceiptPrinterRenderer, renders esc-pos, star-prnt, star-line and star-graphics');

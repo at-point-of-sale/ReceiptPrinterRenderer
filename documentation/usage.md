@@ -98,7 +98,7 @@ These are the options:
 
 | Option | Default | Meaning |
 |---|---|---|
-| `language` | `esc-pos` | The language the commands are in: `esc-pos`, `star-prnt` or `star-line`. Anything else throws. |
+| `language` | `esc-pos` | The language the commands are in: `esc-pos`, `star-prnt`, `star-line` or `star-graphics`. Anything else throws. |
 | `width` | required | Width of the print area in dots. Must be a multiple of 8. |
 | `codepageMapping` | `epson` for ESC/POS, `star` for StarPRNT | The mapping the encoder used, so that the codepage selection command can be turned back into a codepage. The same names as the encoder's mappings for that language. |
 | `commands` | `[]` | Command types that may appear in the output: `cut`, `pulse`, `feed` and `unknown`. Everything else falls back, see [Commands the printer supports](#commands-the-printer-supports). |
@@ -120,14 +120,16 @@ It also reports the language it was created for, which is what a driver puts in 
 
 ```js
 console.log(renderer.language);                  //  esc-pos
-console.log(ReceiptPrinterRenderer.languages);   //  [ 'esc-pos', 'star-prnt', 'star-line' ]
+console.log(ReceiptPrinterRenderer.languages);   //  [ 'esc-pos', 'star-prnt', 'star-line', 'star-graphics' ]
 ```
+
+The first three are the languages of the encoder. `star-graphics` is the raster protocol of the Star TSP100 family, which a driver resolves from the profile of the printer it is connected to: a job in it is the StarPRNT command set with the raster mode of `ESC * r A` in it, so it renders with the same renderer, and a renderer created for it reports `star-graphics`.
 
 <br>
 
 ### The renderer of one language
 
-StarPRNT and Star Line Mode are the same set of commands, so there are two renderers underneath: `EscPosRenderer` for ESC/POS and `StarPrntRenderer` for both Star languages. They are named exports, they take the same options without `language`, and they produce exactly the same items. Use them when the language is fixed anyway, or when you want to bundle one language only.
+StarPRNT, Star Line Mode and the raster protocol of a TSP100 are one set of commands, so there are two renderers underneath: `EscPosRenderer` for ESC/POS and `StarPrntRenderer` for all three Star languages. They are named exports, they take the same options without `language`, and they produce exactly the same items. Use them when the language is fixed anyway, or when you want to bundle one language only.
 
 ```js
 import { EscPosRenderer, StarPrntRenderer } from '@point-of-sale/receipt-printer-renderer';
@@ -142,7 +144,7 @@ console.log(EscPosRenderer.language);    //  esc-pos
 console.log(StarPrntRenderer.language);  //  star-prnt
 ```
 
-A `ReceiptPrinterRenderer` created for `star-line` renders with `StarPrntRenderer`, but reports `star-line`, because that is the language the encoder that produced the commands was configured with:
+A `ReceiptPrinterRenderer` created for `star-line` or for `star-graphics` renders with `StarPrntRenderer`, but reports the language it was given, because that is the language the encoder that produced the commands was configured with, or the protocol the driver is speaking:
 
 ```js
 let renderer = new ReceiptPrinterRenderer({ language: 'star-line', width: 576, codepageMapping: 'star' });
@@ -358,6 +360,7 @@ Passing a renderer is optional. Without one a driver for a printer that only pri
 The renderer covers the commands ReceiptPrinterEncoder version 3 emits. A few things are recognised, so that the rest of the stream stays in sync, but do not appear on the paper:
 
 - **Maxicode, the two dimensional GS1 DataBar and the composite symbologies.** The other selectors of the two dimensional group of `GS ( k`, parsed and reported as an `unknown` item.
+- **CJK text, and the logos a printer already holds.** There is no CJK font here, so a multibyte character is drawn as two placeholder cells unless the stream downloaded a glyph for it itself, and an image the stream never defined is reported instead of printed. Glyphs and images a stream does define are drawn, see the `ESC &` and the graphics rows of the ESC/POS reference.
 - **Commands the parser does not know.** Skipped according to the argument lengths of the specification and reported as an `unknown` item, so that one command the renderer has never seen does not derail the text after it.
 
 An `unknown` item only reaches you when `unknown` is in `commands`, otherwise it is dropped. It carries the bytes of the command, which makes it the place to look when something is missing from a render. A command that cannot change the paper at all, a status request or a setting of the printer, does not produce one: it is consumed with its length and nothing else happens, so an `unknown` item always means something that could have been on the paper is not. The two command references say which is which, under "Statuses".

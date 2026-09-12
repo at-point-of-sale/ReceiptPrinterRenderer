@@ -70,6 +70,16 @@ const rendererOptions: ReceiptPrinterRendererOptions = {
 const renderer: ReceiptPrinterRenderer = new ReceiptPrinterRenderer(rendererOptions);
 const fallback = new NamedReceiptPrinterRenderer({width: 384});
 
+/* The raster protocol of a TSP100 is a language of its own, which is what a
+   driver resolves from the profile of one */
+
+const graphics: ReceiptPrinterRenderer = new ReceiptPrinterRenderer({
+  language: 'star-graphics',
+  width: 576,
+  codepageMapping: 'star',
+  commands,
+});
+
 const language: RenderLanguage = renderer.language;
 const total: number = renderer.columns + fallback.columns;
 
@@ -152,6 +162,7 @@ void languages;
 void supported;
 void columns;
 void language;
+void graphics;
 void total;
 void attached;
 void attachedStar;

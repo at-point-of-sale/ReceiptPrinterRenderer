@@ -39,10 +39,10 @@ const items = renderer.render(bytes);
 */
 ```
 
-`ReceiptPrinterRenderer` takes the language as an option, the way ReceiptPrinterEncoder does: `esc-pos`, `star-prnt` or `star-line`. Underneath are two renderers, sharing the same painter and output format, which are named exports for code that only ever needs one language:
+`ReceiptPrinterRenderer` takes the language as an option, the way ReceiptPrinterEncoder does: `esc-pos`, `star-prnt`, `star-line`, or `star-graphics` for the raster protocol of a Star TSP100. Underneath are two renderers, sharing the same painter and output format, which are named exports for code that only ever needs one language:
 
 - `EscPosRenderer` renders the commands the encoder emits for the `esc-pos` language.
-- `StarPrntRenderer` renders the commands the encoder emits for the `star-prnt` and `star-line` languages.
+- `StarPrntRenderer` renders the commands the encoder emits for the `star-prnt` and `star-line` languages, and the raster jobs of the `star-graphics` protocol.
 
 And there are four helpers to do something with the images:
 

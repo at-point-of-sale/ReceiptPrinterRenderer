@@ -35,6 +35,38 @@ const DEFAULT_DPI = 203;
 
 const MAX_REVERSE_UNITS = 48;
 
+/* The character codes ESC & defines a glyph for and ESC ? cancels one for, and
+   the height of a definition: three bytes of eight dots, the 24 dots of the
+   fonts of these printers, which is the only value the reference gives y for
+   them. A code outside the range makes the printer ignore the command, and a
+   height that is not three leaves the parser without a layout for the data
+   behind it, see userDefinedArguments */
+
+const FIRST_GLYPH_CODE = 0x20;
+const LAST_GLYPH_CODE = 0x7e;
+const GLYPH_BYTES = 3;
+
+/* The size of a user defined Kanji glyph of FS 2: 24 by 24 dots in column
+   format, three bytes per column, which is 72 data bytes */
+
+const KANJI_GLYPH_SIZE = 24;
+const KANJI_GLYPH_BYTES = (KANJI_GLYPH_SIZE / 8) * KANJI_GLYPH_SIZE;
+
+/* The values ESC V n accepts. 0 and 48 switch the rotation off, 1, 49, 2 and 50
+   switch it on: the two differ in the space the printer leaves between the
+   rotated characters, one dot against one and a half, which a cell of whole
+   dots has no room for. Anything else leaves the rotation as it was */
+
+const ROTATION = Object.assign(Object.create(null), {
+  0: false, 1: true, 2: true, 48: false, 49: true, 50: true,
+});
+
+/* The functions of GS ( N, the colour of the characters and of the background
+   they are printed on, and the shading mode. This renderer draws one bit, so
+   every colour is the black of its paper */
+
+const COLOUR_FUNCTIONS = [48, 49, 50];
+
 /* The code system FS C selects, which decides which bytes are the lead byte of
    a multibyte character in Kanji mode */
 
@@ -122,12 +154,6 @@ const DOWNLOAD_BIT_IMAGE = 'download-bit-image';
 
 const MONOCHROME = 48;
 const MULTI_TONE = 52;
-
-/* The colour of a block of graphics data. Colour 1 is the black of a single
-   colour printer, the other colours belong to a second ribbon or a second
-   thermal layer and are consumed without being drawn */
-
-const FIRST_COLOUR = 49;
 
 /* The size the graphics functions of GS ( L accept, in dots: the direction the
    data runs in holds up to 8192 dots and the other one up to 2047, so a raster
@@ -397,6 +423,43 @@ function nvBitImageArguments(bytes, index) {
 }
 
 /**
+ * Arguments of ESC & y c1 c2 [x d1..d(y * x)]1..[..], the definition of the
+ * glyphs of the character codes c1 to c2. Every character carries the number of
+ * columns it is wide and y bytes of eight dots per column.
+ *
+ * @param  {Uint8Array}   bytes   The whole stream
+ * @param  {number}       index   Position of the first argument
+ * @return {number}               Number of argument bytes, or -1 when the stream is too short
+ */
+function userDefinedArguments(bytes, index) {
+  if (index + 3 > bytes.length) {
+    return -1;
+  }
+
+  const characters = bytes[index + 2] - bytes[index + 1] + 1;
+
+  /* A height the fonts of these printers do not have is a command the parser
+     has no layout for, so it consumes the three parameters and leaves the rest
+     to the stream, which is what it does for a c2 below c1 as well */
+
+  if (bytes[index] !== GLYPH_BYTES) {
+    return 3;
+  }
+
+  let length = 3;
+
+  for (let character = 0; character < characters; character++) {
+    if (index + length + 1 > bytes.length) {
+      return -1;
+    }
+
+    length += 1 + bytes[index + length] * GLYPH_BYTES;
+  }
+
+  return length;
+}
+
+/**
  * Arguments of GS * x y d1..dk, a downloaded bitmap
  *
  * @param  {Uint8Array}   bytes   The whole stream
@@ -462,26 +525,17 @@ function realTimeRequestArguments(bytes, index) {
     tables consume their prefix alone, which is the best guess there is.
 */
 
-/* FS 2 c1 c2 d1..dk defines a Kanji glyph, and the number of data bytes depends
-   on the Kanji font of the printer, which the stream does not say. The 16 by 16
-   font is the common one and the encoder never sends this command at all, so
-   the table assumes its 32 data bytes */
-
 const UNKNOWN_ARGUMENTS = {
   [DLE]: {
     0x14: realTimeRequestArguments, /* DLE DC4 fn .., real time request */
   },
 
   [ESC]: {
-    0x25: 1, /* select user defined character set */
     0x2f: 1, /* print downloaded bitmap */
     0x3d: 1, /* select peripheral device */
-    0x3f: 1, /* cancel user defined character */
     0x43: 1, /* page length in lines */
     0x55: 1, /* unidirectional printing */
-    0x56: 1, /* rotate 90 degrees */
     0x63: 2, /* paper sensor and panel button settings */
-    0x72: 1, /* print colour */
   },
 
   [GS]: {
@@ -495,8 +549,6 @@ const UNKNOWN_ARGUMENTS = {
   },
 
   [FS]: {
-    0x32: 34, /* define user defined Kanji, c1 c2 and the glyph, see below */
-    0x3f: 2, /* cancel user defined Kanji, c1 c2 */
     0x67: userMemoryArguments, /* write and read the user memory */
   },
 };
@@ -526,6 +578,7 @@ class EscPosRenderer {
   #horizontalUnits;
   #kanji;
   #codeSystem;
+  #userDefined;
   #direction;
   #dpi;
   #text;
@@ -635,6 +688,7 @@ class EscPosRenderer {
     this.#doubleStrike = false;
     this.#kanji = false;
     this.#codeSystem = 'shift-jis';
+    this.#userDefined = false;
     this.#direction = 0;
     this.#text = [];
 
@@ -670,9 +724,26 @@ class EscPosRenderer {
 
       if (this.#kanji && this.#isLeadByte(byte) && index + 1 < bytes.length) {
         this.#flushText();
-        this.#painter.placeholder(2);
+
+        /* Unless the stream defined a glyph for this code with FS 2, which is
+           drawn in the two cells the placeholder would have taken */
+
+        if (!this.#painter.glyph(byte * 256 + bytes[index + 1], {multibyte: true})) {
+          this.#painter.placeholder(2);
+        }
 
         index += 2;
+        continue;
+      }
+
+      /* A byte that has a glyph a stream downloaded, while ESC % selected the
+         user defined set, prints that glyph instead of the one of the codepage */
+
+      if (byte >= 0x20 && this.#userDefined && this.#painter.hasGlyph(byte)) {
+        this.#flushText();
+        this.#painter.glyph(byte);
+
+        index++;
         continue;
       }
 
@@ -829,8 +900,11 @@ class EscPosRenderer {
         0x20: {args: 1, run: (a) => this.#painter.spacing(this.#across(a[0]))},
         0x21: {args: 1, run: (a) => this.#printMode(a[0])},
         0x24: {args: 2, run: (a) => this.#painter.position(this.#across(a[0] + a[1] * 256))},
+        0x25: {args: 1, run: (a) => this.#selectUserDefined(a[0])},
+        0x26: {args: userDefinedArguments, run: (a) => this.#defineUserDefined(a)},
         0x2a: {args: columnImageArguments, run: (a) => this.#columnImage(a)},
         0x2d: {args: 1, run: (a) => this.#underline(a[0])},
+        0x3f: {args: 1, run: (a) => this.#cancelUserDefined(a[0])},
         0x32: {args: 0, run: () => this.#painter.lineSpacing(null)},
         0x33: {args: 1, run: (a) => this.#painter.lineSpacing(this.#down(a[0]))},
         0x34: {args: 1, run: null}, /* italic, parsed and ignored, as the hardware does */
@@ -845,6 +919,7 @@ class EscPosRenderer {
         0x52: {args: 1, run: (a) => this.#international(a[0])},
         0x53: {args: 0, run: () => this.#painter.page(false)}, /* ESC S, select standard mode */
         0x54: {args: 1, run: (a) => this.#printDirection(a[0])},
+        0x56: {args: 1, run: (a) => this.#rotate(a[0])},
         0x57: {args: 8, run: (a) => this.#printArea(a)},
         0x5c: {args: 2, run: (a) => this.#relative(a)},
         0x61: {args: 1, run: (a) => this.#align(a[0])},
@@ -853,6 +928,7 @@ class EscPosRenderer {
         0x69: {args: 0, run: () => this.#emitCut('full')}, /* legacy full cut */
         0x6d: {args: 0, run: () => this.#emitCut('partial')}, /* legacy partial cut */
         0x70: {args: 3, run: (a) => this.#pulse(a)},
+        0x72: {args: 1, run: null}, /* print colour, parsed, this renderer draws one bit */
         0x74: {args: 1, run: (a) => this.#selectCodepage(a[0])},
         0x75: {args: 1, run: null}, /* transmit peripheral device status, parsed, there is no channel back */
         0x76: {args: 0, run: null}, /* transmit paper sensor status, parsed */
@@ -891,6 +967,8 @@ class EscPosRenderer {
         0x28: {args: parenthesisArguments, run: (a, consumed) => this.#fsParenthesis(a, consumed)},
         0x2d: {args: 1, run: null}, /* multibyte underline, parsed */
         0x2e: {args: 0, run: () => this.#kanjiMode(false)},
+        0x32: {args: 2 + KANJI_GLYPH_BYTES, run: (a) => this.#defineKanji(a)},
+        0x3f: {args: 2, run: (a) => this.#cancelKanji(a)},
         0x43: {args: 1, run: (a) => this.#kanjiCodeSystem(a[0])},
         0x53: {args: 2, run: null}, /* multibyte character spacing, parsed */
         0x57: {args: 1, run: null}, /* quadruple size multibyte, parsed */
@@ -926,6 +1004,18 @@ class EscPosRenderer {
        renderer has not got and paper it cannot touch, so it is parsed */
 
     if (args[0] === 0x48) {
+      return;
+    }
+
+    /* GS ( N selects the colour of the characters and of the background they
+       are printed on. This renderer draws one bit, so every colour is the black
+       of its paper and the functions of the group change nothing */
+
+    if (args[0] === 0x4e) {
+      if (!COLOUR_FUNCTIONS.includes(args[3])) {
+        this.#unknown(consumed);
+      }
+
       return;
     }
 
@@ -1087,9 +1177,10 @@ class EscPosRenderer {
      * repeating its dots, c is the colour of the data, and x and y are the size
      * of the image in dots.
      *
-     * Only colour 1 is drawn, the black of a single colour printer. The data of
-     * another colour is consumed and nothing is stored for it, which is what a
-     * printer without a second colour prints.
+     * Every colour is drawn, in the black of a single colour printer: this
+     * renderer has one image buffer where a two colour printer has one per
+     * colour, so a store of the second colour is stored the way a store of the
+     * first one is and nothing an image carried is lost.
      *
      * @param  {Uint8Array}   parameters   The parameters of the function
      * @param  {boolean}      column       True for the column format of 113
@@ -1112,10 +1203,6 @@ class EscPosRenderer {
     }
 
     if (!this.#fits(width, height, column)) {
-      return;
-    }
-
-    if (parameters[3] !== FIRST_COLOUR) {
       return;
     }
 
@@ -1170,7 +1257,9 @@ class EscPosRenderer {
      *
      * The image is kept in the painter under its key code for as long as this
      * renderer lives, an initialize and the end of a stream included, the way
-     * the memory of a printer keeps it.
+     * the memory of a printer keeps it. Every colour block is drawn into it
+     * with OR: a single colour printer has one image buffer, so the colours
+     * land on top of each other and no dot of the definition is lost.
      *
      * @param  {Uint8Array}   parameters   The parameters of the function
      * @param  {string}       prefix       Key prefix of the memory, NV or download
@@ -1203,23 +1292,52 @@ class EscPosRenderer {
       ((height + 7) >> 3) * width :
       ((width + 7) >> 3) * height;
 
+    /* Every colour block of the definition is drawn into one image with OR,
+       which is what a printer with one image buffer does with them and what
+       keeps an image that was sent in a second colour alone.
+
+       The image is as large as the blocks that were drawn, never as large as
+       the size the command declared: a definition that carries fewer rows, or
+       fewer columns, than it asks for is the image it carries, the same rule
+       #bitmap() applies to a block of one colour */
+
+    let image = null;
     let offset = 8;
 
     for (let colour = 0; colour < colours && offset < parameters.length; colour++) {
-      if (parameters[offset] === FIRST_COLOUR) {
-        const bitmap = this.#bitmap(
-            parameters.subarray(offset + 1, offset + 1 + size), width, height, column,
-        );
-
-        /* A definition whose dots are missing leaves the image that is under
-           this key code alone, it does not delete it */
-
-        if (bitmap.width > 0 && bitmap.height > 0) {
-          this.#painter.define(key, bitmap);
-        }
-      }
+      const bitmap = this.#bitmap(
+          parameters.subarray(offset + 1, offset + 1 + size), width, height, column,
+      );
 
       offset += 1 + size;
+
+      if (bitmap.width === 0 || bitmap.height === 0) {
+        continue;
+      }
+
+      if (!image) {
+        image = bitmap;
+        continue;
+      }
+
+      if (bitmap.width > image.width || bitmap.height > image.height) {
+        const merged = Bitmap.create(
+            Math.max(image.width, bitmap.width), Math.max(image.height, bitmap.height),
+        );
+
+        Bitmap.blit(image, merged, 0, 0);
+
+        image = merged;
+      }
+
+      Bitmap.blit(bitmap, image, 0, 0);
+    }
+
+    /* A definition whose dots are missing leaves the image that is under this
+       key code alone, it does not delete it */
+
+    if (image) {
+      this.#painter.define(key, image);
     }
   }
 
@@ -2046,6 +2164,123 @@ class EscPosRenderer {
     if (CODE_SYSTEMS[value]) {
       this.#codeSystem = CODE_SYSTEMS[value];
     }
+  }
+
+  /**
+     * ESC & y c1 c2 [x d1..d(y * x)]1..[..], which defines the glyphs of the
+     * character codes c1 to c2 in the font that is current: y bytes of eight
+     * dots in the vertical direction, which is three for the fonts of these
+     * printers and the only value the command takes here, and per character the
+     * number of columns it is wide and that many columns of y bytes, the most
+     * significant bit at the top.
+     *
+     * A parameter outside the ranges of the command makes the printer ignore
+     * the whole command, so the glyphs that are defined stay as they are. The
+     * widest character is the cell of the font, twelve columns for font A and
+     * nine for font B, which is what the ranges of the reference come down to.
+     *
+     * @param  {Uint8Array}   args   The arguments of the command
+     */
+  #defineUserDefined(args) {
+    const first = args[1];
+    const last = args[2];
+
+    if (args[0] !== GLYPH_BYTES || first > last) {
+      return;
+    }
+
+    if (first < FIRST_GLYPH_CODE || last > LAST_GLYPH_CODE) {
+      return;
+    }
+
+    /* The dots of every character first, so that a command whose last
+       definition is out of range defines none of them, the way the printer
+       ignores it whole */
+
+    const glyphs = [];
+
+    let offset = 3;
+
+    for (let code = first; code <= last; code++) {
+      const width = args[offset];
+      const length = width * GLYPH_BYTES;
+
+      if (width > this.#painter.characterWidth || offset + 1 + length > args.length) {
+        return;
+      }
+
+      glyphs.push({code, data: args.subarray(offset + 1, offset + 1 + length), width});
+      offset += 1 + length;
+    }
+
+    for (const glyph of glyphs) {
+      this.#painter.defineGlyph(glyph.code, Bitmap.fromColumns(glyph.data, glyph.width, GLYPH_BYTES * 8));
+    }
+  }
+
+  /**
+     * ESC % n, which selects the glyphs a stream downloaded with bit 0 of n and
+     * the built in ones without it. A character code without a definition
+     * prints its built in glyph either way.
+     *
+     * @param  {number}   value   The argument of the command
+     */
+  #selectUserDefined(value) {
+    this.#userDefined = (value & 1) !== 0;
+  }
+
+  /**
+     * ESC ? n, which cancels the glyph of one character code in the current
+     * font, so that the code prints its built in glyph again
+     *
+     * @param  {number}   value   The argument of the command
+     */
+  #cancelUserDefined(value) {
+    if (value < FIRST_GLYPH_CODE || value > LAST_GLYPH_CODE) {
+      return;
+    }
+
+    this.#painter.defineGlyph(value, null);
+  }
+
+  /**
+     * FS 2 c1 c2 d1..d72, which defines the glyph of a multibyte character
+     * code: 24 by 24 dots in the column format of ESC &, three bytes per
+     * column. That is the Kanji font of these printers, and it is two cells of
+     * font A wide, which is the width the placeholder of a multibyte character
+     * takes as well.
+     *
+     * @param  {Uint8Array}   args   The arguments of the command
+     */
+  #defineKanji(args) {
+    const bitmap = Bitmap.fromColumns(args.subarray(2), KANJI_GLYPH_SIZE, KANJI_GLYPH_SIZE);
+
+    this.#painter.defineGlyph(args[0] * 256 + args[1], bitmap, {multibyte: true});
+  }
+
+  /**
+     * FS ? c1 c2, which cancels the glyph of a multibyte character code, so
+     * that the code prints its placeholder cells again
+     *
+     * @param  {Uint8Array}   args   The arguments of the command
+     */
+  #cancelKanji(args) {
+    this.#painter.defineGlyph(args[0] * 256 + args[1], null, {multibyte: true});
+  }
+
+  /**
+     * ESC V n, the rotation of the characters by 90 degrees clockwise. It is a
+     * standard mode command, so a stream that sends it in page mode is ignored,
+     * and the print direction of ESC T is what turns a layout there.
+     *
+     * @param  {number}   value   The argument of the command
+     */
+  #rotate(value) {
+    if (this.#painter.pageMode || typeof ROTATION[value] !== 'boolean') {
+      return;
+    }
+
+    this.#painter.style({rotate: ROTATION[value]});
   }
 
   /**

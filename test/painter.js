@@ -1431,6 +1431,241 @@ describe('Painter', function() {
       assert.deepEqual(paper.end(), empty.end());
     });
   });
+  describe('defineGlyph(), hasGlyph() and glyph()', function() {
+    /* A glyph of four by eight black dots, which is smaller than a cell of
+       either font, so where it lands in the cell is visible */
+
+    const CORNER = black(4, 8);
+
+    it('should draw a downloaded glyph as a cell of the current font', function() {
+      const paper = painter();
+
+      paper.defineGlyph(0x41, CORNER);
+
+      assert.isTrue(paper.glyph(0x41));
+
+      paper.lineFeed();
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      for (let y = 0; y < 24; y++) {
+        for (let x = 0; x < 12; x++) {
+          assert.equal(Bitmap.getPixel(bitmap, x, y), x < 4 && y < 8 ? 1 : 0, `dot ${x},${y}`);
+        }
+      }
+
+      /* The cell of the font, so the character behind it starts at twelve */
+
+      assert.equal(bitmap.height, 30);
+    });
+
+    it('should report a code it has no glyph for and place nothing', function() {
+      const paper = painter();
+
+      paper.defineGlyph(0x41, CORNER);
+
+      assert.isTrue(paper.hasGlyph(0x41));
+      assert.isFalse(paper.hasGlyph(0x42));
+      assert.isFalse(paper.glyph(0x42));
+
+      paper.lineFeed();
+
+      assert.equal(stitch(paper.end(), {width: WIDTH}).height, 30);
+    });
+
+    it('should keep a set per font', function() {
+      const paper = painter();
+
+      paper.defineGlyph(0x41, CORNER);
+      paper.font('B');
+
+      assert.isFalse(paper.hasGlyph(0x41));
+
+      paper.defineGlyph(0x41, black(4, 4));
+
+      assert.isTrue(paper.hasGlyph(0x41));
+
+      paper.font('A');
+
+      assert.isTrue(paper.hasGlyph(0x41));
+    });
+
+    it('should cancel a definition with a bitmap of null', function() {
+      const paper = painter();
+
+      paper.defineGlyph(0x41, CORNER);
+      paper.defineGlyph(0x41, null);
+
+      assert.isFalse(paper.hasGlyph(0x41));
+    });
+
+    it('should redefine a code without keeping the cell of the definition before it', function() {
+      const paper = painter();
+
+      paper.defineGlyph(0x41, CORNER);
+      paper.glyph(0x41);
+      paper.lineFeed();
+
+      paper.defineGlyph(0x41, black(8, 16));
+      paper.glyph(0x41);
+      paper.lineFeed();
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(Bitmap.getPixel(bitmap, 6, 30 + 12), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 6, 4), 0);
+    });
+
+    it('should throw the definitions away on reset()', function() {
+      const paper = painter();
+
+      paper.defineGlyph(0x41, CORNER);
+      paper.reset();
+
+      assert.isFalse(paper.hasGlyph(0x41));
+    });
+
+    it('should keep the multibyte glyphs in a set of their own, two cells wide', function() {
+      const paper = painter();
+
+      paper.defineGlyph(0x9821, black(24, 24), {multibyte: true});
+
+      assert.isFalse(paper.hasGlyph(0x9821));
+      assert.isTrue(paper.hasGlyph(0x9821, {multibyte: true}));
+
+      paper.glyph(0x9821, {multibyte: true});
+      paper.text('A');
+      paper.lineFeed();
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      for (let y = 0; y < 24; y++) {
+        for (let x = 0; x < 24; x++) {
+          assert.equal(Bitmap.getPixel(bitmap, x, y), 1, `dot ${x},${y}`);
+        }
+      }
+
+      assert.equal(Bitmap.getPixel(bitmap, 24, 0), 0);
+    });
+
+    it('should style and scale a downloaded glyph the way it styles a built in one', function() {
+      const paper = painter();
+
+      paper.defineGlyph(0x41, CORNER);
+      paper.style({width: 2, height: 2});
+      paper.glyph(0x41);
+      paper.lineFeed();
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      for (let y = 0; y < 48; y++) {
+        for (let x = 0; x < 24; x++) {
+          assert.equal(Bitmap.getPixel(bitmap, x, y), x < 8 && y < 16 ? 1 : 0, `dot ${x},${y}`);
+        }
+      }
+    });
+
+    it('should clip a glyph that is larger than the cell', function() {
+      const paper = painter();
+
+      paper.defineGlyph(0x41, black(24, 48));
+      paper.glyph(0x41);
+      paper.lineFeed();
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(Bitmap.getPixel(bitmap, 11, 23), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 12, 0), 0);
+      assert.equal(bitmap.height, 30);
+    });
+  });
+
+  describe('the rotation of ESC V', function() {
+    it('should turn every cell a quarter turn clockwise', function() {
+      const rotated = painter();
+      const upright = painter();
+
+      rotated.style({rotate: true});
+      rotated.text('A');
+      rotated.lineFeed();
+
+      upright.text('A');
+      upright.lineFeed();
+
+      const left = stitch(rotated.end(), {width: WIDTH});
+      const right = stitch(upright.end(), {width: WIDTH});
+
+      for (let y = 0; y < 12; y++) {
+        for (let x = 0; x < 24; x++) {
+          /* The top left dot of a cell becomes its top right one, so the
+             dot at x, y of the rotated cell is the dot at y, 23 - x of the
+             upright one */
+
+          assert.equal(
+              Bitmap.getPixel(left, x, y),
+              Bitmap.getPixel(right, y, 23 - x),
+              `dot ${x},${y}`,
+          );
+        }
+      }
+    });
+
+    it('should wrap a rotated line over the width of the paper', function() {
+      /* A rotated cell is 24 dots wide, so four of them fill the 96 dots of
+         this printer and the fifth wraps */
+
+      const paper = painter();
+
+      paper.style({rotate: true});
+      paper.text('ABCDE');
+      paper.lineFeed();
+
+      assert.equal(stitch(paper.end(), {width: WIDTH}).height, 60);
+    });
+
+    it('should draw no underline and no upperline on a rotated cell', function() {
+      const lined = painter();
+      const plain = painter();
+
+      lined.style({rotate: true, underline: 2, upperline: 1});
+      lined.text('A');
+      lined.lineFeed();
+
+      plain.style({rotate: true});
+      plain.text('A');
+      plain.lineFeed();
+
+      assert.deepEqual(lined.end(), plain.end());
+    });
+
+    it('should draw the two lines again on an upright cell', function() {
+      const lined = painter();
+      const plain = painter();
+
+      lined.style({rotate: true, underline: 2, upperline: 1});
+      lined.style({rotate: false});
+      lined.text('A');
+      lined.lineFeed();
+
+      plain.text('A');
+      plain.lineFeed();
+
+      assert.notDeepEqual(lined.end(), plain.end());
+    });
+
+    it('should leave the blocks of a line upright', function() {
+      const rotated = painter();
+      const upright = painter();
+
+      rotated.style({rotate: true});
+      rotated.block(black(48, 10));
+
+      upright.block(black(48, 10));
+
+      assert.deepEqual(rotated.end(), upright.end());
+    });
+  });
+
   describe('page mode', function() {
     /* A page of this narrow printer: the whole width and a few lines tall */
 

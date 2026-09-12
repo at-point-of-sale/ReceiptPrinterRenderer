@@ -35,7 +35,7 @@ This page lists every command `StarPrntRenderer` recognises, what it does to the
 
 The renderer emulates a Star printer. It interprets the bytes the way the firmware does, including the cases where the firmware prints nothing at all: a barcode with invalid data, a symbol wider than the paper, an argument outside the range of its command, which leaves the setting as it was rather than clipping it.
 
-It deliberately differs from the hardware in a few places, each of them because the behaviour is not on the wire and no hardware check settled it. They are marked in the notes below, and these are all of them: the module widths of `ESC b`, the line spacing of an `ESC z n` that is not `0` or `1`, the feeds of `ESC I`, `ESC J` and `ESC a`, the four dot gap between the bars of a barcode and its human readable text, the reading of `ESC GS x S 0`, a QR model 1 drawn as a model 2 symbol, the basic 43 character set of Code 93, the minimum of three data codewords of a PDF417 symbol, the reading of `ESC h n` and `ESC Q n`, `ESC R n` leaving the sets above 13 alone, `ESC SP n`, whose length and meaning are read from what receiptline writes, the tear bar mode of raster mode read as a partial cut, the twenty four dot band of `ESC k`, the length of `ESC s n1 n2`, the module widths above three of `ESC b`, the layout of `ESC GS S` and its alignment, the assumed layout of `ESC FS q`, the heights of the GS1 DataBar family, which are a reading of the specification pending a hardware check, and the four functions of [page mode](#page-mode) that are not the two the encoder sends, whose numbering, lengths and units are read from the ESC/POS group of the same commands.
+It deliberately differs from the hardware in a few places, each of them because the behaviour is not on the wire and no hardware check settled it. They are marked in the notes below, and these are all of them: the module widths of `ESC b`, the line spacing of an `ESC z n` that is not `0` or `1`, the feeds of `ESC I`, `ESC J` and `ESC a`, the four dot gap between the bars of a barcode and its human readable text, the reading of `ESC GS x S 0`, a QR model 1 drawn as a model 2 symbol, the basic 43 character set of Code 93, the minimum of three data codewords of a PDF417 symbol, the reading of `ESC h n` and `ESC Q n`, `ESC R n` leaving the sets above 13 alone, `ESC SP n`, whose length and meaning are read from what receiptline writes, the tear bar mode of raster mode read as a partial cut, the raster print colour of `ESC * r K`, whose colours all land in one image buffer, and the two readings of `ESC RS C`, the twenty four dot band of `ESC k`, the length of `ESC s n1 n2`, the module widths above three of `ESC b`, the layout of `ESC GS S` and its alignment, the assumed layout of `ESC FS q`, the heights of the GS1 DataBar family, which are a reading of the specification pending a hardware check, and the four functions of [page mode](#page-mode) that are not the two the encoder sends, whose numbering, lengths and units are read from the ESC/POS group of the same commands.
 
 Two differences are the printer itself rather than the renderer, and both show up when the same receipt is printed in both languages: a pulse to the second drawer is fixed at 200 ms on and 200 ms off, because the width is not on the wire, and the size multipliers of `ESC i` stop at six where `GS ! n` of ESC/POS goes to eight.
 
@@ -92,7 +92,7 @@ A Star command is `ESC` and a command byte, or `ESC GS`, `ESC RS` or `ESC FS` an
 | `ESC h n` | character height | Rendered | The multiplier is the value plus one, the way `ESC i` counts it, so `1` is double height and `0` is back to one, and the ASCII digits `48` to `53` do the same. A value outside that range leaves the height as it was. **The multiplier of the value plus one is the StarPRNT reading of this command; the Star Line Mode documentation describes it as a double height switch, where `0` and `1` mean the same thing as here.** |
 | `ESC ( n` | select character expansion | Reported | |
 | `ESC ) n` | cancel character expansion | Reported | |
-| `ESC RS C n` | character style | Reported | |
+| `ESC RS C n` | character style, or the print mode | Reported | **Two readings, one argument byte either way. The Star Graphic Mode specification in this repository has `ESC RS C n` as the print mode select, which switches the two colour printing mode on and off on the models that have it, and a print mode this renderer could not show; the reading of this page is the character style of the line mode, which could move a dot. It is reported for that reason, which is the answer that costs nothing either way.** |
 | `ESC RS E n` | character expansion | Reported | |
 
 The encoder emits nothing for italic in this language, so there is no italic command to ignore.
@@ -161,6 +161,7 @@ In page mode the printer composes a page in memory, in a print area on that page
 | `ESC GS t n` | select codepage | Rendered | `n` is looked up in the `codepageMapping` the renderer was built with, which has to be the mapping the encoder used. The printer starts in entry `0` of that mapping, the Star specific standard character set, and `ESC @` returns to it; an unknown number lands there as well, and so does a codepage the codepage encoder does not implement. |
 | `ESC R n` | international character set | Rendered | Sets `0` to `13`: USA, France, Germany, United Kingdom, Denmark I, Sweden, Italy, Spain I, Japan, Norway, Denmark II, Spain II, Latin America and Korea. The set replaces the twelve code points `0x23`, `0x24`, `0x40`, `0x5B`, `0x5C`, `0x5D`, `0x5E`, `0x60`, `0x7B`, `0x7C`, `0x7D` and `0x7E`, after the codepage decoding and only for those twelve bytes. `ESC @` goes back to the set that replaces nothing. **Star numbers these sets the way Epson does and the renderer uses the Epson table for them; Star also defines sets above 13, and those tables are not in the specification text that was available here, so a number above 13 leaves the set as it was.** |
 | `ESC c n` | select character set | Reported | |
+| `ESC &`, `ESC %` | user defined characters | Reported | The glyphs a stream downloads into the printer, and the selection of the downloaded set. **No Star specification text available here defines either command, the Star Graphic Mode specification of this repository does not carry them, and a length that is a guess is worse than none: both consume their two prefix bytes alone, so a stream that really defines glyphs desynchronises on the dots of the first one.** The ESC/POS renderer does define them, see the `ESC &` row of [the ESC/POS page](commands-esc-pos.md#codepages-and-character-sets). |
 
 <br>
 
@@ -258,7 +259,7 @@ A symbol never holds fewer than three data codewords: one codeword of data and t
 
 ### Raster mode
 
-Raster mode is a second way to print, and the only one a TSP100 has: rows of dots go into an image buffer and an execute command prints the buffer, feeds and cuts. The renderer reads it, so a job that a driver built from the items of this renderer with [StarGraphicsPrinterEncoder](https://github.com/NielsLeenheer/StarGraphicsPrinterEncoder) renders back to the receipt it was made from.
+Raster mode is a second way to print, and the only one a TSP100 has: rows of dots go into an image buffer and an execute command prints the buffer, feeds and cuts. The renderer reads it, so a job that a driver built from the items of this renderer with [StarGraphicsPrinterEncoder](https://github.com/NielsLeenheer/StarGraphicsPrinterEncoder) renders back to the receipt it was made from. That protocol is a language of the unified renderer of its own, `star-graphics`, which is the name a driver resolves from the profile of a TSP100; it is this command set with the raster mode in it, so `StarPrntRenderer` renders it, see [Usage](usage.md#the-language-of-the-commands).
 
 Two rules of the mode shape the parsing. A setting is ignored while data is in the image buffer, so a job stores the mode of a cut before it sends the rows of that segment. And an execute command on an empty buffer does nothing at all, so a job that has to cut without rows sends one blank row first.
 
@@ -281,7 +282,7 @@ Two rules of the mode shape the parsing. A setting is ignored while data is in t
 | `ESC * r P n NUL` | page length | Parsed | The paper of the renderer has no pages. |
 | `ESC * r Q n NUL` | print quality | Parsed | |
 | `ESC * r t n NUL` | top margin | Parsed | |
-| `ESC * r K n NUL` | print colour | Parsed | The second colour of a two colour paper roll. |
+| `ESC * r K n NUL` | print colour | Parsed | `0` black, `1` cyan, `2` magenta and `3` yellow, and the command is only effective on a printer that the line mode put in two colour printing mode. A printer has an image buffer per colour and this renderer has one, so the rows of every colour go into the same image and nothing a job sent is lost. |
 | `ESC * r a`, `ESC * r b` | start and end a block | Parsed | The command emulator mode of the specification. |
 
 Rows that are still in the image buffer when the stream ends are printed, so that a job that forgot its execute command is not lost.
@@ -317,7 +318,7 @@ These commands change nothing about the paper of the receipt that is being rende
 | `ESC GS BEL m n1 n2` | buzzer | Parsed | Three argument bytes. The buzzer is not part of the paper and the item stream has no sound, so nothing happens. |
 | `ESC GS EM DC1 m n1 n2`, `ESC GS EM DC2 m n1 n2` | buzzer | Parsed | Four argument bytes, the `DC1` or `DC2` included. |
 | `ESC GS b n` | blackmark and sensor settings | Reported | The sensor settings decide where the paper stops, which is paper. |
-| `ESC GS c n` | colour | Reported | A second ribbon or a second thermal layer, which this renderer does not draw. |
+| `ESC GS c h v` | reduced printing | Reported | **Two argument bytes, `h`, which is always `0`, and `v`, the vertical reduction: `0` prints at 100 per cent, `1` at 50 and `2` at 75. That is the Star Graphic Mode specification in this repository, and it is what this page said was a colour command with one argument byte until section 16e; a stream that sends it lost a byte to the text behind it before that.** The renderer does not reduce, so a receipt that asks for it comes out at its full size. |
 
 <br>
 
@@ -326,9 +327,10 @@ These commands change nothing about the paper of the receipt that is being rende
 These are the StarPRNT and Star Line Mode commands the renderer parses but does not render. Every command the [implementation plan](implementation-plan.md) planned for is rendered now; what is left is the list below, and none of it is planned.
 
 - CJK fonts. A receipt that needs real CJK text needs a printer with the font.
-- User defined characters: glyphs downloaded into the printer.
+- User defined characters: glyphs downloaded into the printer. `ESC &` and `ESC %` are reported with their prefix alone, because no specification text available here settles their layout. ESC/POS has them, see [its reference page](commands-esc-pos.md#codepages-and-character-sets).
 - NV logos: images a utility stored in the printer, which the renderer has never seen. `ESC FS p` reports an `unknown` item and prints nothing, and so does the definition command `ESC FS q`, whose layout is not settled here.
-- Status and settings commands, `ESC GS ETX`, `ESC GS #`, `ESC GS b`, `ESC GS c`, `ESC RS a`, `ESC RS d`, `ESC RS r` and the rest of [Printer state and status](#printer-state-and-status): there is no channel back to the host, and the settings do not change the paper. The ones that provably cannot change it are parsed and leave no item, the ones that might are reported.
+- Status and settings commands, `ESC GS ETX`, `ESC GS #`, `ESC GS b`, `ESC RS a`, `ESC RS d`, `ESC RS r` and the rest of [Printer state and status](#printer-state-and-status): there is no channel back to the host, and the settings do not change the paper. The ones that provably cannot change it are parsed and leave no item, the ones that might are reported.
+- Reduced printing, `ESC GS c h v`, which prints a receipt at half or at three quarters of its size. The renderer draws it at its full size and reports the command.
 - The buzzer, `ESC GS BEL` and `ESC GS EM`: the item stream carries paper, cuts and drawers, and no sound.
 - Maxicode and the composite symbologies, which this command set has no selector for in anything the renderer parses.
 

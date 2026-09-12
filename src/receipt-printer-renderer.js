@@ -38,14 +38,17 @@ import StarPrntRenderer from './renderers/star-prnt.js';
  * @typedef {import('./formats/stitch.js').StitchOptions} StitchOptions
  */
 
-/* The renderer of every language the package speaks. Both Star languages are
-   the same command set, so one renderer handles them, which is why a language
-   is not the same thing as a renderer class */
+/* The renderer of every language the package speaks. The three Star languages
+   are the same command set, so one renderer handles them, which is why a
+   language is not the same thing as a renderer class: star-prnt and star-line
+   are the two the encoder writes, and star-graphics is the raster protocol of
+   a TSP100, whose jobs enter raster mode with ESC * r A themselves */
 
 const RENDERERS = Object.assign(Object.create(null), {
   'esc-pos': EscPosRenderer,
   'star-prnt': StarPrntRenderer,
   'star-line': StarPrntRenderer,
+  'star-graphics': StarPrntRenderer,
 });
 
 /* The language of a renderer that was constructed without one */
@@ -110,10 +113,11 @@ class ReceiptPrinterRenderer {
   }
 
   /**
-     * The language this renderer was created for. Both Star languages are
+     * The language this renderer was created for. All three Star languages are
      * rendered by the StarPRNT renderer, but a renderer created for
      * 'star-line' reports 'star-line', which is the language the encoder that
-     * produced the commands was configured with.
+     * produced the commands was configured with, and one created for
+     * 'star-graphics' reports the protocol a driver resolved from its profile.
      *
      * @return {RenderLanguage}   The name of the language
      */

@@ -550,7 +550,7 @@ const UNKNOWN_ARGUMENTS = {
   [GROUP_GS]: {
     0x5c: 2, /* vertical position */
     0x62: 1, /* blackmark and sensor settings */
-    0x63: 1, /* colour */
+    0x63: 2, /* ESC GS c h v, reduced printing, see the reference page */
   },
 
   [GROUP_RS]: {

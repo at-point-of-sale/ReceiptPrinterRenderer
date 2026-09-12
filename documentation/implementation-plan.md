@@ -1114,6 +1114,142 @@ Effort: one day.
 
 <br>
 
+## Section 16e: user defined characters, rotation, colour and the star-graphics language
+
+Section 16d took page mode off the "Not planned" list of both reference pages.
+What is left there is four groups, and this section renders three of them: the
+glyphs a stream downloads into the printer, the 90 degree rotation of `ESC V`
+and the two colour commands. The fourth, the CJK fonts, the NV logos a utility
+put in the printer before the stream and the Maxicode and composite symbols of
+the `GS ( k` group, stays: the first needs a font this package does not carry,
+the second needs dots the renderer has never seen, and the third is a symbology
+that has to be written before it can be drawn. A fourth change comes from the
+drivers rather than from a reference page: the unified class learns the name
+`star-graphics`, the protocol of a TSP100, so that a driver that resolved that
+name from its profile can construct a renderer with it.
+
+**1. User defined characters.** `ESC & y c1 c2 [x d..]..` defines the glyphs of
+the character codes `c1` to `c2`: `y` bytes of eight dots in the vertical
+direction, and per character its width in columns and that many columns of `y`
+bytes each, the most significant bit at the top, which is the column format of
+`ESC *` and of the define functions of the graphics group. `ESC % n` selects the
+user defined set with bit 0 of `n` and the built in one without it, and
+`ESC ? c` cancels the definition of one character code. While the set is
+selected a code that has a definition prints the defined glyph in the cell of
+the current font, with the bold, the underline, the invert and the size of the
+print mode applied to it exactly as they are applied to a built in glyph, and a
+code without a definition prints the built in glyph, so a stream that defines
+three characters and selects the set keeps the rest of its text. The definitions
+belong to the font they were defined in, font A and font B holding a set each,
+and the dots of a definition that is narrower or shorter than the cell are
+placed at its top left corner, the rest of the cell staying blank. The glyphs go
+through the cell rendering of the painter, not next to it: `Font.renderGlyph`
+draws them, the cell cache keeps them, and nothing about the layout, the
+wrapping or the styles knows the difference.
+
+`FS 2 c1 c2 d..` is the same command for a multibyte character code, and the
+renderer keeps it: the 24 by 24 dots of the Kanji font of these printers are two
+cells wide, which is exactly the width the placeholder of section 12 gives a
+multibyte character, so a defined Kanji glyph is drawn in a cell of two
+characters while Kanji mode is on and the code matches, and every other
+multibyte code keeps its two placeholder cells. `FS ? c1 c2` cancels one.
+
+Star gets none of this. The Star Line Mode user defined character commands are
+not in any specification text available here, the Star Graphic Mode
+specification of this repository does not carry them either, and a definition
+whose layout is a guess would desynchronise a stream where reporting it does
+not. The Star reference page says so on a row of its own.
+
+**2. `ESC V n`, rotation by 90 degrees.** Every character cell is turned a
+quarter turn clockwise and the cells still go left to right along the line, so a
+rotated line reads from the bottom of the paper to the top and the line grows as
+tall as a character is wide. `0` and `48` switch it off, `1`, `49`, `2` and `50`
+switch it on. It is a standard mode command, as the reference says, so the
+command is dropped in page mode and a rotation that is on turns nothing there
+either, the same rule the upside down printing of section 12 follows. Only
+character cells turn: an image, a barcode and a QR code are blocks and stand the
+way they always stand.
+
+**3. Two colour printing.** `ESC r n` selects the colour the characters are
+printed in, and `GS ( N` does the same under a length, function `48` for the
+characters and `49` for their background. This renderer draws one bit, black on
+white, so every colour is black and the commands change nothing on the paper:
+they are consumed, they leave no item, and the reference page says what a two
+colour printer would have done with them. The same rule already holds for the
+raster print colour of the Star raster mode, `ESC * r K`, whose rows go into a
+black and a coloured image buffer on a printer and into the one image buffer
+this renderer has.
+
+The graphics group is where the colour did change a dot. Section 13 draws the
+colour 1 block of a definition and consumes the others, and a store function
+whose colour is not colour 1 stores nothing at all, so an image that a stream
+sends entirely in the second colour disappears. Every colour block is drawn now,
+combined into one image with OR, which is the same answer the raster mode of the
+Star languages gives and the only one that never loses a dot of an image the
+stream carried. The deviation lists of both reference pages say it.
+
+**4. The star-graphics language.** `RENDERERS` of the unified class gains
+`star-graphics`, the raster protocol of a TSP100, backed by `StarPrntRenderer`
+with the `star` profile and the `star` codepage mapping, the way `star-line` is.
+No parser state changes with it: a job in Star Graphic Mode enters raster mode
+with `ESC * r A` itself, which the renderer has read since section 12, so the
+language is a name, a fourth key in the table, and a renderer that reports
+`star-graphics` in its `language` getter, which is what a driver puts in its
+connected event. One name, not two: `star-graphics` is what the drivers and
+StarGraphicsPrinterEncoder call it.
+
+Deliverables:
+
+- `defineGlyph`, `hasGlyph` and `glyph` in the painter, a `rotate` property in
+  its style, and the user defined glyphs held per font and per multibyte code,
+  thrown away by `reset()`.
+- `ESC &`, `ESC %`, `ESC ?`, `FS 2` and `FS ?` in the ESC/POS renderer, with the
+  argument length of `ESC &` walked over the definitions it carries and of
+  `FS 2` over the 24 by 24 glyph of these printers.
+- `ESC V` in the ESC/POS renderer, standard mode only.
+- `ESC r` parsed, `GS ( N` parsed for the functions it defines and reported for
+  the rest of the group, and every colour block of `GS ( L` and `GS 8 L` drawn.
+- `star-graphics` in `RENDERERS`, in the `RenderLanguage` type, in the README,
+  in usage.md and in the design document.
+- The rows of all of it on the reference pages, Rendered or Parsed with their
+  semantics, the "Not planned" lists trimmed to the CJK fonts, the NV logos the
+  printer holds and the Maxicode and composite symbols, and the deviation lists
+  brought up to date.
+
+Fixtures, hand assembled in `test/tools/make-fixtures.js`: `user-defined`, which
+defines three glyphs, prints them as built in characters first, selects the set,
+prints them plain and in a double size, cancels one with `ESC ?` and starts over
+with `ESC @`; `rotation`, upright lines around rotated ones, in two sizes; and
+`colour`, `ESC r` toggling over three lines and a graphics definition of two
+colour blocks that prints as one image. All three are ESC/POS, which is the
+language that has the commands. `star-graphics` is the fourth, and it is not
+written by hand: the `receipt` fixture is rendered, encoded to a raster job with
+StarGraphicsPrinterEncoder and frozen as a StarPRNT fixture, so that the job a
+driver sends a TSP100 is in the suite as bytes and not only as a round trip.
+
+Tests: the definitions per font, the selection, the cancel, the initialize, a
+code without a definition, the styles and the sizes over a defined glyph, the
+Kanji definition in and out of Kanji mode, the rotation of a cell and the height
+of a rotated line, `ESC V` dropped in page mode, the colour commands changing no
+dot, the two colour blocks of a definition drawn as one image, the truncation
+and argument length sweeps of every new command, and the unified class rendering
+the `star-graphics` fixture exactly as the StarPRNT renderer does.
+
+Acceptance:
+
+- `npm test` passes, `npm run build`, `npm run test:types` and `npm run test:umd`
+  pass.
+- Every fixture of sections 2 to 16d is byte identical, the external ones
+  included.
+- The reference pages have no row that says only "Reported" with an empty note
+  for a command of these four groups, and "Not supported yet" lists what is
+  named above and nothing else.
+- Version stays 0.3.0, nothing committed.
+
+Effort: one day.
+
+<br>
+
 ## Notes per section
 
 Filled in during implementation.
@@ -3936,3 +4072,288 @@ Acceptance:
 - `npm run build`, `npm run test:types` and `npm run test:umd` pass. Every
   fixture of sections 2 to 16c, the 123 external ones included, is byte
   identical. Version stays 0.3.0, nothing committed.
+
+### Section 16e
+
+Implemented on 2026-09-13. Files: `src/painter.js`, `src/renderers/esc-pos.js`,
+`src/renderers/star-prnt.js`, `src/receipt-printer-renderer.js`, `src/types.js`,
+`test/painter.js`, `test/esc-pos.js`, `test/star-prnt.js`,
+`test/receipt-printer-renderer.js`, `test/tools/make-fixtures.js`,
+`test/types/smoke.ts`, `test/umd/check.js`, the three hand assembled fixtures in
+`test/fixtures/esc-pos/raw` and the generated one in
+`test/fixtures/star-prnt/raw`, `README.md`, `documentation/design.md`,
+`documentation/usage.md`, `documentation/commands-esc-pos.md`,
+`documentation/commands-star-prnt.md`.
+
+The painter:
+
+- **A downloaded glyph goes through the cell rendering of a built in one.** The
+  painter keeps the dots a stream defined and nothing else; `glyph()` blits them
+  into a bitmap of the cell of the current font and hands that to
+  `Font.renderGlyph()`, which is the one place a cell is drawn. The glyph is
+  exactly the size of the cell there, so the centring of that function puts it
+  at 0, 0, and the overstrike, the underline, the upperline, the invert and the
+  two multipliers are applied to it the way they are applied to a glyph of the
+  font. The cell cache holds it like any other cell, keyed by the serial number
+  of the definition, so a code that is redefined never gets the cell of the
+  definition before it.
+- **Three methods, one option.** `defineGlyph(code, bitmap)`, `hasGlyph(code)`
+  and `glyph(code)` work on the set of the font that is current, and
+  `{multibyte: true}` moves all three to the set of the multibyte codes, whose
+  cell is two characters wide. That is one set more than the parser strictly
+  needs and one method less than a pair per set would have been.
+- **The glyphs are cleared by `reset()` and the images are not.** The images of
+  the graphics commands are the NV memory of a printer and live as long as the
+  painter, which section 13 wrote down; the downloaded glyphs are RAM, and the
+  Epson note of `ESC &` says they are available until `ESC ?`, `ESC @`, a reset
+  or the power going off. So `ESC @` throws them away, together with the
+  selection of `ESC %`, which the parser holds.
+- **The rotation is a property of the cell, upside down is a property of the
+  line.** `rotate` is an option of `Font.renderGlyph()`, next to the underline
+  and the invert, and it is the last thing that happens to a cell: the font
+  draws the character, scales it and turns the whole of it with
+  `Bitmap.rotate270()`. The line then lays the turned cells out left to right
+  as it lays out any cell, so the wrapping, the alignment, the line height and
+  the character spacing need no case of their own: a rotated line is simply a
+  line of cells that are 24 dots wide and 12 tall. The rotation is part of the
+  cache key, and it is part of it as the painter applies it,
+  `style.rotate && !page`, so the page mode rule below cannot serve a turned
+  cell from the cache to an upright page.
+- **A rotated cell gets no underline and no upperline.** The ESC/POS reference
+  of `ESC - n` exempts the 90 degree clockwise rotated characters next to the
+  white on black reverse ones, and the reverse exemption was already in
+  `renderGlyph()`; the rotated one is the same condition in the same two places,
+  which is why the rotation had to move into the font from the painter, where
+  the first round of this section had it. The setting itself survives, so the
+  line behind an `ESC V 0` is underlined again.
+- **The character spacing follows every cell a glyph takes.** A downloaded
+  multibyte glyph is two cells wide, so `glyph()` leaves two spacings behind it,
+  which is what `placeholder(2)` leaves and what the character behind it stands
+  on.
+- **A block does not turn.** `ESC V` is a character command in the reference and
+  the blocks of this painter are images, barcodes and symbols, which a printer
+  draws the way it draws them. Only `#cell()` and `#glyphCell()` turn.
+
+ESC/POS, and the readings where the reference is not on the wire:
+
+- **`ESC &` defines in the font that is current**, and font A and font B hold a
+  set each, which is what the reference says of the command. The parser does not
+  track the font for it: the painter does, and the set follows its own
+  `font()`.
+- **The widest character is the cell of the font.** The reference gives `x` a
+  range of 0 to 12 for font A and 0 to 9 for font B, which is the width of the
+  cell of each, so the check is `painter.characterWidth` and it follows the
+  profile instead of a table of its own. A definition wider than that, or of a
+  code outside `0x20` to `0x7e`, makes the whole command do nothing and the
+  glyphs that are there stay. **A reading**: the data of such a command is
+  consumed with it. A printer that ignores the command may well leave those
+  bytes to the stream and print them, and nothing available here settles which;
+  consuming them keeps a stream that asks for one glyph too wide from printing
+  its dots as text, which is the failure that is visible on paper. It is in the
+  deviation list of the reference page.
+- **`y` is 3 and nothing else.** The height of a definition is three bytes of
+  eight dots, the 24 dots of the cells of these profiles, and that is the only
+  value the Epson range gives font A and font B here. A `y` that is not 3 is a
+  command the parser has no layout for at all, so it consumes its three
+  parameters and leaves the bytes behind it to the stream, which is exactly what
+  it does for a `c2` below `c1`: both are commands that define nothing, and the
+  parser cannot know how many bytes belong to them. The first round of this
+  section accepted 1 to 3 and computed the data length from the `y` it was
+  given.
+- **An `x` of zero is a character of no dots**, which is in the range of the
+  command, so the code prints a blank cell while the set is selected. The
+  definition exists, so `hasGlyph` is true for it: that is the difference
+  between a character a stream blanked and a character it never defined.
+- **The dots go in the top left corner of the cell.** The reference draws the
+  definition as the left columns of the cell and says nothing about the rows,
+  and the fonts of these printers fill the cell in height, so the only case that
+  is visible is a `y` of one or two in a cell of 24 dots: the dots are at the
+  top and the rest of the cell is blank. A definition larger than the cell is
+  clipped by it, which only a font B cell of 9 by 17 in the Epson profile can
+  be given.
+- **`FS 2` carries 72 data bytes, the 24 by 24 glyph.** The reference makes the
+  length depend on the Kanji font of the printer and the reference page of this
+  repository assumed the 32 bytes of a 16 by 16 font until now. 24 by 24 is the
+  font of these models and the only size that fills the two cells the
+  placeholder of a multibyte character takes, so it is what the renderer reads
+  and what the length table says; a stream that defines 16 by 16 glyphs
+  desynchronises where it used to stay in sync, and a stream that defines 24 by
+  24 ones does the opposite. The encoder sends neither.
+- **A multibyte glyph is drawn whenever Kanji mode is on and the code matches**,
+  without `ESC %`: that command selects the single byte set, and the reference
+  has no selection for the Kanji set at all.
+- **`ESC V 2` is the same as `ESC V 1` here.** The reference has `0` and `48`
+  off, `1` and `49` on with a one dot space between the rotated characters and
+  `2` and `50` on with one and a half dots. A cell of whole dots has no room for
+  the difference and the renderer adds no space of its own, so the two are the
+  same rotation. It is in the deviation list of the reference page.
+- **`ESC V` is dropped in page mode and turns nothing there.** The reference
+  calls it a standard mode command. Both halves of that are implemented: the
+  parser ignores the command while the painter is in page mode, and a rotation
+  that was switched on in standard mode turns no cell of a page either, which is
+  the rule `ESC {` already followed since section 16d.
+- **The colour commands are parsed and change nothing.** `ESC r` and the
+  functions `48`, `49` and `50` of `GS ( N` are consumed and leave no item: this
+  renderer draws one bit, so a character of the second colour is black and the
+  background of a character is the white of the paper. **A reading**: a
+  background colour that is printed would be the invert of `GS B` on a one bit
+  page, and the reference text for `GS ( N` was not available here to settle
+  what a printer does with it. The renderer follows the printer of its profiles
+  instead, a single colour TM-T88 class model, which ignores the group
+  altogether. The reference page names both readings. A function the group does
+  not define is reported with all of its bytes, the way `FS ( C` is.
+- **Every colour block of the graphics group is drawn.** Section 13 drew colour
+  1 and consumed the rest, so an image a stream sent entirely in the second
+  colour disappeared and a definition of two blocks lost half of itself. The
+  blocks are combined into one image with OR now, and a store function draws
+  whatever colour its `c` names. **The merged image is as large as the blocks
+  that were drawn and never as large as the size the command declared**, which
+  is the rule `#bitmap()` already applied to a block of one colour: a definition
+  that carries sixteen columns of a declared sixty four is sixteen dots wide and
+  centres over those dots. The first round of this section sized the merge to
+  the declared width and moved such an image. That is the same answer the Star raster mode
+  has given since section 12, where the rows of every colour of `ESC * r K` go
+  into the one image buffer this renderer has, and it is the only answer that
+  never loses a dot the stream carried. It is in the deviation list of both
+  reference pages.
+- **The multiple tone parameter follows it.** `a` of 52 was drawn as its first
+  colour and is drawn as all of its tones now, which for a one bit image is the
+  same sentence: everything the command carries is black.
+
+StarPRNT:
+
+- **No user defined characters, and the reason is written down.** The Star Line
+  Mode commands for them are not in any specification text available here, and
+  the Star Graphic Mode specification of `documentation/star-graphics-mode.md`
+  does not carry them either: its command list is the raster mode, the drawer,
+  the buzzer, the print settings, the status group and the print mode. `ESC &`
+  and `ESC %` therefore still consume their two prefix bytes alone and are
+  reported, which desynchronises a stream that really defines a glyph; a length
+  that is a guess would desynchronise the same stream in a different place and
+  claim to know. The reference page has a row of its own for it and the "Not
+  supported yet" list keeps the entry.
+- **`ESC GS c` was a colour command with one argument byte and is reduced
+  printing with two.** The Star Graphic Mode specification in this repository
+  defines `ESC GS c h v`, `h` always zero and `v` the vertical reduction, 0 for
+  100 per cent, 1 for 50 and 2 for 75. So the parser consumed one byte too few
+  and printed the second as text. It is fixed, it stays Reported because a
+  receipt at half its size is paper this renderer does not reproduce, and the
+  row says what it is now. Found while looking for the Star colour commands.
+- **`ESC RS C` has two readings and keeps the one that reports.** The same
+  specification calls it the print mode select, which switches the two colour
+  printing mode on and off, and the reference page of this repository calls it
+  the character style. Both are one argument byte, so the stream stays in sync
+  either way; the row names both and the command stays Reported, because the
+  reading that could move a dot is the one that decides the status.
+- **`ESC * r K` gained the table of the specification.** 0 black, 1 cyan, 2
+  magenta, 3 yellow, and the rows of every colour land in the same image buffer
+  here, which is the note the row now carries.
+
+The star-graphics language:
+
+- **It is a name and a fourth key in `RENDERERS`.** A job in Star Graphic Mode
+  is the StarPRNT command set with the raster mode of `ESC * r A` in it, and
+  that mode has been in the parser since section 12, so no initial state, no
+  profile and no mapping of its own is needed: `star-graphics` is backed by
+  `StarPrntRenderer` with the `star` profile and the `star` codepage mapping,
+  exactly as `star-line` is, and a renderer created for it reports
+  `star-graphics` in its `language` getter.
+- **One name, not two.** `star-graphics` is what the Star profile of the device
+  database resolves for the TSP100, TSP100II and TSP100III, what the design's
+  driver integration has called the raw protocol since section 10 and what
+  StarGraphicsPrinterEncoder is named after. No `star-graphic` alias.
+- **What changes for a driver.** Before this section a driver whose profile
+  resolved `star-graphics` had to construct the renderer with another language
+  name, `star-prnt`, and report something the profile did not say; now the name
+  goes straight through, and the connected event of a TSP100 says
+  `star-graphics` whether the application passed a renderer or not. The design
+  document says so in Driver integration.
+
+Fixtures and tests:
+
+- **Four fixtures, three of them hand assembled.** `user-defined` prints `ABC`
+  five times: before the definition, after it and before `ESC %`, with the set
+  selected, in the double size of `ESC ! 0x38`, with the glyph of `B` cancelled
+  by `ESC ?`, and after an `ESC @`. `rotation` has an upright line, a rotated
+  one, a rotated double size line and a rotated right aligned line, and an
+  upright line behind `ESC V 0`. `colour` toggles `ESC r`, sends the two colour
+  functions of `GS ( N`, and defines an NV graphic of two colour blocks, the top
+  half of the test picture as colour 1 and the bottom half as colour 2, so the
+  image function `69` prints it only if both blocks were drawn. All three are
+  ESC/POS, the language that has the commands, so the shared list of
+  `test/parity.js` is unchanged.
+- **`star-graphics` is generated, not written.** `make-fixtures.js` renders the
+  `receipt` fixture of the StarPRNT language, hands the items to
+  StarGraphicsPrinterEncoder and freezes the job it writes, 20355 bytes, as a
+  StarPRNT fixture. It is the round trip of `test/star-raster.js` on paper: the
+  bytes a driver sends a TSP100 are in the suite as a fixture now, so the fixture
+  loops of `test/star-prnt.js` render them, and the unified renderer renders the
+  same fixture with the language `star-graphics` and has to agree with
+  `StarPrntRenderer` item for item.
+- **Reviewed as ASCII art before they were frozen**: the three glyphs are a
+  triangle standing on its point, a diamond and a frame with a diagonal through
+  it, each 12 by 24 dots, and they appear only on the lines behind `ESC % 1`,
+  with a built in `B` in the middle of the line behind `ESC ?` and three built
+  in letters again behind `ESC @`; the rotated lines are twelve dots tall and
+  their letters lie on their right side; the colour fixture prints the circle
+  over the checkerboard of the other image fixtures, whole.
+- **81 tests**, the 2268 of section 16d to 2349: 16 for the user defined
+  characters, 6 for the user defined Kanji, 8 for the rotation, 4 for the colour
+  commands and 3 for the colour blocks of a definition in `test/esc-pos.js`, 20
+  in its two length sweeps, 14 in `test/painter.js`, 1 for the length of
+  `ESC GS c` in `test/star-prnt.js`, 2 for the language in
+  `test/receipt-printer-renderer.js` and 8 for the four new fixtures over the
+  fixture loops. Six of them are the review below: the short colour definition,
+  the character spacing of a multibyte glyph, the underline and the upperline of
+  a rotated cell, in the renderer and in the painter, and the two halves of the
+  `y` rule of `ESC &`.
+- **Two existing tests changed rather than moved**: the length of the user
+  defined Kanji commands, which is 72 data bytes now and not 32, and the store
+  of a colour the renderer did not draw, which draws it now.
+
+The reference pages:
+
+- **ESC/POS: 150 command rows, 106 Rendered, 21 Parsed, 20 Reported, 3
+  Skipped**, against 147 rows with 99 Rendered, 19 Parsed and 26 Reported at the
+  end of section 16d. Six rows left Reported for good: `ESC V`, `ESC %`,
+  `ESC ?`, `FS 2` and `FS ?` are rendered and `ESC r` is parsed; the new rows are
+  `ESC &`, the `GS ( N` group and the colour blocks of the graphics group, which
+  have a section of their own, "Two colour printing".
+- **StarPRNT: 120 command rows, 86 Rendered, 16 Parsed, 13 Reported, 5
+  Skipped**, one row more than section 16d left: `ESC &` and `ESC %` together,
+  which say why the Star user defined characters are not implemented.
+- **"Not supported yet" lost the user defined characters and kept the rest.**
+  What both pages list now is the CJK fonts, the NV logos a utility put in the
+  printer, Maxicode and the composite symbols, and the status and settings
+  commands, which are parsed or reported and change no dot; the Star page keeps
+  the buzzer, the Star user defined characters and the reduced printing of
+  `ESC GS c` next to them. The three groups the task named as what should remain
+  are the ones that are about dots; the status and settings entry stays because
+  it says what happens to a command that cannot reach the paper.
+
+Review:
+
+The first round of this section was returned with six points, all of them
+applied here: the merge of the colour blocks of a definition is sized to the
+blocks that were drawn instead of to the size the command declared, so a short
+column format definition keeps its width and its place; `glyph()` leaves the
+character spacing of every cell a multibyte glyph takes; a rotated cell gets no
+underline and no upperline, which moved the rotation itself into
+`Font.renderGlyph()`, next to the invert exemption it follows; `ESC &` takes a
+`y` of 3 and nothing else, and a `y` it does not take leaves the data to the
+stream the way a `c2` below `c1` does; the three definition case of the length
+sweep carries exactly the twelve bytes the parser computes for it, so it pins
+the length; and the note about what is left on the "Not supported yet" lists
+says what those lists really hold. The reference page and the design document
+gained the value set of `ESC V`, its two exempted lines and the `y` rule, and
+the deviation list gained the data of an out of range `ESC &`. No fixture
+changed a dot in either round.
+
+Acceptance:
+
+- `npm test` 2349 passing, lint clean. `npm run build`, `npm run test:types` and
+  `npm run test:umd` pass, and `npm run contact-sheet` still builds.
+- Every fixture of sections 2 to 16d is byte identical, the 123 external ones
+  included: the fixtures of the new commands are new files and nothing that was
+  frozen moved a dot.
+- Version stays 0.3.0, nothing committed.

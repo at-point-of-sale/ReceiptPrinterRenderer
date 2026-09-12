@@ -1,0 +1,36 @@
+[
+  {
+    "type": "feed",
+    "height": 41
+  },
+  {
+    "type": "feed",
+    "height": 46
+  },
+  {
+    "type": "feed",
+    "height": 70
+  },
+  {
+    "type": "feed",
+    "height": 32
+  },
+  {
+    "type": "feed",
+    "height": 73
+  },
+  {
+    "type": "cut",
+    "value": "partial"
+  },
+  {
+    "type": "feed",
+    "height": 32
+  },
+  {
+    "type": "pulse",
+    "device": 0,
+    "on": 100,
+    "off": 500
+  }
+]

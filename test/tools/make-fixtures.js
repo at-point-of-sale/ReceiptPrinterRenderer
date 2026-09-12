@@ -3,6 +3,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 import ReceiptPrinterEncoder from '@point-of-sale/receipt-printer-encoder';
+import StarGraphicsPrinterEncoder from '@point-of-sale/star-graphics-printer-encoder';
 
 import {EscPosRenderer, StarPrntRenderer} from '../../src/receipt-printer-renderer.js';
 import {toPbm} from '../../src/formats/pbm.js';
@@ -715,6 +716,104 @@ function largeGraphics(fn, parameters) {
 }
 
 /**
+ * The dots of a shape of the size of a cell, as lines of ASCII art, so that the
+ * glyphs the user defined fixture downloads are described instead of typed
+ *
+ * @param  {Function}   test     Whether the dot at x, y is black
+ * @param  {number}     width    Width of the glyph in dots
+ * @param  {number}     height   Height of the glyph in dots
+ * @return {string[]}            One string per row
+ */
+function shape(test, width = 12, height = 24) {
+  const rows = [];
+
+  for (let y = 0; y < height; y++) {
+    let row = '';
+
+    for (let x = 0; x < width; x++) {
+      row += test(x, y, width, height) ? '#' : '.';
+    }
+
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+/**
+ * A glyph in the column format of ESC & and FS 2: one column after another,
+ * every column a number of bytes of eight dots with the top dot in the most
+ * significant bit
+ *
+ * @param  {string[]}   rows   The dots, one string per row
+ * @return {number[]}          The columns
+ */
+function columns(rows) {
+  const height = rows.length;
+  const bytes = height / 8;
+  const data = [];
+
+  for (let x = 0; x < rows[0].length; x++) {
+    for (let byte = 0; byte < bytes; byte++) {
+      let value = 0;
+
+      for (let bit = 0; bit < 8; bit++) {
+        if (rows[byte * 8 + bit].charAt(x) !== '.') {
+          value |= 0x80 >> bit;
+        }
+      }
+
+      data.push(value);
+    }
+  }
+
+  return data;
+}
+
+/**
+ * One character of ESC &: the number of columns it is wide and its columns
+ *
+ * @param  {string[]}   rows   The dots, one string per row
+ * @return {number[]}          The bytes of the definition
+ */
+function definition(rows) {
+  return [rows[0].length, ...columns(rows)];
+}
+
+/* The three glyphs the user defined fixture downloads, each of them the 12 by
+   24 dots of a font A cell: a triangle standing on its point, a diamond and a
+   frame with a diagonal through it */
+
+const GLYPHS = {
+  triangle: shape((x, y, w, h) => Math.abs(x - (w - 1) / 2) <= (y * (w - 1)) / (2 * (h - 1))),
+  diamond: shape((x, y, w, h) =>
+    Math.abs(x - (w - 1) / 2) / ((w - 1) / 2) + Math.abs(y - (h - 1) / 2) / ((h - 1) / 2) <= 1),
+  frame: shape((x, y, w, h) =>
+    x === 0 || y === 0 || x === w - 1 || y === h - 1 || Math.round((x * (h - 1)) / (w - 1)) === y),
+};
+
+/**
+ * The picture of the image fixtures with half of its rows blanked, which is
+ * what the two colour blocks of the colour fixture carry: the two together are
+ * the whole picture, so the OR of the blocks is what the other image fixtures
+ * print
+ *
+ * @param  {boolean}    top   True for the top half, false for the bottom one
+ * @return {number[]}         The dots in raster format
+ */
+function half(top) {
+  const data = PICTURE.data.slice();
+
+  for (let y = 0; y < PICTURE.height; y++) {
+    if (top === (y >= PICTURE.height / 2)) {
+      data.fill(0, y * PICTURE.width, (y + 1) * PICTURE.width);
+    }
+  }
+
+  return data;
+}
+
+/**
  * A two byte number, low byte first, the way every size and position of both
  * languages carries one
  *
@@ -1368,6 +1467,79 @@ const raw = {
   },
 
   /*
+      ESC &, the glyphs a stream downloads into the printer. The same three
+      characters, A, B and C, are printed five times: before the definition,
+      after it but before ESC % selects the downloaded set, with the set
+      selected, in a double size, with the glyph of B cancelled by ESC ?, and
+      after an ESC @, which throws every definition away.
+  */
+
+  'user-defined': {
+    'esc-pos': stream(
+        ESC, '@',
+        'Before the definition ABC', LF,
+        ESC, '&', 3, 'A', 'C',
+        definition(GLYPHS.triangle), definition(GLYPHS.diamond), definition(GLYPHS.frame),
+        'Defined, not selected ABC', LF,
+        ESC, '%', 1,
+        'Selected with ESC %   ABC', LF,
+        ESC, '!', 0x38, 'ABC', LF, ESC, '!', 0x00,
+        ESC, '?', 'B',
+        'B cancelled by ESC ?  ABC', LF,
+        ESC, '@',
+        'After ESC @           ABC', LF,
+    ),
+  },
+
+  /*
+      ESC V, the rotation of the characters by 90 degrees clockwise. The cells
+      of a rotated line stand sideways and still go left to right, so the line
+      is as tall as a character is wide and reads from the bottom of the paper
+      to the top.
+  */
+
+  'rotation': {
+    'esc-pos': stream(
+        ESC, '@',
+        'Upright line', LF,
+        ESC, 'V', 1,
+        'Rotated line', LF,
+        ESC, '!', 0x30, 'Rotated, double size', LF, ESC, '!', 0x00,
+        ESC, 'a', 2, 'Rotated, right aligned', LF, ESC, 'a', 0,
+        ESC, 'V', 0,
+        'Upright again', LF,
+    ),
+  },
+
+  /*
+      The two colour commands, and the two colour blocks of a graphics
+      definition. ESC r selects the colour of the characters, which this
+      renderer draws in the black of its one bit paper whatever the colour is,
+      and the definition carries the top half of the picture as colour 1 and the
+      bottom half as colour 2, so the image it prints is the whole picture of
+      the other image fixtures.
+  */
+
+  'colour': {
+    'esc-pos': stream(
+        ESC, '@',
+        'Colour one text', LF,
+        ESC, 'r', 1,
+        'Colour two text', LF,
+        ESC, 'r', 0,
+        GS, '(', 'N', [2, 0, 48, 49],
+        'Colour two by GS ( N', LF,
+        GS, '(', 'N', [2, 0, 48, 48],
+        ESC, 'a', 1,
+        graphics(67, [48, 'C'.charCodeAt(0), 'C'.charCodeAt(0), 2, ...PICTURE_DOTS,
+          49, ...half(true), 50, ...half(false)]),
+        graphics(69, ['C'.charCodeAt(0), 'C'.charCodeAt(0), 1, 1]),
+        ESC, 'a', 0,
+        'Both colour blocks above', LF,
+    ),
+  },
+
+  /*
       ESC GS S, the StarPRNT raster image: the same picture, 25 bytes of eight
       dots wide and 96 dots tall, drawn as a block and centred the way ESC GS a
       says.
@@ -1414,4 +1586,36 @@ for (const language of languages) {
       `${String(bitmap.height).padStart(5)} rows  ${items.length} items`,
     );
   }
+}
+
+/*
+    The star-graphics fixture.
+
+    It is not written by hand and it is not encoded by ReceiptPrinterEncoder
+    either: it is the receipt fixture rendered to items and handed to
+    StarGraphicsPrinterEncoder, which is the job a driver sends a TSP100. The
+    renderer reads that job back, in the star-prnt language, which is what the
+    star-graphics language of the unified renderer is an alias of, so the
+    fixture is the round trip of test/star-raster.js frozen as bytes.
+*/
+
+{
+  const directory = path.join(fixtures, 'star-prnt', 'raw');
+  const receipt = new Uint8Array(fs.readFileSync(path.join(fixtures, 'star-prnt', 'receipt.bin')));
+
+  const bytes = new StarGraphicsPrinterEncoder().encode(new StarPrntRenderer(RENDERER).render(receipt));
+  const items = new StarPrntRenderer(RENDERER).render(bytes);
+  const bitmap = stitch(items, {width: WIDTH});
+
+  fs.writeFileSync(path.join(directory, 'star-graphics.bin'), bytes);
+  fs.writeFileSync(path.join(directory, 'star-graphics.pbm'), toPbm(bitmap));
+  fs.writeFileSync(
+      path.join(directory, 'star-graphics.items.json'),
+      JSON.stringify(commands(items), null, 2) + '\n',
+  );
+
+  console.log(
+      `  ${'star-graphics'.padEnd(12)} ${String(bytes.length).padStart(6)} bytes  ` +
+    `${String(bitmap.height).padStart(5)} rows  ${items.length} items`,
+  );
 }

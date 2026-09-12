@@ -73,7 +73,7 @@
 
 /** @typedef {'cut' | 'pulse' | 'feed' | 'unknown'} RenderCommand */
 
-/** @typedef {'esc-pos' | 'star-prnt' | 'star-line'} RenderLanguage */
+/** @typedef {'esc-pos' | 'star-prnt' | 'star-line' | 'star-graphics'} RenderLanguage */
 
 /**
  * @typedef {object} RendererOptions

@@ -68,8 +68,11 @@ describe('ReceiptPrinterRenderer', function() {
   });
 
   describe('languages', function() {
-    it('lists the three languages of the encoder', function() {
-      assert.deepEqual(ReceiptPrinterRenderer.languages, ['esc-pos', 'star-prnt', 'star-line']);
+    it('lists the three languages of the encoder and the raster protocol of a TSP100', function() {
+      assert.deepEqual(
+          ReceiptPrinterRenderer.languages,
+          ['esc-pos', 'star-prnt', 'star-line', 'star-graphics'],
+      );
     });
 
     it('hands out a new array every time, so a caller cannot change the list', function() {
@@ -77,7 +80,10 @@ describe('ReceiptPrinterRenderer', function() {
 
       list.push('meow');
 
-      assert.deepEqual(ReceiptPrinterRenderer.languages, ['esc-pos', 'star-prnt', 'star-line']);
+      assert.deepEqual(
+          ReceiptPrinterRenderer.languages,
+          ['esc-pos', 'star-prnt', 'star-line', 'star-graphics'],
+      );
     });
 
     it('has no static language, unlike the renderers of one language', function() {
@@ -96,12 +102,17 @@ describe('ReceiptPrinterRenderer', function() {
       assert.equal(new ReceiptPrinterRenderer({language: 'esc-pos', width: WIDTH}).language, 'esc-pos');
       assert.equal(new ReceiptPrinterRenderer({language: 'star-prnt', width: WIDTH}).language, 'star-prnt');
       assert.equal(new ReceiptPrinterRenderer({language: 'star-line', width: WIDTH}).language, 'star-line');
+
+      assert.equal(
+          new ReceiptPrinterRenderer({language: 'star-graphics', width: WIDTH}).language,
+          'star-graphics',
+      );
     });
 
     it('throws on a language it does not know, and names the ones it does', function() {
       assert.throws(
           () => new ReceiptPrinterRenderer({language: 'meow', width: WIDTH}),
-          /Unknown language meow, must be one of esc-pos, star-prnt, star-line/,
+          /Unknown language meow, must be one of esc-pos, star-prnt, star-line, star-graphics/,
       );
     });
 
@@ -179,6 +190,37 @@ describe('ReceiptPrinterRenderer', function() {
 
         assert.deepEqual(summary(unified.render(bytes)), summary(direct.render(bytes)), name);
       }
+    });
+
+    it('renders star-graphics with the StarPRNT renderer', function() {
+      /* The raster job of a TSP100 is the StarPRNT command set with the raster
+         mode of ESC * r A in it, which the renderer has read since section 12,
+         so the language is a name and nothing else */
+
+      const unified = new ReceiptPrinterRenderer({language: 'star-graphics', width: WIDTH, commands: COMMANDS});
+      const direct = new StarPrntRenderer({width: WIDTH, commands: COMMANDS});
+
+      const {bytes} = fixture('star-prnt/raw', 'star-graphics');
+
+      assert.deepEqual(summary(unified.render(bytes)), summary(direct.render(bytes)));
+    });
+
+    it('renders the star-graphics fixture to the paper of the receipt it was made from', function() {
+      /* The fixture is the receipt fixture encoded by StarGraphicsPrinterEncoder,
+         so the two render the same paper, see test/star-raster.js */
+
+      const graphics = new ReceiptPrinterRenderer({language: 'star-graphics', width: WIDTH, commands: COMMANDS});
+      const star = new ReceiptPrinterRenderer({language: 'star-prnt', width: WIDTH, commands: COMMANDS});
+
+      const job = graphics.render(fixture('star-prnt/raw', 'star-graphics').bytes);
+      const receipt = star.render(fixture('star-prnt', 'receipt').bytes);
+
+      assert.deepEqual(
+          summary(job).images.map((image) => image.data.length),
+          summary(receipt).images.map((image) => image.data.length),
+      );
+
+      assert.deepEqual(commands(job), commands(receipt));
     });
 
     it('matches the fixtures of the language, commands and all', function() {

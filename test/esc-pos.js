@@ -624,8 +624,11 @@ describe('EscPosRenderer', function() {
     it('should consume the arguments of the user defined Kanji commands', function() {
       const known = render(stream(ESC, '@', 'AB', LF));
 
+      /* The definition carries the 72 bytes of a 24 by 24 glyph, and neither
+         the definition nor the cancel prints anything of its own */
+
       const define = render(stream(
-          ESC, '@', 'A', FS, '2', [0x77, 0x21], new Array(32).fill(0xff), 'B', LF,
+          ESC, '@', 'A', FS, '2', [0x77, 0x21], new Array(72).fill(0xff), 'B', LF,
       ));
 
       const cancel = render(stream(ESC, '@', 'A', FS, '?', [0x77, 0x21], 'B', LF));
@@ -1809,6 +1812,517 @@ describe('EscPosRenderer', function() {
     });
   });
 
+  describe('ESC &, ESC % and ESC ?, user defined characters', function() {
+    /*
+        The glyphs are described as ASCII art and turned into the column format
+        of the command, so that a test says what it downloads.
+    */
+
+    /**
+     * A character of ESC &: the number of columns and the columns themselves,
+     * every column a number of bytes of eight dots with the top dot in the
+     * most significant bit
+     *
+     * @param  {string[]}   rows   The dots, one string per row
+     * @return {number[]}          The bytes of the definition
+     */
+    function glyph(rows) {
+      const data = [rows[0].length];
+
+      for (let x = 0; x < rows[0].length; x++) {
+        for (let byte = 0; byte < rows.length / 8; byte++) {
+          let value = 0;
+
+          for (let bit = 0; bit < 8; bit++) {
+            if (rows[byte * 8 + bit].charAt(x) !== '.') {
+              value |= 0x80 >> bit;
+            }
+          }
+
+          data.push(value);
+        }
+      }
+
+      return data;
+    }
+
+    /**
+     * A glyph of the size of a font A cell, a rectangle of black dots of the
+     * given size in the top left corner of it
+     *
+     * @param  {number}     width    Width of the rectangle in dots
+     * @param  {number}     height   Height of the rectangle in dots
+     * @param  {number}     cell     Width of the definition in columns
+     * @return {number[]}            The bytes of the definition
+     */
+    function block(width, height, cell = 12) {
+      const rows = [];
+
+      for (let y = 0; y < 24; y++) {
+        rows.push(new Array(cell).fill('.').map((dot, x) => x < width && y < height ? '#' : '.').join(''));
+      }
+
+      return glyph(rows);
+    }
+
+    const FULL = block(12, 24);
+    const NARROW = block(4, 8);
+
+    /* ESC & 3 A A, one definition of twelve columns of three bytes */
+
+    const define = (character, definition) => [ESC, 0x26, 3, character, character, ...definition];
+
+    it('should print the downloaded glyph while ESC % selected the set', function() {
+      const paper = stitch(render(stream(
+          ESC, '@', define(0x41, FULL), ESC, '%', 1, 'A', LF,
+      )), {width: WIDTH});
+
+      for (let y = 0; y < 24; y++) {
+        for (let x = 0; x < 12; x++) {
+          assert.equal(Bitmap.getPixel(paper, x, y), 1, `dot ${x},${y}`);
+        }
+      }
+    });
+
+    it('should print the built in glyph while the set is not selected', function() {
+      const defined = render(stream(ESC, '@', define(0x41, FULL), 'A', LF));
+      const plain = render(stream(ESC, '@', 'A', LF));
+
+      assert.equal(dots(stitch(defined, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+
+    it('should print the built in glyph of a code without a definition', function() {
+      const defined = render(stream(ESC, '@', define(0x41, FULL), ESC, '%', 1, 'B', LF));
+      const plain = render(stream(ESC, '@', 'B', LF));
+
+      assert.equal(dots(stitch(defined, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+
+    it('should print the built in glyph again after ESC % 0', function() {
+      const off = render(stream(ESC, '@', define(0x41, FULL), ESC, '%', 1, ESC, '%', 0, 'A', LF));
+      const plain = render(stream(ESC, '@', 'A', LF));
+
+      assert.equal(dots(stitch(off, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+
+    it('should place the dots of a glyph in the top left corner of the cell', function() {
+      const paper = stitch(render(stream(
+          ESC, '@', define(0x41, NARROW), ESC, '%', 1, 'A', LF,
+      )), {width: WIDTH});
+
+      for (let y = 0; y < 24; y++) {
+        for (let x = 0; x < 12; x++) {
+          assert.equal(Bitmap.getPixel(paper, x, y), x < 4 && y < 8 ? 1 : 0, `dot ${x},${y}`);
+        }
+      }
+    });
+
+    it('should keep a set per font', function() {
+      /* The definition is made in font A, so font B prints its built in glyph
+         and font A prints the downloaded one */
+
+      const paper = stitch(render(stream(
+          ESC, '@', define(0x41, FULL), ESC, '%', 1,
+          ESC, 'M', 1, 'A', LF,
+          ESC, 'M', 0, 'A', LF,
+      )), {width: WIDTH});
+
+      const built = stitch(render(stream(ESC, '@', ESC, 'M', 1, 'A', LF)), {width: WIDTH});
+
+      for (let y = 0; y < 24; y++) {
+        for (let x = 0; x < 12; x++) {
+          assert.equal(Bitmap.getPixel(paper, x, y), Bitmap.getPixel(built, x, y), `font B dot ${x},${y}`);
+        }
+      }
+
+      assert.equal(Bitmap.getPixel(paper, 0, 30), 1);
+    });
+
+    it('should cancel one definition with ESC ? and keep the others', function() {
+      const paper = stitch(render(stream(
+          ESC, '@', define(0x41, FULL), define(0x42, FULL), ESC, '%', 1,
+          ESC, '?', 0x42, 'AB', LF,
+      )), {width: WIDTH});
+
+      const built = stitch(render(stream(ESC, '@', 'B', LF)), {width: WIDTH});
+
+      assert.equal(Bitmap.getPixel(paper, 0, 0), 1);
+
+      for (let y = 0; y < 24; y++) {
+        for (let x = 0; x < 12; x++) {
+          assert.equal(Bitmap.getPixel(paper, 12 + x, y), Bitmap.getPixel(built, x, y), `dot ${x},${y}`);
+        }
+      }
+    });
+
+    it('should throw every definition away on ESC @, and the selection with it', function() {
+      const reset = render(stream(ESC, '@', define(0x41, FULL), ESC, '%', 1, ESC, '@', 'A', LF));
+      const plain = render(stream(ESC, '@', 'A', LF));
+
+      assert.equal(dots(stitch(reset, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+
+    it('should define more than one character in one command', function() {
+      const paper = stitch(render(stream(
+          ESC, '@',
+          [ESC, 0x26, 3, 0x41, 0x43, ...NARROW, ...NARROW, ...NARROW],
+          ESC, '%', 1, 'ABC', LF,
+      )), {width: WIDTH});
+
+      for (let cell = 0; cell < 3; cell++) {
+        assert.equal(Bitmap.getPixel(paper, cell * 12, 0), 1, `cell ${cell}`);
+        assert.equal(Bitmap.getPixel(paper, cell * 12 + 4, 0), 0, `cell ${cell}`);
+      }
+    });
+
+    it('should scale and style a downloaded glyph the way it styles a built in one', function() {
+      const paper = stitch(render(stream(
+          ESC, '@', define(0x41, NARROW), ESC, '%', 1, GS, '!', 0x11, 'A', LF,
+      )), {width: WIDTH});
+
+      /* Double width and double height, so the four by eight dots of the
+         definition are eight by sixteen */
+
+      for (let y = 0; y < 48; y++) {
+        for (let x = 0; x < 24; x++) {
+          assert.equal(Bitmap.getPixel(paper, x, y), x < 8 && y < 16 ? 1 : 0, `dot ${x},${y}`);
+        }
+      }
+    });
+
+    it('should draw a downloaded glyph white on black while GS B is on', function() {
+      const paper = stitch(render(stream(
+          ESC, '@', define(0x41, NARROW), ESC, '%', 1, GS, 'B', 1, 'A', LF,
+      )), {width: WIDTH});
+
+      assert.equal(Bitmap.getPixel(paper, 0, 0), 0);
+      assert.equal(Bitmap.getPixel(paper, 8, 0), 1);
+      assert.equal(Bitmap.getPixel(paper, 8, 20), 1);
+    });
+
+    it('should ignore a definition whose width or code is out of range, data and all', function() {
+      /* Thirteen columns is wider than a font A cell, and 0x10 is below the
+         first character code the command defines. Both are consumed with the
+         data they carry, which is the reading of this renderer */
+
+      const wide = [ESC, 0x26, 3, 0x41, 0x41, ...block(12, 24, 13)];
+      const code = [ESC, 0x26, 3, 0x10, 0x10, ...FULL];
+
+      const plain = dots(stitch(render(stream(ESC, '@', ESC, '%', 1, 'A', LF)), {width: WIDTH}));
+
+      for (const [name, bytes] of [['wide', wide], ['code', code]]) {
+        assert.equal(
+            dots(stitch(render(stream(ESC, '@', bytes, ESC, '%', 1, 'A', LF)), {width: WIDTH})),
+            plain,
+            name,
+        );
+      }
+    });
+
+    it('should leave the data of a height it does not define to the stream', function() {
+      /* A y that is not three is a definition this parser has no layout for,
+         so it consumes the three parameters and nothing else, the way a c2
+         below c1 does, and the bytes behind it are text */
+
+      const bytes = [ESC, 0x26, 4, 0x41, 0x41, ...'xyz'.split('').map((c) => c.charCodeAt(0))];
+
+      assert.equal(
+          dots(stitch(render(stream(ESC, '@', bytes, LF)), {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'xyz', LF)), {width: WIDTH})),
+      );
+
+      assert.equal(
+          dots(stitch(render(stream(ESC, '@', bytes, LF, ESC, '%', 1, 'A', LF)), {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'xyz', LF, 'A', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should ignore the whole command when one of its definitions is out of range', function() {
+      const bytes = [ESC, 0x26, 3, 0x41, 0x42, ...FULL, ...block(12, 24, 13)];
+
+      assert.equal(
+          dots(stitch(render(stream(ESC, '@', bytes, ESC, '%', 1, 'AB', LF)), {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'AB', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should define a blank character with a width of zero columns', function() {
+      const paper = stitch(render(stream(
+          ESC, '@', [ESC, 0x26, 3, 0x41, 0x41, 0], ESC, '%', 1, 'A', 'B', LF,
+      )), {width: WIDTH});
+
+      assert.deepEqual(columnsOf(paper, 0, 24).map((run) => run.start >= 12), [true]);
+    });
+  });
+
+  describe('FS 2 and FS ?, user defined Kanji', function() {
+    /* A glyph of 24 by 24 dots in column format, three bytes per column: every
+       column is black in this one, so the character is a filled block */
+
+    const KANJI = new Array(72).fill(0xff);
+
+    const kanji = (code, data) => [FS, 0x32, code >> 8, code & 0xff, ...data];
+
+    it('should draw the downloaded glyph of a multibyte code in two cells', function() {
+      const paper = stitch(render(stream(
+          ESC, '@', FS, 'C', 1, kanji(0x93fa, KANJI), FS, '&', [0x93, 0xfa], LF,
+      )), {width: WIDTH});
+
+      for (let y = 0; y < 24; y++) {
+        for (let x = 0; x < 24; x++) {
+          assert.equal(Bitmap.getPixel(paper, x, y), 1, `dot ${x},${y}`);
+        }
+      }
+
+      assert.equal(Bitmap.getPixel(paper, 24, 0), 0);
+    });
+
+    it('should draw the placeholder cells of a code without a definition', function() {
+      const defined = render(stream(
+          ESC, '@', FS, 'C', 1, kanji(0x93fa, KANJI), FS, '&', [0x93, 0xfb], LF,
+      ));
+
+      const plain = render(stream(ESC, '@', FS, 'C', 1, FS, '&', [0x93, 0xfb], LF));
+
+      assert.equal(dots(stitch(defined, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+
+    it('should leave the character spacing of two cells behind a multibyte glyph', function() {
+      /* ESC SP 6 follows every cell, and a multibyte character is two cells
+         whether it is a downloaded glyph or two placeholders, so the character
+         behind it lands in the same place either way */
+
+      const paper = (trail) => stitch(render(stream(
+          ESC, '@', ESC, ' ', 6, FS, 'C', 1, kanji(0x93fa, KANJI),
+          FS, '&', [0x93, trail], 'A', LF,
+      )), {width: WIDTH});
+
+      const behind = (bitmap) => columnsOf(bitmap, 0, 24).pop().start;
+
+      /* Two cells of twelve dots and two spacings of six, so the A starts at
+         36 and its ink a side bearing behind that */
+
+      assert.equal(behind(paper(0xfa)), behind(paper(0xfb)));
+      assert.isAtLeast(behind(paper(0xfa)), 36);
+    });
+
+    it('should draw nothing of its own outside Kanji mode', function() {
+      const defined = render(stream(ESC, '@', kanji(0x4142, KANJI), 'AB', LF));
+      const plain = render(stream(ESC, '@', 'AB', LF));
+
+      assert.equal(dots(stitch(defined, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+
+    it('should cancel a definition with FS ?', function() {
+      const cancelled = render(stream(
+          ESC, '@', FS, 'C', 1, kanji(0x93fa, KANJI),
+          FS, 0x3f, [0x93, 0xfa], FS, '&', [0x93, 0xfa], LF,
+      ));
+
+      const plain = render(stream(ESC, '@', FS, 'C', 1, FS, '&', [0x93, 0xfa], LF));
+
+      assert.equal(dots(stitch(cancelled, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+
+    it('should throw the definitions away on ESC @', function() {
+      const reset = render(stream(
+          ESC, '@', FS, 'C', 1, kanji(0x93fa, KANJI), ESC, '@',
+          FS, 'C', 1, FS, '&', [0x93, 0xfa], LF,
+      ));
+
+      const plain = render(stream(ESC, '@', FS, 'C', 1, FS, '&', [0x93, 0xfa], LF));
+
+      assert.equal(dots(stitch(reset, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+  });
+
+  describe('ESC V n, rotation by 90 degrees', function() {
+    /**
+     * A rectangle of a bitmap, so that one cell can be compared with another
+     *
+     * @param  {object}   bitmap   The bitmap to cut from
+     * @param  {number}   x        Left edge
+     * @param  {number}   y        Top row
+     * @param  {number}   width    Width in dots
+     * @param  {number}   height   Height in dots
+     * @return {object}            The rectangle
+     */
+    function crop(bitmap, x, y, width, height) {
+      const result = Bitmap.create(width, height);
+
+      for (let row = 0; row < height; row++) {
+        for (let column = 0; column < width; column++) {
+          Bitmap.setPixel(result, column, row, Bitmap.getPixel(bitmap, x + column, y + row));
+        }
+      }
+
+      return result;
+    }
+
+    it('should turn every cell a quarter turn clockwise', function() {
+      const rotated = stitch(render(stream(ESC, '@', ESC, 'V', 1, 'A', LF)), {width: WIDTH});
+      const upright = stitch(render(stream(ESC, '@', 'A', LF)), {width: WIDTH});
+
+      assert.equal(
+          dots(crop(rotated, 0, 0, 24, 12)),
+          dots(Bitmap.rotate270(crop(upright, 0, 0, 12, 24))),
+      );
+    });
+
+    it('should put the cells of a rotated line left to right', function() {
+      const paper = stitch(render(stream(ESC, '@', ESC, 'V', 1, 'AB', LF)), {width: WIDTH});
+
+      const first = crop(paper, 0, 0, 24, 12);
+      const second = crop(paper, 24, 0, 24, 12);
+      const alone = stitch(render(stream(ESC, '@', ESC, 'V', 1, 'A', LF)), {width: WIDTH});
+
+      assert.equal(dots(first), dots(crop(alone, 0, 0, 24, 12)));
+      assert.notEqual(dots(second), dots(first));
+    });
+
+    it('should make the ink of a rotated line as tall as a character is wide', function() {
+      const paper = stitch(render(stream(ESC, '@', ESC, '3', 24, ESC, 'V', 1, 'Hello', LF)), {width: WIDTH});
+
+      let last = -1;
+
+      for (let y = 0; y < paper.height; y++) {
+        for (let x = 0; x < paper.width; x++) {
+          if (Bitmap.getPixel(paper, x, y)) {
+            last = y;
+          }
+        }
+      }
+
+      /* Twelve dots of cell, and the line spacing of ESC 3 24, which is twelve
+         dots at the two vertical motion units per dot of an Epson, so the line
+         is exactly the rotated cell */
+
+      assert.isAtMost(last, 11);
+      assert.equal(paper.height, 12);
+    });
+
+    it('should accept the values of the command and leave the rest alone', function() {
+      const rotated = dots(stitch(render(stream(ESC, '@', ESC, 'V', 1, 'A', LF)), {width: WIDTH}));
+      const upright = dots(stitch(render(stream(ESC, '@', 'A', LF)), {width: WIDTH}));
+
+      for (const value of [1, 49, 2, 50]) {
+        assert.equal(dots(stitch(render(stream(ESC, '@', ESC, 'V', value, 'A', LF)), {width: WIDTH})), rotated);
+      }
+
+      for (const value of [0, 48]) {
+        assert.equal(
+            dots(stitch(render(stream(ESC, '@', ESC, 'V', 1, ESC, 'V', value, 'A', LF)), {width: WIDTH})),
+            upright,
+        );
+      }
+
+      assert.equal(
+          dots(stitch(render(stream(ESC, '@', ESC, 'V', 1, ESC, 'V', 9, 'A', LF)), {width: WIDTH})),
+          rotated,
+      );
+    });
+
+    it('should draw no underline on a rotated cell', function() {
+      /* The ESC/POS reference exempts the rotated characters from the
+         underline the way it exempts the reverse ones */
+
+      const underlined = render(stream(ESC, '@', ESC, 'V', 1, ESC, '-', 1, 'Rotated', LF));
+      const plain = render(stream(ESC, '@', ESC, 'V', 1, 'Rotated', LF));
+
+      assert.equal(dots(stitch(underlined, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+
+      /* And the underline is back on the line behind ESC V 0, so the setting
+         itself is not lost */
+
+      const upright = render(stream(ESC, '@', ESC, 'V', 1, ESC, '-', 1, ESC, 'V', 0, 'Upright', LF));
+
+      assert.notEqual(
+          dots(stitch(upright, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'Upright', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should be switched off by ESC @', function() {
+      const reset = render(stream(ESC, '@', ESC, 'V', 1, ESC, '@', 'A', LF));
+      const plain = render(stream(ESC, '@', 'A', LF));
+
+      assert.equal(dots(stitch(reset, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+
+    it('should be a standard mode command, which page mode drops', function() {
+      const page = (rotate) => stream(
+          ESC, '@', ESC, 'L', ESC, 'W', [0, 0, 0, 0, 0x40, 0x02, 60, 0],
+          ...(rotate ? [ESC, 'V', 1] : []), 'A', LF, 0x0c,
+      );
+
+      assert.equal(
+          dots(stitch(render(page(true)), {width: WIDTH})),
+          dots(stitch(render(page(false)), {width: WIDTH})),
+      );
+    });
+
+    it('should lay a page out upright while the rotation is on', function() {
+      /* The rotation is set in standard mode, where it is effective, and the
+         page that follows is laid out as if it were off */
+
+      const rotated = stream(
+          ESC, '@', ESC, 'V', 1, ESC, 'L', ESC, 'W', [0, 0, 0, 0, 0x40, 0x02, 60, 0], 'A', LF, 0x0c,
+      );
+
+      const upright = stream(
+          ESC, '@', ESC, 'L', ESC, 'W', [0, 0, 0, 0, 0x40, 0x02, 60, 0], 'A', LF, 0x0c,
+      );
+
+      assert.equal(
+          dots(stitch(render(rotated), {width: WIDTH})),
+          dots(stitch(render(upright), {width: WIDTH})),
+      );
+    });
+  });
+
+  describe('the colour commands', function() {
+    it('should draw the second colour of ESC r in black, like the first', function() {
+      const second = render(stream(ESC, '@', ESC, 'r', 1, 'Colour', LF));
+      const first = render(stream(ESC, '@', 'Colour', LF));
+
+      assert.equal(dots(stitch(second, {width: WIDTH})), dots(stitch(first, {width: WIDTH})));
+    });
+
+    it('should leave no unknown item for ESC r', function() {
+      const items = render(stream(ESC, '@', ESC, 'r', 1, 'Colour', LF), {commands: ['unknown']});
+
+      assert.equal(items.filter((item) => item.type === 'unknown').length, 0);
+    });
+
+    it('should parse the colour functions of GS ( N', function() {
+      for (const fn of [48, 49, 50]) {
+        const items = render(
+            stream(ESC, '@', GS, '(', 'N', [2, 0, fn, 49], 'Colour', LF),
+            {commands: ['unknown']},
+        );
+
+        assert.equal(items.filter((item) => item.type === 'unknown').length, 0, `function ${fn}`);
+
+        assert.equal(
+            dots(stitch(items, {width: WIDTH})),
+            dots(stitch(render(stream(ESC, '@', 'Colour', LF)), {width: WIDTH})),
+        );
+      }
+    });
+
+    it('should report a function GS ( N does not have', function() {
+      const items = render(
+          stream(ESC, '@', GS, '(', 'N', [2, 0, 99, 49], 'Colour', LF),
+          {commands: ['unknown']},
+      );
+
+      assert.deepEqual(
+          Array.from(items.find((item) => item.type === 'unknown').data),
+          [GS, 0x28, 0x4e, 2, 0, 99, 49],
+      );
+    });
+  });
+
   describe('ESC i and ESC m, the legacy cuts', function() {
     it('should cut fully with ESC i', function() {
       const items = render(stream(ESC, '@', 'Hi', LF, ESC, 'i'), {commands: COMMANDS});
@@ -2522,6 +3036,20 @@ describe('EscPosRenderer', function() {
       ['ESC FF', [ESC, 0x0c]],
       ['GS $ nL nH', [GS, 0x24, 0, 0]],
       ['GS \\ nL nH', [GS, 0x5c, 0, 0]],
+      ['ESC & y c1 c2 x d..', [ESC, 0x26, 3, 0x7e, 0x7e, 12, ...new Array(36).fill(0x00)]],
+      /* Three definitions of the codes 0x7b to 0x7d, the first two columns
+         wide and the other two blank, which is exactly the twelve argument
+         bytes the parser computes for them */
+
+      ['ESC & with three definitions', [ESC, 0x26, 3, 0x7b, 0x7d, 2, 0, 0, 0, 0, 0, 0, 0, 0]],
+      ['ESC & with a code out of range', [ESC, 0x26, 3, 0x10, 0x10, 1, 0, 0, 0]],
+      ['ESC % n', [ESC, 0x25, 0]],
+      ['ESC ? n', [ESC, 0x3f, 0x7e]],
+      ['ESC V n', [ESC, 0x56, 0]],
+      ['ESC r n', [ESC, 0x72, 0]],
+      ['GS ( N pL pH fn m', [GS, 0x28, 0x4e, 2, 0, 48, 48]],
+      ['FS 2 c1 c2 d1..d72', [FS, 0x32, 0x77, 0x21, ...new Array(72).fill(0x00)]],
+      ['FS ? c1 c2', [FS, 0x3f, 0x77, 0x21]],
     ];
 
     for (const [name, bytes] of lengths) {
@@ -2560,6 +3088,16 @@ describe('EscPosRenderer', function() {
       ['ESC W', [ESC, 0x57, 0, 0, 0, 0]],
       ['GS $', [GS, 0x24, 10]],
       ['GS \\', [GS, 0x5c, 10]],
+      ['ESC & without its codes', [ESC, 0x26, 3, 0x41]],
+      ['ESC & without the width of a character', [ESC, 0x26, 3, 0x41, 0x42, 12, ...new Array(36).fill(0x00)]],
+      ['ESC & with the dots of a character missing', [ESC, 0x26, 3, 0x41, 0x41, 12, 0x00, 0x00]],
+      ['ESC %', [ESC, 0x25]],
+      ['ESC ?', [ESC, 0x3f]],
+      ['ESC V', [ESC, 0x56]],
+      ['ESC r', [ESC, 0x72]],
+      ['GS ( N', [GS, 0x28, 0x4e, 2, 0, 48]],
+      ['FS 2 with the glyph missing', [FS, 0x32, 0x77, 0x21, ...new Array(40).fill(0x00)]],
+      ['FS ?', [FS, 0x3f, 0x77]],
     ];
 
     for (const [name, bytes] of truncated) {
@@ -2837,6 +3375,66 @@ describe('EscPosRenderer', function() {
       );
     });
 
+    it('should draw every colour block of a definition into one image', function() {
+      /* The picture is split over two colour blocks, the odd rows in colour 1
+         and the even ones in colour 2, so only the OR of the two is the
+         picture the other image commands print */
+
+      const odd = raster.map((byte, index) => (index >> 1) % 2 === 0 ? byte : 0);
+      const even = raster.map((byte, index) => (index >> 1) % 2 === 0 ? 0 : byte);
+
+      const blocks = render(stream(
+          ESC, '@',
+          graphics(67, [48, 0x41, 0x42, 2, ...size, 49, ...odd, 50, ...even]),
+          graphics(69, [0x41, 0x42, 1, 1]),
+      ));
+
+      const whole = render(stream(
+          ESC, '@',
+          graphics(67, [48, 0x41, 0x42, 1, ...size, 49, ...raster]),
+          graphics(69, [0x41, 0x42, 1, 1]),
+      ));
+
+      assert.equal(dots(stitch(blocks, {width: WIDTH})), dots(stitch(whole, {width: WIDTH})));
+    });
+
+    it('should keep a short definition as wide as its dots, not as wide as it declared', function() {
+      /* A column format definition of 64 by 8 dots that carries sixteen
+         columns is sixteen dots wide, the way a block of one colour is, so it
+         centres over its dots and not over the size the command asked for */
+
+      const dots16 = new Array(16).fill(0).map((value, index) => (index * 37 + 11) & 0xff);
+
+      const items = render(stream(
+          ESC, '@', ESC, 'a', 1,
+          graphics(68, [48, 0x41, 0x42, 1, 64, 0, 8, 0, 49, ...dots16]),
+          graphics(69, [0x41, 0x42, 1, 1]),
+      ));
+
+      const paper = stitch(items, {width: WIDTH});
+      const edges = ink(paper, 0, 8);
+
+      assert.equal(paper.height, 8);
+      assert.isAtLeast(edges.min, (WIDTH - 16) / 2);
+      assert.isBelow(edges.max, (WIDTH + 16) / 2);
+    });
+
+    it('should keep a definition of a colour the printer would call the second one', function() {
+      const second = render(stream(
+          ESC, '@',
+          graphics(67, [48, 0x41, 0x42, 1, ...size, 50, ...raster]),
+          graphics(69, [0x41, 0x42, 1, 1]),
+      ));
+
+      const first = render(stream(
+          ESC, '@',
+          graphics(67, [48, 0x41, 0x42, 1, ...size, 49, ...raster]),
+          graphics(69, [0x41, 0x42, 1, 1]),
+      ));
+
+      assert.equal(dots(stitch(second, {width: WIDTH})), dots(stitch(first, {width: WIDTH})));
+    });
+
     it('should draw the multiple tone images of a as colour one', function() {
       const tone = render(stream(ESC, '@', graphics(112, [52, 1, 1, 49, ...size, ...raster]), graphics(50, [])));
       const plain = render(stream(ESC, '@', graphics(112, [48, 1, 1, 49, ...size, ...raster]), graphics(50, [])));
@@ -2844,18 +3442,26 @@ describe('EscPosRenderer', function() {
       assert.equal(dots(stitch(tone, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
     });
 
-    it('should consume the data of a colour it does not draw', function() {
-      const items = render(stream(
+    it('should draw the data of the second colour as well, in black', function() {
+      /* One image buffer here against one per colour on a two colour printer,
+         so a store of colour two prints exactly what a store of colour one
+         prints and nothing of the image is lost */
+
+      const second = render(stream(
           ESC, '@',
           graphics(112, [48, 1, 1, 50, ...size, ...raster]),
           graphics(50, []),
-          'Only colour one is drawn', LF,
-      ), {commands: ['unknown']});
+          'Every colour is drawn', LF,
+      ));
 
-      assert.equal(
-          dots(stitch(items, {width: WIDTH})),
-          dots(stitch(render(stream(ESC, '@', 'Only colour one is drawn', LF)), {width: WIDTH})),
-      );
+      const first = render(stream(
+          ESC, '@',
+          graphics(112, [48, 1, 1, 49, ...size, ...raster]),
+          graphics(50, []),
+          'Every colour is drawn', LF,
+      ));
+
+      assert.equal(dots(stitch(second, {width: WIDTH})), dots(stitch(first, {width: WIDTH})));
     });
 
     it('should report a tone parameter the command does not define', function() {

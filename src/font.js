@@ -28,6 +28,7 @@ import fonts from '../generated/fonts.js';
  * @property {number} [underline]          Underline thickness in dots, 0, 1 or 2
  * @property {number} [upperline]          Upperline thickness in dots, 0, 1 or 2
  * @property {boolean} [invert]            Draw the cell white on black
+ * @property {boolean} [rotate]            Turn the finished cell a quarter turn clockwise, which is ESC V
  */
 
 /**
@@ -214,6 +215,7 @@ class Font {
       underline: 0,
       upperline: 0,
       invert: false,
+      rotate: false,
       ...options,
     };
 
@@ -248,9 +250,11 @@ class Font {
     /* The underline is drawn over the full width of the cell, also under the
        spaces, and its thickness is in dots, so it does not scale. A printer
        does not underline reverse characters, see the ESC/POS reference of
-       ESC - n: "underline is not applied to white/black reverse characters" */
+       ESC - n: "underline is not applied to white/black reverse characters",
+       and the same note exempts the rotated ones: "underline is not applied to
+       90 degree clockwise rotated characters" */
 
-    if (settings.underline > 0 && !settings.invert) {
+    if (settings.underline > 0 && !settings.invert && !settings.rotate) {
       const rowBytes = Bitmap.rowBytes(cell.width);
       const first = Math.max(0, cell.height - settings.underline);
 
@@ -260,7 +264,7 @@ class Font {
     /* The upperline of ESC _ n on a Star printer is the same line along the top
        of the cell, under the same rules */
 
-    if (settings.upperline > 0 && !settings.invert) {
+    if (settings.upperline > 0 && !settings.invert && !settings.rotate) {
       const rowBytes = Bitmap.rowBytes(cell.width);
 
       cell.data.fill(0xff, 0, Math.min(settings.upperline, cell.height) * rowBytes);
@@ -274,7 +278,11 @@ class Font {
 
     this.#clearPadding(cell);
 
-    return cell;
+    /* The rotation of ESC V is the last thing that happens to a cell: a printer
+       draws the character and turns the whole of it, which is why the underline
+       and the upperline above are exempted instead of turned along */
+
+    return settings.rotate ? Bitmap.rotate270(cell) : cell;
   }
 
   /**

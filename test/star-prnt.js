@@ -694,6 +694,23 @@ describe('StarPrntRenderer', function() {
       );
     });
 
+    it('should consume both arguments of the reduced printing command', function() {
+      /* ESC GS c h v, the two bytes of the Star Graphic Mode specification, so
+         the text behind it is not the second argument */
+
+      const items = render(stream(ESC, '@', 'A', ESC, GS, 'c', [0, 1], 'B', LF), {commands: ['unknown']});
+
+      assert.deepEqual(
+          Array.from(items.find((item) => item.type === 'unknown').data),
+          [ESC, GS, 0x63, 0, 1],
+      );
+
+      assert.equal(
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'AB', LF)), {width: WIDTH})),
+      );
+    });
+
     it('should consume the automatic status command of the ESC GS group', function() {
       const known = render(stream(ESC, '@', 'AB', LF));
       const skipped = render(stream(ESC, '@', 'A', ESC, GS, [0x03], 's', [1, 0], 'B', LF));
