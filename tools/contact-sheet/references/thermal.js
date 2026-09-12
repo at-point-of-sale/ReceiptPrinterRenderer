@@ -8,8 +8,9 @@ import {references, root, locate, run, unavailable, outOfScope, fromPng} from '.
 
     thermal, https://github.com/zachzurn/thermal, MIT or Apache 2.0, commit
     9456874a850b8604d95eca428cca027750cd6188. It renders an ESC/POS stream to
-    one PNG and to HTML, and it is the renderer whose own sample renders the eye
-    review of the escpos-tools fixture was read against.
+    one PNG, which is what is compared here, and to HTML next to it, and it is
+    the renderer whose own sample renders the eye review of the escpos-tools
+    fixture was read against.
 
     It is a Rust library with no binary of its own: the repository renders its
     samples from a test. The shim next to this module,

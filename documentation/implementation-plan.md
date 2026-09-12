@@ -902,8 +902,7 @@ Rules on top of section 16:
 Rules:
 
 - **One module per tool** in `tools/contact-sheet/references/<tool>.js`, with the pinned version, the exact commands and where the module looks for the tool written in its header, so that a maintainer can reproduce a rendering by hand. A module reports whether it is available, what it produced for a fixture and why it could not, and it never throws into the sheet.
-- **The tools**: thermal (PNG), ESCPost (PNG), `esc2html` of escpos-tools (HTML, converted to an image when a converter is present, linked otherwise) and escpos-emulator (HTML). A tool that needs a toolchain this machine does not have is built once into `build/references/` and found there; `build/` stays gitignored and out of the repository.
-- **escpos-emulator is a dev dependency** when it renders a stream without opening a port, and is driven from a capture module otherwise.
+- **The tools are the ones that render to dots**: thermal (PNG) and ESCPost (PNG). A renderer that produces markup rather than an image, such as `esc2html` of escpos-tools or escpos-emulator, cannot answer the question this page asks, so it is not a reference here, see the notes. A tool that needs a toolchain this machine does not have is built once into `build/references/` and found there; `build/` stays gitignored and out of the repository.
 - **One coarse agreement metric per fixture per reference** where both renderings are images: the reference is scaled to our width, and the page records the ink rows of both, the rows that carry any dark pixel, and the relative height difference. It is information, not a check: no test fails on it, and the numbers go into a small table in the contact sheet index and as a summary into the notes of this section, with the fixtures that disagree most and what the eye review says the reason is.
 - **No new runtime dependency**, and no reference tool is needed by `npm test`.
 
@@ -3170,15 +3169,25 @@ printer profile rather than of this renderer:
   barcodes on the same dots. The QR symbol is the same version and size with a
   different mask, which two encoders may choose differently.
 
-Part B, the reference renderers. **Two of the four ran here**, and the page
-degrades to "not available" for the other two:
+Part B, the reference renderers. **Two tools, both of which render to dots**, and
+the page degrades to "not available" when a binary is not there:
 
 | Tool | Ran | What it needed | Fixtures rendered |
 |---|---|---|---|
 | thermal `9456874` | yes | a Rust toolchain and the shim crate of this repository | 76 of 76 ESC/POS fixtures |
 | ESCPost 0.2.1 | yes | a Rust toolchain, the workspace at `c4a7665` | 24 of 76, it refuses the rest |
-| esc2html `4311694` | no | php with imagick | 0 |
-| escpos-emulator 0.2.0 | yes | `npm install` | 66 of 76, 10 streams give it no receipt |
+
+- **The two HTML renderers were built and then dropped, by decision of the
+  maintainer.** `esc2html` of escpos-tools and escpos-emulator both read a stream
+  and write markup, and markup is not what this page compares: a div with a class
+  on it says nothing about whether the paper agrees, it has no dots to count ink
+  rows in and no height to measure, so neither could carry the agreement metric
+  and neither could answer the one question the sheet exists to ask. They are
+  gone, with the escpos-emulator dev dependency and its lock entries. For the
+  history: `esc2html` never ran here anyway, because every image command of its
+  parser builds its picture with `new Imagick()` and `php -m` on this machine has
+  gd and no imagick. escpos-tools stays a sample source, its `receipt-with-logo`
+  fixture and all, and escpos-emulator contributes nothing at all.
 
 - **There is no prebuilt binary for either Rust tool.** thermal has no releases
   at all, and the three releases of ESCPost carry no assets, so the toolchain was
@@ -3196,39 +3205,12 @@ degrades to "not available" for the other two:
   `ImageRenderer` and `HtmlRenderer` on a file. It pins the library by commit in
   its `Cargo.toml`, so it builds without a checkout, and it is the only Rust in
   this repository. Nothing in `npm test` or `npm run build` touches it.
-- **esc2html is skipped for imagick**, which is the documented skip: `php -m` on
-  this machine lists gd and not imagick, and every image command of the escpos-tools
-  parser, `ESC *`, `GS v 0` and the graphics group, builds its picture with
-  `new Imagick()`. The module checks php, the composer install and `php -m` in
-  that order and reports which of the three is missing, so the day imagick is
-  there the tool joins the page without a change. An HTML to image converter
-  would have given it an agreement metric as well; none of the headless browsers
-  is a dependency of this package, so the HTML is linked instead.
-- **escpos-emulator needs no port.** Its `dist/escpos-parser.js` is a module that
-  hands a receipt to a callback, so the reference module drives the parser
-  directly and writes the receipt out with the class names of the emulator's own
-  page: the parse is theirs, the page around it is ours, and the caption says so.
-  It is a dev dependency. One catch of this checkout: two dev dependencies are
-  local links that are not on the registry, so `npm install --save-dev` cannot
-  resolve the tree at all; the entry was added to `package.json` by hand and the
-  package unpacked into `node_modules`. `npm install --package-lock-only
-  --ignore-scripts` fails on the same 404, links or not, because the lock is
-  resolved against the registry, so the two entries the package needs were
-  written into `package-lock.json` by hand and checked: `escpos-emulator` 0.2.0
-  in the root `devDependencies` and as a package, with the integrity of the
-  published tarball, `sha512-2Iu+YvUf…`, verified against the sha512 of the file
-  npm pack downloaded, and its one dependency `ws` 8.20.0 next to it, so that
-  `npm ci` has nothing to complain about for this package. The lock is still
-  short of `@point-of-sale/star-graphics-printer-encoder`, which is a local link
-  and not on npm, which is what makes a normal install impossible here; the
-  whole lock gets refreshed with one `npm install` on the day the two encoder
-  packages are published.
 - **Every module reports, none of them throws.** A missing tool, a tool that
   fails on a stream and a stream in a language the tool does not read are all a
   cell that says "not available" with the reason. The last case is the largest
   group on this page: the 47 StarPRNT, Star Line and Star raster fixtures of
-  receiptline are skipped by all four tools, which are ESC/POS only, 188 cells of
-  the page.
+  receiptline are skipped by both tools, which are ESC/POS only, 94 cells of the
+  page.
 
 Rebuilding the reference tools on another machine, in one place. Everything
 lands under `build/`, which is gitignored, and every module also takes an
@@ -3253,14 +3235,6 @@ git clone https://github.com/receiptful/escpost build/references/escpost
 git -C build/references/escpost checkout c4a7665
 cd build/references/escpost && cargo build --bin escpost
 cp target/debug/escpost ../escpost-bin
-
-# esc2html, which then still needs an imagick in php -m
-git clone https://github.com/receipt-print-hq/escpos-tools build/references/escpos-tools
-git -C build/references/escpos-tools checkout 4311694
-composer install -d build/references/escpos-tools
-
-# escpos-emulator
-npm install
 ```
 
 Where each module looks, in order, the first that exists winning:
@@ -3269,8 +3243,6 @@ Where each module looks, in order, the first that exists winning:
 |---|---|---|
 | thermal | `RENDERER_THERMAL` | `thermal-bin`, then `thermal-cli/release/thermal-cli` |
 | ESCPost | `RENDERER_ESCPOST` | `escpost-bin`, then `escpost/target/{debug,release}/escpost` |
-| esc2html | `RENDERER_ESC2HTML`, php at `RENDERER_PHP` | `escpos-tools/esc2html.php` |
-| escpos-emulator | none, it is a dev dependency | `node_modules/escpos-emulator` |
 
 The agreement metric, over the 100 fixture and reference pairs that are two
 images:
@@ -3327,9 +3299,8 @@ Acceptance:
   generated is linted. It turned up two findings in the capture scripts of
   section 16, both fixed here: a 124 character line in python-escpos and a JSDoc
   parameter named `capture` for an argument named `item` in receiptline.
-- `npm run contact-sheet` builds with the four tools present and with none of
-  them: hiding `build/references` and `node_modules/escpos-emulator` leaves a
-  page with the same 123 fixtures, every reference cell reading "not available"
-  with its reason, and the agreement table replaced by the line that says there
-  is nothing to compare.
+- `npm run contact-sheet` builds with both tools present and with neither of
+  them: hiding `build/references` leaves a page with the same 123 fixtures,
+  every reference cell reading "not available" with its reason, and the
+  agreement table replaced by the line that says there is nothing to compare.
 - Version stays 0.3.0, nothing committed.

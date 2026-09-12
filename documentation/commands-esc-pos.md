@@ -386,4 +386,4 @@ Four of these are **Reported**, which is the interesting part of the table: `ESC
 
 The last rows come from the sample streams of two renderers rather than from an encoder, which is why they reach commands no library above sends: the four bit image densities of `ESC *`, every scaling mode of `GS v 0`, `ESC 2`, `ESC J`, `GS P` and the GS1 DataBar selectors of `GS k`. A renderer writes those by hand to exercise a parser, so they are the part of the table that says what the wild does when it is not an encoder holding the pen.
 
-`npm run contact-sheet` can put the renderings of those projects next to ours, where the tools are installed on the machine that builds the page: thermal, ESCPost, `esc2html` of escpos-tools and escpos-emulator, each with a coarse agreement metric. See section 16b of the implementation plan for what the four disagree about and why.
+`npm run contact-sheet` can put the renderings of two of those projects next to ours, where the tools are installed on the machine that builds the page: thermal and ESCPost, each with a coarse agreement metric. See section 16b of the implementation plan for what the two disagree about and why.

@@ -10,9 +10,9 @@ import {write, report, today} from '../shared.js';
     A set of PHP tools that read ESC/POS rather than write it: esc2text,
     esc2html and escimages. The repository carries one ESC/POS sample, the
     receipt with a logo its documentation shows, and that stream is what is
-    captured here. Nothing of the library is run for the capture; see
-    tools/contact-sheet/references/esc2html.js for its renderer on the contact
-    sheet.
+    captured here. Nothing of the library is run, here or anywhere else in this
+    repository: its tools write HTML and text rather than dots, which is no
+    answer to whether the paper agrees, see the notes of section 16b.
 
         git clone https://github.com/receipt-print-hq/escpos-tools build/external/escpos-tools
         git -C build/external/escpos-tools checkout 4311694

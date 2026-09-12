@@ -18,16 +18,15 @@ import {agreement} from './contact-sheet/references/shared.js';
     which is what the golden images were reviewed against.
 
     Next to our render it shows what other renderers make of the same bytes,
-    where they are installed on this machine: thermal and ESCPost as images,
-    esc2html of escpos-tools and escpos-emulator as HTML. Every tool is a module
-    of tools/contact-sheet/references, and a tool that is not there is a
-    "not available" cell, never a failure, so the sheet builds on a machine with
-    none of them.
+    where they are installed on this machine: thermal and ESCPost, both of which
+    produce an image. Every tool is a module of tools/contact-sheet/references,
+    and a tool that is not there is a "not available" cell, never a failure, so
+    the sheet builds on a machine with none of them.
 
-    For the two that produce an image the page also carries a coarse agreement
-    metric: the reference is scaled to our width, and the table gives the rows
-    that carry ink in both and the relative height difference. It is information
-    for a maintainer, not a check; no test looks at it.
+    The page also carries a coarse agreement metric per reference: the reference
+    is scaled to our width, and the table gives the rows that carry ink in both
+    and the relative height difference. It is information for a maintainer, not
+    a check; no test looks at it.
 
         npm run contact-sheet
 
@@ -97,7 +96,7 @@ async function previews(library) {
 }
 
 /**
- * One reference render as a figure or a link, and its row of the agreement
+ * One reference render as a figure, and its row of the agreement
  * table
  *
  * @param  {object}   reference   What a reference module returned
@@ -112,15 +111,6 @@ function cell(reference, paper, name) {
     return {
       html: `<figure class="missing"><figcaption>${title}</figcaption>
       <div class="unavailable">not available<br><span>${escape(reference.reason)}</span></div></figure>`,
-      row: null,
-    };
-  }
-
-  if (reference.kind === 'html') {
-    return {
-      html: `<figure><figcaption>${title}</figcaption>
-      <div class="page"><a href="${escape(reference.file)}">${escape(path.basename(reference.file))}</a>
-      <p>${escape(reference.note || 'HTML, opened in a browser')}</p></div></figure>`,
       row: null,
     };
   }
@@ -286,8 +276,6 @@ async function main() {
   details td { padding-right: .75rem; white-space: pre-wrap; }
   .unavailable { border: 1px dashed #ccc; color: #888; padding: 1rem; width: 14rem; background: #fafafa; }
   .unavailable span { color: #aaa; }
-  .page { border: 1px solid #eee; padding: 1rem; width: 14rem; background: #fafafa; }
-  .page p { color: #888; margin: .5rem 0 0; }
   .agreement { background: #fff; border: 1px solid #ddd; margin: 1rem 0; }
   .agreement th, .agreement td { padding: .2rem .75rem; border-bottom: 1px solid #eee; }
   .agreement thead th { background: #f0f0f0; }

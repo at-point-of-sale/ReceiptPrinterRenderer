@@ -64,7 +64,6 @@
         "@zxing/library": "^0.21.3",
         "bwip-js": "^4.11.4",
         "chai": "^4.3.7",
-        "escpos-emulator": "0.2.0",
         "eslint": "^8.39.0",
         "eslint-config-google": "^0.14.0",
         "javascript-stringify": "^2.1.0",
