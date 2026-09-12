@@ -944,8 +944,77 @@ everything the protocol section of design.md marks as unconfirmed: that the job
 sequence is accepted as it stands, that speed `0x20` and energy `0x2ee0` give
 readable output, that the flow control packets are exactly those nine bytes and
 that a pause is always followed by a resume, and that 96 rows of final feed is
-enough for the paper to clear the print head. The run length encoded row command
-is not used, and whether it is worth using is still open.
+enough for the paper to clear the print head.
+
+#### Speed, added 2026-09-12
+
+The cat printer path prints correctly on an MX10 but took about 18 seconds for
+the receipt fixture: 603 packets, each its own Bluetooth write with a sleep of
+30 ms after it. Three changes, all in the driver, bring that down to under two
+seconds without giving up flow control.
+
+- **Run length encoded rows, command `BF`.** Confirmed from rbaron's catprinter,
+  `catprinter/cmds.py`, in `cmd_print_row()`, `run_length_encode()` and
+  `encode_run_length_repetition()`. NaitLee's `commander.py`, the reference for
+  the rest of the protocol, only has `draw_compressed_bitmap()` as a TODO that
+  calls the raw `draw_bitmap()`, so it says nothing about the format. One byte is
+  one run: bit 7 is the value of the dots, 1 is black, bits 0 to 6 are the length
+  of the run, 1 to 127, and a longer run is split into several bytes of the same
+  value. The runs are in the order the dots are printed, leftmost first, and they
+  have to add up to the full width of the print head, 384 dots. That order is the
+  difference with the raw `A2` row: the `A2` payload is a bitmap whose leftmost
+  dot is the least significant bit of its byte, which is why the renderer's rows,
+  most significant bit first, are reversed byte by byte, while a run byte carries
+  no bitmap and needs no reversal.
+- **The choice is per row**, as in `cmd_print_row()`: the row is encoded, and when
+  the result is longer than the 48 bytes of the bitmap it is sent raw instead. The
+  comparison is the reference's, `> PRINT_WIDTH // 8`, so runs that are exactly as
+  long as the bitmap are kept. A line of text is a handful of bytes, a row of
+  alternating single dots needs one byte per dot and always falls back. The
+  wrapper exports `encodeRow()` and `runLengthEncode()`, and the tests decode the
+  runs again and round trip random rows, an all white row, an all black row, a
+  text shaped row and the alternating dots that must fall back.
+- **Writes carry whole packets.** `print()` no longer queues one write per packet.
+  `#batch()` concatenates consecutive packets into writes of at most `messageSize`
+  bytes, 200 in the profile, never splitting a packet, and each write is one queue
+  entry with `sleepAfterCommand` after it. The queue checks its gate before every
+  callback, so a pause that arrives between two batches still stops the next
+  write, which is a test of its own. The chunking path of the other printers is
+  untouched.
+- **Profile values.** `sleepAfterCommand` is 20, the value of the reference
+  implementation with 200 byte writes, and the graphics section sets
+  `feedThreshold: 4`, so the short white gaps between lines of a receipt become
+  feed packets of two bytes instead of dozens of white rows. Both are documented
+  as tunable in the profile. `#open()` now passes the graphics values `maxHeight`
+  and `feedThreshold` to the renderer through a `RendererSettings` list, and only
+  when the profile actually has them, so a profile without one leaves it to
+  `rendererOptions` and to the renderer's default rather than overruling it with
+  an `undefined`. The driver's values still win over `rendererOptions`.
+
+The receipt fixture, `test/fixtures/esc-pos/receipt.bin`, rendered at width 384
+with `commands: ['feed']` and `maxHeight: 256`:
+
+| | packets | writes | bytes | time |
+|---|---|---|---|---|
+| before, raw rows, one packet per write | 603 | 603 | 33091 | 18.1 s at 30 ms |
+| after, compressed rows, `feedThreshold` 4, batched | 484 | 82 | 14619 | 1.6 s at 20 ms |
+
+Each change on its own, for the record: batching alone takes the 603 raw packets
+to 197 writes, compression alone halves the bytes to 16069 but not the 603
+writes, and the two together without the feed threshold give 89 writes. The feed
+threshold is what removes rows altogether, 588 rows and 6 feeds become 458 rows
+and 17 feeds.
+
+Tests: 81 cases, all passing, `npm run build` clean and the dist rebuilt. The
+byte level tests cover a job with one compressible row, `BF` with the six run
+bytes `81 7f 7f 7f 01 81`, and one incompressible row, `A2` with 48 reversed
+bytes, and the driver tests cover the batch boundaries, twenty packets of a ten
+row job becoming writes of 186, 168, 168 and 151 bytes, three rows of 56 bytes
+per write in the middle, and a pause that arrives after the first write stopping
+the second until the resume.
+
+Still open on hardware: whether the MX10 and the GB and GT models accept the
+`BF` rows, and whether 20 ms is enough with 200 byte writes on those models.
 
 ### Section 8
 
