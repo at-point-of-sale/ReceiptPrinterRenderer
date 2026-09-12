@@ -2,7 +2,7 @@ import {generate, mode, correction} from 'lean-qr';
 import Bitmap from '../bitmap.js';
 
 /**
- * @typedef {import('../bitmap.js').Bitmap} Bitmap
+ * @typedef {import('../types.js').Bitmap} Bitmap
  */
 
 /*

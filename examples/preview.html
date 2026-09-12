@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ReceiptPrinterRenderer preview</title>
+<style>
+    body {
+        margin: 0;
+        padding: 2rem;
+        font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        color: #222;
+        background: #f6f6f6;
+    }
+
+    h1 {
+        margin: 0 0 .25rem;
+        font-size: 1.4rem;
+    }
+
+    p.intro {
+        margin: 0 0 1.5rem;
+        max-width: 46rem;
+        color: #555;
+    }
+
+    .layout {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 2rem;
+        align-items: flex-start;
+    }
+
+    .controls {
+        flex: 1 1 22rem;
+    }
+
+    label {
+        display: block;
+        margin-bottom: .35rem;
+        font-weight: 600;
+        font-size: .85rem;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        color: #666;
+    }
+
+    textarea,
+    select {
+        width: 100%;
+        box-sizing: border-box;
+        padding: .6rem;
+        font: inherit;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        background: #fff;
+    }
+
+    textarea {
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 13px;
+        height: 9rem;
+        resize: vertical;
+    }
+
+    .field + .field {
+        margin-top: 1.25rem;
+    }
+
+    .paper {
+        flex: 0 0 auto;
+        padding: 1rem;
+        background: #fff;
+        border-radius: 4px;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, .2);
+    }
+
+    canvas {
+        display: block;
+        width: 384px;
+        height: auto;
+        image-rendering: pixelated;
+    }
+
+    #status {
+        margin-top: 1rem;
+        font-size: .85rem;
+        color: #666;
+    }
+
+    #status.error {
+        color: #b00;
+    }
+</style>
+</head>
+<body>
+
+<h1>ReceiptPrinterRenderer preview</h1>
+
+<p class="intro">
+    This page encodes a small receipt with ReceiptPrinterEncoder, renders it with
+    ReceiptPrinterRenderer and draws the result on a canvas, the way a printer without
+    fonts would print it. Nothing is sent to a printer.
+</p>
+
+<div class="layout">
+
+    <div class="controls">
+        <div class="field">
+            <label for="language">Printer language</label>
+            <select id="language">
+                <option value="esc-pos" selected>ESC/POS</option>
+                <option value="star-prnt">StarPRNT</option>
+            </select>
+        </div>
+
+        <div class="field">
+            <label for="message">Message on the receipt</label>
+            <textarea id="message">The quick brown fox jumps over the lazy dog
+
+Table 12, two guests</textarea>
+        </div>
+
+        <p id="status">Loading&hellip;</p>
+    </div>
+
+    <div class="paper">
+        <canvas id="canvas" width="576" height="1"></canvas>
+    </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@point-of-sale/receipt-printer-encoder@3/dist/receipt-printer-encoder.umd.js"></script>
+<script src="../dist/receipt-printer-renderer.umd.js"></script>
+
+<script>
+
+    /* The printer this preview emulates: 80 mm paper, 576 dots wide, which is
+       48 columns of font A, because font A is 12 dots wide */
+
+    const WIDTH = 576;
+    const COLUMNS = WIDTH / 12;
+
+    const language = document.getElementById('language');
+    const message = document.getElementById('message');
+    const canvas = document.getElementById('canvas');
+    const status = document.getElementById('status');
+
+    /**
+     * Encode a small receipt: a header, the text from the textarea, a table, a
+     * barcode, a QR code and a cut
+     *
+     * @param  {string}       name   The printer language, 'esc-pos' or 'star-prnt'
+     * @param  {string}       text   The text to put on the receipt
+     * @return {Uint8Array}          The commands
+     */
+    function encode(name, text) {
+        const encoder = new ReceiptPrinterEncoder({ language: name, columns: COLUMNS });
+
+        /* The newline after initialize is there because the encoder puts the
+           padding of a centred line in front of the commands that open the
+           receipt, and the initialize command clears it again, exactly as a
+           printer would */
+
+        encoder
+            .initialize()
+            .codepage('cp437')
+            .newline()
+            .align('center')
+            .bold(true).line('THE CORNER STORE').bold(false)
+            .line('Kerkstraat 1, Amsterdam')
+            .align('left')
+            .newline();
+
+        for (const line of text.split('\n')) {
+            encoder.line(line);
+        }
+
+        return encoder
+            .newline()
+            .table(
+                [
+                    { width: 28, align: 'left' },
+                    { width: 6, align: 'center' },
+                    { width: 14, align: 'right' },
+                ],
+                [
+                    [ 'Coffee', '2', '5.00' ],
+                    [ 'Cheesecake', '1', '4.25' ],
+                    [ 'Sparkling water', '3', '7.50' ],
+                ],
+            )
+            .rule()
+            .table(
+                [
+                    { width: 34, align: 'left' },
+                    { width: 14, align: 'right' },
+                ],
+                [
+                    [ (e) => e.bold(true).text('Total'), (e) => e.bold(true).text('16.75') ],
+                ],
+            )
+            .newline()
+            .align('center')
+            .barcode('4006381333931', 'ean13', { height: 60, width: 2, text: true })
+            .newline()
+            .qrcode('https://example.com/order/9912', { model: 2, size: 5, errorlevel: 'm' })
+            .line('Thank you')
+            .align('left')
+            .newline(2)
+            .cut('partial')
+            .encode();
+    }
+
+    /**
+     * Encode, render, stitch and draw
+     *
+     * @return {void}
+     */
+    function preview() {
+        const name = language.value;
+
+        try {
+            const bytes = encode(name, message.value);
+
+            /* The driver normally does this part. It knows the printer, so it
+               knows the width, the codepage mapping the encoder used and which
+               commands the printer still understands */
+
+            const Renderer = name === 'esc-pos' ?
+                ReceiptPrinterRenderer.EscPosRenderer :
+                ReceiptPrinterRenderer.StarPrntRenderer;
+
+            const renderer = new Renderer({
+                width: WIDTH,
+                codepageMapping: name === 'esc-pos' ? 'epson' : 'star',
+                commands: [ 'cut' ],
+            });
+
+            const items = renderer.render(bytes);
+
+            /* Everything below is the preview: the items become one bitmap with
+               a dashed line where the paper is cut, and that bitmap goes on the
+               canvas as an ImageData */
+
+            const paper = ReceiptPrinterRenderer.stitch(items, { width: WIDTH, cutMarker: true });
+            const image = ReceiptPrinterRenderer.toImageData(paper);
+
+            canvas.width = paper.width;
+            canvas.height = paper.height;
+            canvas.getContext('2d').putImageData(image, 0, 0);
+
+            const images = items.filter((item) => item.type === 'image').length;
+
+            status.className = '';
+            status.textContent = `${Renderer.language}: ${bytes.length} bytes encoded, ` +
+                `${items.length} items, ${images} of them images, ` +
+                `${paper.width} by ${paper.height} dots of paper`;
+
+            document.body.dataset.ready = 'yes';
+        } catch (error) {
+            status.className = 'error';
+            status.textContent = `${error}`;
+
+            document.body.dataset.ready = 'no';
+        }
+    }
+
+    if (typeof ReceiptPrinterEncoder !== 'function') {
+        status.className = 'error';
+        status.textContent = 'ReceiptPrinterEncoder did not load, this page needs the CDN.';
+        document.body.dataset.ready = 'no';
+    } else if (typeof ReceiptPrinterRenderer !== 'object') {
+        status.className = 'error';
+        status.textContent = 'ReceiptPrinterRenderer did not load, run npm run build first.';
+        document.body.dataset.ready = 'no';
+    } else {
+        /* ?language=star-prnt opens the page in the other language, which makes
+           it easy to check both from a script */
+
+        const requested = new URLSearchParams(location.search).get('language');
+
+        if (requested === 'esc-pos' || requested === 'star-prnt') {
+            language.value = requested;
+        }
+
+        language.addEventListener('change', preview);
+        message.addEventListener('input', preview);
+
+        preview();
+    }
+
+</script>
+
+</body>
+</html>

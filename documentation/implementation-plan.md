@@ -489,3 +489,197 @@ the tests:
   of the print head and the fine density image of one dot per column; the QR
   code defaults say three dot modules, which is what they are; and the header of
   the parity test names the one exception instead of claiming there is none.
+
+### Section 5
+
+Choices made where the design and this plan were silent.
+
+Build and declarations:
+
+- **The declaration file was broken before this section.** `src/bitmap.js` held
+  both a `Bitmap` typedef and a `Bitmap` class, and rollup-plugin-dts renamed
+  both to the same name, so the bundled `dist/receipt-printer-renderer.d.ts`
+  declared `Bitmap$5` twice and did not compile. `tsc` never noticed because
+  `checkJs` is off and the duplicate only meets itself after bundling.
+- **`src/types.js` is the one place the public types are written down.** It has
+  no runtime code, only the typedefs of the output contract: `Bitmap`, the five
+  item types, `RenderItem`, `RenderCommand` and `RendererOptions`. Every other
+  module refers to it with `@typedef {import('./types.js').X} X`, so the
+  bundled declarations contain each type once and the entry point re-exports
+  them by naming them.
+- **`src/bitmap.js` calls the type `Image` internally**, because the class of
+  the operations is called `Bitmap` and a JSDoc typedef cannot share that name
+  with it. It is the same type, imported from `src/types.js`.
+- **The renderers no longer have their own options typedef.** Both constructors
+  take `RendererOptions`, which is what the design describes, with the per
+  language defaults in the JSDoc line and in the documentation instead of in two
+  near identical copies of the same type.
+- Other JSDoc corrections: `render()` returns `RenderItem[]` and not `object[]`,
+  `stitch()` takes `RenderItem[]` and its options argument is optional,
+  `toImageData()` returns an `ImageData` and not an `object`, `commands` is
+  `RenderCommand[]`, `profile` is `string|Profile` and `font` is
+  `Object<string, PackedFont>`.
+- **`typeof ImageData` is not written in JSDoc**, because eslint's `valid-jsdoc`
+  cannot parse it. The second argument of `toImageData()` stays a `Function`,
+  the return type is what matters for an application.
+- The entry point also exports `CellSize`, `Profile`, `PackedFont` and
+  `StitchOptions`, because the option types name them and a TypeScript
+  application that builds an options object needs to be able to name them too.
+- The browser bundles contain no `require(` and no `node:` import: the only
+  Node-only path is the `Buffer` fallback of the base64 decoder in
+  `src/font.js`, which is behind a `typeof Buffer === 'function'` guard and
+  reaches no module system. `@point-of-sale/codepage-encoder` and `lean-qr` stay
+  external in the cjs and mjs builds and are bundled in the browser builds, as
+  the rollup configuration already had it.
+- Sizes, after terser: the UMD bundle is 133 kB, 39.8 kB gzipped, the ESM bundle
+  the same, and the declaration file is 3.3 kB. The cjs and mjs builds are not
+  minified, 215 kB each. Most of the weight is the packed font.
+
+Types test:
+
+- **`npm run test:types`** compiles `test/types/smoke.ts` against
+  `dist/receipt-printer-renderer.d.ts` with `tsc -p test/types/tsconfig.json`.
+  The tsconfig maps the package name to the declaration file, so the smoke test
+  imports `@point-of-sale/receipt-printer-renderer` the way an application does.
+  It is a separate script because it needs a build, and `npm test` must keep
+  running on a fresh checkout without one. The full check before a release is
+  `npm run build && npm test && npm run test:types`.
+- The smoke test constructs both renderers, renders from a `Uint8Array` and from
+  an array of numbers, narrows the items in a switch on `type`, and calls
+  `toPbm`, `toPng`, `toImageData` and `stitch`. It has `lib: ES2020, DOM`,
+  because `toImageData()` returns an `ImageData`.
+- eslint does not see the file: it lints `test/**/*.js`, and mocha runs
+  `test/` without recursion, so neither picks up `test/types`.
+
+Documentation and example:
+
+- `documentation/usage.md` follows the encoder's documentation: the same header,
+  the same navigation list, short sections and tables for the options. It covers
+  installation, creating a renderer, the item stream, the fallback table, feed
+  items and `maxHeight`, the four helpers, a preview example, the note that
+  drivers construct the renderer, and what is not rendered.
+- `examples/preview.html` loads the encoder's UMD build from jsDelivr and the
+  renderer's UMD build from `../dist`. A textarea feeds a small receipt with a
+  header, a table, a rule, an EAN-13 barcode, a QR code and a cut, a select
+  switches between ESC/POS and StarPRNT, and the render is stitched with cut
+  markers and drawn on a canvas through `toImageData()`. A `?language=` query
+  parameter preselects the language, which is what made the headless check able
+  to test both.
+- **The example calls `newline()` right after `initialize()`.** The encoder puts
+  the padding of a centred line in front of the commands that open the receipt,
+  and `ESC @` clears the print buffer, so without the extra line the first
+  centred line of a receipt comes out left aligned. The renderer is faithful to
+  the printer here, the fixtures of section 2 show the same bytes; the example
+  simply does not want to demonstrate that quirk.
+- **Verified in a headless browser.** Playwright's `chrome-headless-shell`
+  (chromium 1228) is installed on this machine and was used with `--dump-dom`
+  and `--screenshot` on `file://.../examples/preview.html`. Both languages
+  render: ESC/POS gives 3 items, 2 of them images, 576 by 891 dots of paper, and
+  StarPRNT gives 3 items, 2 images, 576 by 935 dots. The screenshot shows the
+  bold centred header, the table with its aligned columns, the rule, the bold
+  total, the barcode with its human readable text, the QR code and the dashed
+  cut marker.
+
+Packaging:
+
+- `files` is `dist`, `README.md` and `LICENSE`. `npm pack --dry-run` lists ten
+  files, the four bundles with their two source maps, the declaration file, the
+  readme, the licence and `package.json`, and nothing from `test`, `data`,
+  `generated`, `documentation` or `examples`.
+- `exports` already had the `types` condition first, which is the order
+  TypeScript needs, so it was left as it is. The keyword list grew with the
+  spellings people search for.
+- The version stays 0.1.0, nothing is published.
+
+### Section 6
+
+Implemented on branch `tsp100` of `/Users/salonhub/Projects/Dependencies/WebUSBReceiptPrinter`,
+not committed. Files: `src/wrappers/star-raster.js`, `src/main.js`,
+`test/star-raster.js`, `package.json`, `README.md`.
+
+Choices made where the design was silent:
+
+- **The `graphics` section of a profile is keyed by language**, so the Star
+  profile carries `graphics: { 'star-graphics': { width, commands, wrapper } }`
+  and the driver looks up `profile.graphics[language]` after resolving the
+  language. The Star profile resolves five different languages from one entry,
+  so a flat section would have had to be guarded by a language test in the
+  driver. Keyed by language, a profile with a plain string language, such as the
+  cat printer profile of section 7, writes its own language as the single key
+  and needs no special case in `#open()`.
+- **The wrapper returns one `Uint8Array`** holding the whole job, not a list of
+  chunks. The existing `print()` sends the command it is given in a single
+  `transferOut()`, and nothing in it chunks or paces, so the graphics path does
+  the same: render, wrap, one `transferOut()`. A bulk USB transfer of a few
+  hundred kilobytes is what the browser already handles for a large ESC/POS
+  receipt. Chunking belongs to the Bluetooth driver, where the link needs
+  pacing, and there the wrapper returns packets instead.
+- **A renderer class is a function with a static `language` string**, anything
+  else that is a function is a loader and is called and awaited. The result must
+  be a class by that same rule, otherwise `#resolve()` throws with a message
+  about the option. This avoids calling a class as a function, which throws a
+  `TypeError` that says nothing useful.
+- **`connect()` only swallows the device selection.** The existing `try` around
+  the whole of `connect()` would have turned the missing renderer error into a
+  `console.log`, which is exactly the hard to diagnose situation the design wants
+  to avoid. The `try` now wraps `requestDevice()` alone, which is the call that
+  throws when the user cancels the dialog, and errors from `#open()` reach the
+  caller, the same as they already did in `reconnect()`.
+- **`columns` is only reported for graphics printers.** For every other printer
+  the driver does not know the print width, and inventing 42 or 48 would be a
+  guess the application cannot tell apart from knowledge. The README says so.
+- **The codepage mapping of the renderer wins over the mapping of the profile**,
+  through a small `CodepageMappings` table, `epson` for `esc-pos` and `star` for
+  `star-prnt`. The profile mapping stays as the fallback for a renderer language
+  that is not in the table.
+- **`width` and `commands` always come from the profile**, `rendererOptions` is
+  merged underneath, so an application can pass `maxHeight` or a `font` but
+  cannot break the agreement between the print width and the reported columns.
+- **An empty segment sends no FF mode.** The mode command is written lazily,
+  before the first row or feed of a segment, so a job that ends right after a cut
+  does not emit a stray `ESC * r F 1 NUL`, and a `cut` on an empty buffer sends
+  only `ESC FF NUL`, which the printer ignores, as the specification says it
+  does. The same flag decides whether a `pulse` is preceded by `ESC FF NUL`.
+- **The wrapper takes an options object** which is the graphics section of the
+  profile. It reads `quality` and `pageLength` from it, defaulting to `0` and
+  `0`, the high speed and continuous settings of the design. Nothing in the
+  profile sets them today, but a model that needs a page length has a place to
+  say so.
+- **Pulse times that are absent or out of range** fall back to 20, the printer
+  default of 200 ms, and are clamped to the defined area of 1 to 127 units of
+  10 ms.
+- **`ESC * r D n NUL` takes `1` for device 0 and `2` for device 1**, any other
+  device value falls back to drawer 1.
+
+Byte sequences, all checked against star-graphics-mode.md:
+
+| Command | Bytes | Spec |
+|---|---|---|
+| initialize raster mode | `1b 2a 72 52` | `ESC * r R` |
+| enter raster mode | `1b 2a 72 41` | `ESC * r A` |
+| quit raster mode | `1b 2a 72 42` | `ESC * r B` |
+| print quality | `1b 2a 72 51 n.. 00` | `ESC * r Q n NUL` |
+| page length | `1b 2a 72 50 n.. 00` | `ESC * r P n NUL` |
+| EOT mode | `1b 2a 72 45 n.. 00` | `ESC * r E n NUL` |
+| FF mode | `1b 2a 72 46 n.. 00` | `ESC * r F n NUL` |
+| drive drawer | `1b 2a 72 44 n.. 00` | `ESC * r D n NUL` |
+| vertical position | `1b 2a 72 59 n.. 00` | `ESC * r Y n NUL` |
+| raster data | `62 n1 n2 d..` | `b n1 n2 data` |
+| execute FF mode | `1b 0c 00` | `ESC FF NUL` |
+| execute EOT mode | `1b 0c 04` | `ESC FF EOT` |
+| pulse width | `1b 07 n1 n2` | `ESC BEL n1 n2` |
+
+The `n..` of the setting commands is ASCII decimal digits, so FF mode 13 is
+`31 33 00`. The pulse width is the only one with binary arguments.
+
+Tests: `npm test` runs mocha over `test/star-raster.js`, seven cases, all
+passing. Image then partial cut, image then pulse then image then full cut, feed
+items between images, an image with an all white row and a row with a white tail,
+an image ending without a cut, a pulse with no rows before it, and pulse width
+clamping on drawer 2. Every expectation is a literal byte array. The wrapper is
+its own module without a `navigator.usb` reference, so the tests need no browser.
+`npm run build` succeeds and the wrapper is in both bundles.
+
+Not verified on hardware yet. The two things to confirm on a TSP100 are that
+`ESC FF NUL` before `ESC * r D` really empties the buffer in time for the drawer
+command, and that `ESC * r Y` moves the paper the way the CUPS driver expects.

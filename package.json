@@ -21,7 +21,8 @@
         "generate": "node tools/generate.js",
         "lint": "eslint --fix src/*.js src/**/*.js test/*.js test/**/*.js tools/*.js",
         "mocha": "mocha test/",
-        "test": "npm run lint && npm run mocha"
+        "test": "npm run lint && npm run mocha",
+        "test:types": "tsc -p test/types/tsconfig.json"
     },
     "repository": {
         "type": "git",
@@ -29,13 +30,22 @@
     },
     "keywords": [
         "pos",
-        "escpos",
-        "starprnt",
+        "point-of-sale",
         "receipt",
         "printer",
         "renderer",
+        "escpos",
+        "esc-pos",
+        "starprnt",
+        "star-prnt",
+        "starline",
         "raster",
-        "tsp100"
+        "graphics",
+        "bitmap",
+        "image",
+        "thermal-printer",
+        "tsp100",
+        "cat-printer"
     ],
     "author": "Niels Leenheer",
     "license": "MIT",
@@ -64,6 +74,8 @@
         "lean-qr": "^2.4.1"
     },
     "files": [
-        "dist"
+        "dist",
+        "README.md",
+        "LICENSE"
     ]
 }

@@ -1,5 +1,5 @@
 /**
- * @typedef {import('../bitmap.js').Bitmap} Bitmap
+ * @typedef {import('../types.js').Bitmap} Bitmap
  */
 
 /**
@@ -10,9 +10,9 @@
  * constructor can be passed in, from a canvas library or a small class of your
  * own.
  *
- * @param  {Bitmap}     bitmap                 The bitmap to convert
- * @param  {Function}   [ImageDataConstructor] Constructor to use instead of the global one
- * @return {object}                            An ImageData with the pixels of the bitmap
+ * @param  {Bitmap}     bitmap                   The bitmap to convert
+ * @param  {Function}   [ImageDataConstructor]   Constructor to use instead of the global one
+ * @return {ImageData}                           An ImageData with the pixels of the bitmap
  */
 export function toImageData(bitmap, ImageDataConstructor) {
   const constructor = ImageDataConstructor || globalThis.ImageData;

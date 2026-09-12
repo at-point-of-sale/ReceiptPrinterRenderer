@@ -4,7 +4,7 @@ import {barcode as encodeBarcode} from './symbologies/index.js';
 import {qrcode as encodeQrcode} from './symbologies/qrcode.js';
 
 /**
- * @typedef {import('./bitmap.js').Bitmap} Bitmap
+ * @typedef {import('./types.js').Bitmap} Bitmap
  * @typedef {import('./font.js').PackedFont} PackedFont
  */
 

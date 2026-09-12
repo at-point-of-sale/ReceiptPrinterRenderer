@@ -1,7 +1,8 @@
 import Bitmap from '../bitmap.js';
 
 /**
- * @typedef {import('../bitmap.js').Bitmap} Bitmap
+ * @typedef {import('../types.js').Bitmap} Bitmap
+ * @typedef {import('../types.js').RenderItem} RenderItem
  */
 
 /**
@@ -25,9 +26,9 @@ const CUT_DASH = 8;
  *
  * This is a preview helper. A driver sends the items to the printer instead.
  *
- * @param  {object[]}        items     The items of a render
- * @param  {StitchOptions}   options   How to join them
- * @return {Bitmap}                    The paper
+ * @param  {RenderItem[]}    items       The items of a render
+ * @param  {StitchOptions}   [options]   How to join them
+ * @return {Bitmap}                      The paper
  */
 export function stitch(items, options) {
   const settings = Object.assign({cutMarker: false, feed: true}, options || {});

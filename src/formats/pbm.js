@@ -1,5 +1,5 @@
 /**
- * @typedef {import('../bitmap.js').Bitmap} Bitmap
+ * @typedef {import('../types.js').Bitmap} Bitmap
  */
 
 /**

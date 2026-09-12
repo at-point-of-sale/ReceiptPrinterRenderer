@@ -3,6 +3,7 @@
 Render the ESC/POS and StarPRNT commands created by [ReceiptPrinterEncoder](https://github.com/NielsLeenheer/ReceiptPrinterEncoder) to 1-bit images, for receipt printers that only support graphics, such as the Star TSP100 series and Bluetooth "cat" printers.
 
 - [About ReceiptPrinterRenderer](README.md)
+- [Usage and installation](documentation/usage.md)
 - [Design document](documentation/design.md)
 
 <br>
@@ -35,9 +36,21 @@ const items = renderer.render(bytes);
 */
 ```
 
-There is an `EscPosRenderer` and a `StarPrntRenderer`, sharing the same painter and output format. The renderer is normally not used directly, but constructed by a printer driver such as [WebUSBReceiptPrinter](https://github.com/NielsLeenheer/WebUSBReceiptPrinter), which passes the images on to the printer in the format the printer expects. Applications keep using ReceiptPrinterEncoder exactly as they do for printers with native ESC/POS support.
+There are two renderers, sharing the same painter and output format:
 
-This project is in the design stage. See the [design document](documentation/design.md) for the architecture, the output contract and the plan for driver support.
+- `EscPosRenderer` renders the commands the encoder emits for the `esc-pos` language.
+- `StarPrntRenderer` renders the commands the encoder emits for the `star-prnt` and `star-line` languages.
+
+And there are four helpers to do something with the images:
+
+- `toPbm(bitmap)` returns a PBM file, the binary P4 variant.
+- `toPng(bitmap)` returns a PNG file, one bit grayscale.
+- `toImageData(bitmap)` returns an `ImageData`, for drawing on a canvas.
+- `stitch(items, options)` joins the items of a render into one bitmap, for previews.
+
+The renderer is normally not used directly, but constructed by a printer driver such as [WebUSBReceiptPrinter](https://github.com/NielsLeenheer/WebUSBReceiptPrinter), which passes the images on to the printer in the format the printer expects. Applications keep using ReceiptPrinterEncoder exactly as they do for printers with native ESC/POS support.
+
+See [Usage and installation](documentation/usage.md) for the options, the item stream and a preview example, and the [design document](documentation/design.md) for the architecture, the output contract and the plan for driver support.
 
 <br>
 

@@ -7,18 +7,8 @@ import printerProfiles from '../../generated/profiles.js';
 /**
  * @typedef {import('../painter.js').Profile} Profile
  * @typedef {import('../painter.js').PainterOptions} PainterOptions
- */
-
-/**
- * @typedef {object} EscPosRendererOptions
- * @property {number} width                  Width of the print area in dots, a multiple of 8
- * @property {string} [codepageMapping]      Codepage mapping the commands were encoded with, defaults to 'epson'
- * @property {string[]} [commands]           Command types that appear in the output, the rest is dropped
- * @property {number} [maxHeight]            Maximum height of an image item, taller segments are split
- * @property {number} [lineSpacing]          Default line spacing in dots, defaults to the profile
- * @property {string|Profile} [profile]      Printer family defaults, a name or a profile, defaults to 'epson'
- * @property {number} [feedThreshold]        Runs of blank rows at least this tall become feed items
- * @property {object} [font]                 Font data, instead of the built in fonts
+ * @typedef {import('../types.js').RendererOptions} RendererOptions
+ * @typedef {import('../types.js').RenderItem} RenderItem
  */
 
 const ESC = 0x1b;
@@ -387,7 +377,8 @@ class EscPosRenderer {
   /**
      * Create a renderer
      *
-     * @param  {EscPosRendererOptions}   options   How the printer this renderer emulates behaves
+     * @param  {RendererOptions}   options   How the printer this renderer emulates behaves,
+     *                                     `codepageMapping` and `profile` default to 'epson'
      */
   constructor(options) {
     const settings = options || {};
@@ -451,7 +442,7 @@ class EscPosRenderer {
      * Render a stream of ESC/POS commands
      *
      * @param  {Uint8Array|number[]}   bytes   The commands
-     * @return {object[]}                      The items, see the output contract in design.md
+     * @return {RenderItem[]}                  The items, see the output contract in design.md
      */
   render(bytes) {
     const data = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes || []);

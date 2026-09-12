@@ -1,0 +1,126 @@
+/*
+    TypeScript smoke test.
+
+    Compiled with `npm run test:types`, which runs tsc against the bundled
+    declarations in dist. It is not run by mocha, it never runs at all: the
+    point is that the declaration file describes the package well enough to
+    write an application against it.
+*/
+
+import {
+  EscPosRenderer,
+  StarPrntRenderer,
+  toPbm,
+  toPng,
+  toImageData,
+  stitch,
+} from '@point-of-sale/receipt-printer-renderer';
+
+import type {
+  Bitmap,
+  RenderItem,
+  ImageItem,
+  CutItem,
+  PulseItem,
+  FeedItem,
+  UnknownItem,
+  RenderCommand,
+  RendererOptions,
+  StitchOptions,
+} from '@point-of-sale/receipt-printer-renderer';
+
+/* The static language property, which drivers report in their connected event */
+
+const languages: string[] = [EscPosRenderer.language, StarPrntRenderer.language];
+
+/* Constructing a renderer */
+
+const commands: RenderCommand[] = ['cut', 'pulse', 'feed'];
+
+const options: RendererOptions = {
+  width: 576,
+  codepageMapping: 'epson',
+  commands,
+  maxHeight: 1024,
+  feedThreshold: 24,
+};
+
+const escpos = new EscPosRenderer(options);
+const star = new StarPrntRenderer({width: 576, codepageMapping: 'star', commands});
+
+const columns: number = escpos.columns + star.columns;
+
+/* Rendering, from a Uint8Array and from an array of numbers */
+
+const items: RenderItem[] = escpos.render(new Uint8Array([0x1b, 0x40, 0x41, 0x0a]));
+const more: RenderItem[] = star.render([0x1b, 0x40, 0x41, 0x0a]);
+
+/* Narrowing the items by their type */
+
+const images: ImageItem[] = [];
+
+for (const item of items.concat(more)) {
+  switch (item.type) {
+    case 'image': {
+      const image: ImageItem = item;
+      const size: number = image.width * image.height + image.data.length;
+      images.push(image);
+      void size;
+      break;
+    }
+
+    case 'cut': {
+      const cut: CutItem = item;
+      const full: boolean = cut.value === 'full';
+      void full;
+      break;
+    }
+
+    case 'pulse': {
+      const pulse: PulseItem = item;
+      const duration: number = pulse.device + pulse.on + pulse.off;
+      void duration;
+      break;
+    }
+
+    case 'feed': {
+      const feed: FeedItem = item;
+      const height: number = feed.height;
+      void height;
+      break;
+    }
+
+    case 'unknown': {
+      const unknown: UnknownItem = item;
+      const bytes: Uint8Array = unknown.data;
+      void bytes;
+      break;
+    }
+  }
+}
+
+/* An image item is a bitmap, which is what the helpers take */
+
+const first: Bitmap = images[0];
+
+/* Stitching a whole receipt into one bitmap */
+
+const stitchOptions: StitchOptions = {cutMarker: true, feed: true, width: 576};
+
+const paper: Bitmap = stitch(items, stitchOptions);
+const plain: Bitmap = stitch(items);
+
+/* The image format helpers */
+
+const pbm: Uint8Array = toPbm(paper);
+const png: Promise<Uint8Array> = toPng(paper);
+const pixels: ImageData = toImageData(paper);
+const withConstructor: ImageData = toImageData(first, ImageData);
+
+void languages;
+void columns;
+void plain;
+void pbm;
+void png;
+void pixels;
+void withConstructor;

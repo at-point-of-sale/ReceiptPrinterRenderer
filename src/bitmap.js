@@ -1,11 +1,11 @@
+/*
+    The images this module operates on are the Bitmap of the output contract,
+    see src/types.js. The type is called Image here, because the class of the
+    operations is called Bitmap.
+*/
+
 /**
- * A 1-bit image. One bit per pixel, most significant bit first, every row
- * padded to a whole number of bytes, a set bit is a black dot.
- *
- * @typedef {object} Bitmap
- * @property {number} width      Width in dots
- * @property {number} height     Height in dots
- * @property {Uint8Array} data   Packed rows, Math.ceil(width / 8) bytes per row
+ * @typedef {import('./types.js').Bitmap} Image
  */
 
 /**
@@ -29,7 +29,7 @@ class Bitmap {
      *
      * @param  {number}   width    Width in dots
      * @param  {number}   height   Height in dots
-     * @return {Bitmap}            The new bitmap
+     * @return {Image}            The new bitmap
      */
   static create(width, height) {
     if (!Number.isInteger(width) || !Number.isInteger(height) || width < 0 || height < 0) {
@@ -42,7 +42,7 @@ class Bitmap {
   /**
      * Read one dot
      *
-     * @param  {Bitmap}   bitmap   The bitmap to read from
+     * @param  {Image}   bitmap   The bitmap to read from
      * @param  {number}   x        Horizontal position, 0 is the leftmost dot
      * @param  {number}   y        Vertical position, 0 is the top row
      * @return {number}            1 when the dot is black, 0 when it is white or outside the bitmap
@@ -60,7 +60,7 @@ class Bitmap {
   /**
      * Set one dot. Positions outside the bitmap are ignored.
      *
-     * @param  {Bitmap}   bitmap   The bitmap to draw on
+     * @param  {Image}   bitmap   The bitmap to draw on
      * @param  {number}   x        Horizontal position, 0 is the leftmost dot
      * @param  {number}   y        Vertical position, 0 is the top row
      * @param  {number}   value    1 for black, 0 for white
@@ -85,8 +85,8 @@ class Bitmap {
      * so that black dots are never lost. Parts of the source that fall outside
      * the destination are clipped.
      *
-     * @param  {Bitmap}   source        The bitmap to draw
-     * @param  {Bitmap}   destination   The bitmap to draw on
+     * @param  {Image}   source        The bitmap to draw
+     * @param  {Image}   destination   The bitmap to draw on
      * @param  {number}   x             Horizontal position of the left edge of the source
      * @param  {number}   y             Vertical position of the top row of the source
      */
@@ -147,10 +147,10 @@ class Bitmap {
      * Copy a range of rows into a new bitmap. Rows beyond the bottom of the
      * bitmap are not included, so the result can be shorter than requested.
      *
-     * @param  {Bitmap}   bitmap   The bitmap to copy from
+     * @param  {Image}   bitmap   The bitmap to copy from
      * @param  {number}   y        First row to copy
      * @param  {number}   count    Number of rows to copy
-     * @return {Bitmap}            A new bitmap with those rows
+     * @return {Image}            A new bitmap with those rows
      */
   static extractRows(bitmap, y, count) {
     const first = Math.max(0, y);
@@ -171,7 +171,7 @@ class Bitmap {
      *
      * @param  {number}                 width      Width of the bitmap in dots
      * @param  {Array<number|bigint>}   rowMasks   One bitmask per row
-     * @return {Bitmap}                            A new bitmap with those rows
+     * @return {Image}                            A new bitmap with those rows
      */
   static packRows(width, rowMasks) {
     const bitmap = Bitmap.create(width, rowMasks.length);
@@ -210,9 +210,9 @@ class Bitmap {
      * consecutive and nothing is lost, the last one can be shorter. A bitmap
      * that already fits is returned as it is, without copying.
      *
-     * @param  {Bitmap}     bitmap      The bitmap to split
+     * @param  {Image}     bitmap      The bitmap to split
      * @param  {number}     maxHeight   Maximum height of a piece in dots
-     * @return {Bitmap[]}               The pieces, in order
+     * @return {Image[]}               The pieces, in order
      */
   static split(bitmap, maxHeight) {
     if (!Number.isInteger(maxHeight) || maxHeight < 1) {
@@ -236,10 +236,10 @@ class Bitmap {
      * Scale a bitmap by repeating its dots, the way a printer scales a
      * character or an image that is printed at double width or double height
      *
-     * @param  {Bitmap}   bitmap   The bitmap to scale
+     * @param  {Image}   bitmap   The bitmap to scale
      * @param  {number}   x        Horizontal multiplier
      * @param  {number}   y        Vertical multiplier
-     * @return {Bitmap}            The scaled bitmap, or the bitmap itself when both multipliers are one
+     * @return {Image}            The scaled bitmap, or the bitmap itself when both multipliers are one
      */
   static scale(bitmap, x, y) {
     if (!Number.isInteger(x) || !Number.isInteger(y) || x < 1 || y < 1) {
@@ -284,7 +284,7 @@ class Bitmap {
      * that a row is never empty. A bitmap without width has no rows at all, and
      * returns one white byte of its own, not a view.
      *
-     * @param  {Bitmap}       bitmap   The bitmap to read from
+     * @param  {Image}       bitmap   The bitmap to read from
      * @param  {number}       y        The row to read
      * @return {Uint8Array}            A view on the row, not a copy
      */
