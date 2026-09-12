@@ -1,0 +1,16 @@
+{
+  "source": "https://github.com/receiptline/receiptline",
+  "file": "example/data/en/credit2.receipt",
+  "commit": "f93b6747d031e03f75ed49d8079d24edbabf63f6",
+  "licence": "Apache-2.0",
+  "setup": "npm install",
+  "command": "node tools/external/receiptline/capture.js credit2-escpos-48",
+  "version": "4.0.4",
+  "language": "esc-pos",
+  "columns": 48,
+  "width": 576,
+  "codepageMapping": "epson",
+  "captured": "2026-09-12",
+  "unknown": 3,
+  "notes": "ESC/POS of receiptline's escpos command set. Unknown: GS a and GS r, the status commands, and FS ( A, the Kanji font, none of which print. Reviewed against receiptline's SVG preview of the same document."
+}

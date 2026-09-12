@@ -1,0 +1,16 @@
+{
+  "source": "https://github.com/mike42/escpos-php",
+  "file": "example/barcode.php",
+  "commit": "e5496cf819b048b11877117bd14a9cea4fb17c03",
+  "licence": "MIT",
+  "setup": "composer require mike42/escpos-php:v2.2 -d build/external/escpos-php",
+  "command": "php tools/external/escpos-php/capture.php barcode && node tools/external/escpos-php/capture.js barcode",
+  "version": "v2.2",
+  "language": "esc-pos",
+  "columns": 48,
+  "width": 576,
+  "codepageMapping": "epson",
+  "captured": "2026-09-12",
+  "unknown": 0,
+  "notes": "Exercises GS k barcodes of every symbology, barcode height, width and text position. The example prints to a FilePrintConnector on php://stdout; the default capability profile names no paper, so the fixture is rendered on the 80 mm paper of the other fixtures. Reviewed as a PNG against what the example prints. Every symbology, height, module width and text position of the example prints. The Code 128 row of code set C sends the value of every digit pair behind {C, one byte each, which is the reading the renderer took from this capture and from receiptline, see the notes of section 16."
+}

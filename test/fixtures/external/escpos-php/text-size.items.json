@@ -1,0 +1,38 @@
+[
+  {
+    "type": "feed",
+    "height": 30
+  },
+  {
+    "type": "feed",
+    "height": 78
+  },
+  {
+    "type": "feed",
+    "height": 54
+  },
+  {
+    "type": "feed",
+    "height": 78
+  },
+  {
+    "type": "feed",
+    "height": 38
+  },
+  {
+    "type": "feed",
+    "height": 42
+  },
+  {
+    "type": "feed",
+    "height": 48
+  },
+  {
+    "type": "feed",
+    "height": 48
+  },
+  {
+    "type": "cut",
+    "value": "full"
+  }
+]

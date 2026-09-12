@@ -1732,18 +1732,40 @@ describe('StarPrntRenderer', function() {
       );
     });
 
-    it('should draw the quadruple density bit image of ESC k', function() {
-      const strip = new Array(PICTURE_WIDTH).fill(0xff);
+    /* ESC k carries a band of twenty four dot rows, the bytes of a row first,
+       which is how receiptline prints its images in Star Line Mode, see the
+       notes of section 16 */
 
-      const quadruple = render(stream(ESC, '@', ESC, 'k', [PICTURE_WIDTH, 0], strip, LF));
-      const fine = render(stream(ESC, '@', ESC, 'L', [PICTURE_WIDTH, 0], strip, LF));
+    it('should draw the twenty four dot band of ESC k', function() {
+      const band = new Array(PICTURE_WIDTH / 8 * 24).fill(0xff);
+
+      const items = render(stream(ESC, '@', ESC, '0', ESC, 'k', [PICTURE_WIDTH / 8, 0], band, LF));
+      const paper = stitch(items, {width: WIDTH});
+
+      assert.equal(paper.height, 24);
+      assert.equal(ink(paper, 0, 24).max, PICTURE_WIDTH - 1);
+      assert.equal(ink(paper, 0, 24).min, 0);
+    });
+
+    it('should draw the rows of an ESC k band in raster order', function() {
+      const width = 2;
+      const band = new Array(width * 24).fill(0);
+
+      band[0] = 0xff;
+
+      const paper = stitch(render(stream(ESC, '@', ESC, '0', ESC, 'k', [width, 0], band, LF)), {width: WIDTH});
+
+      assert.equal(ink(paper, 0, 1).max, 7);
+      assert.equal(ink(paper, 1, 24).max, -1);
+    });
+
+    it('should print nothing for an ESC k band without dots', function() {
+      const items = render(stream(ESC, '@', ESC, 'k', [0, 0], 'Hi', LF));
 
       assert.equal(
-          dots(stitch(quadruple, {width: WIDTH})),
-          dots(stitch(fine, {width: WIDTH})),
+          dots(stitch(items, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
       );
-
-      assert.equal(ink(stitch(quadruple, {width: WIDTH}), 0, 8).max, PICTURE_WIDTH - 1);
     });
 
     it('should print nothing and report ESC FS p, the NV logo the printer holds', function() {

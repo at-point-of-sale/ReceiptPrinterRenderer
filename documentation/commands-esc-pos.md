@@ -22,6 +22,7 @@ Render the ESC/POS and StarPRNT commands created by [ReceiptPrinterEncoder](http
   - [Cut and drawer](#cut-and-drawer)
   - [Printer state and status](#printer-state-and-status)
   - [Not supported yet](#not-supported-yet)
+  - [Seen in the wild](#seen-in-the-wild)
 - [StarPRNT commands](commands-star-prnt.md)
 - [Design document](design.md)
 
@@ -187,7 +188,7 @@ The human readable text is one line of cells in the HRI font, drawn without any 
 | `5`, `70` | ITF | Rendered | An even number of digits. An odd number prints nothing rather than being padded, because padding would change the number. A wide element is three modules. |
 | `6`, `71` | Codabar | Rendered | The start and stop characters are `A` to `D`. Data without them gets an `A` on both sides, data with only one of the two, or with one of those letters in the middle, prints nothing. They are part of the human readable text, as the firmware prints them. A wide element is two modules. |
 | `72` | Code 93 | Rendered | Two check characters are computed and drawn. Only the basic 43 character set is encoded, the full ASCII variant is not implemented, as printer firmware does not implement it either; a character outside the set prints nothing. |
-| `73` | Code 128 | Rendered | The data carries the code set selection: `{A`, `{B` and `{C` select a set, `{1` to `{4` are the function characters, `{S` is the shift and `{{` is a brace. Data that does not start with a code set, or that holds an escape the table does not have, prints nothing. The encoder puts `{B` in front of a value that does not start with a brace. Inside `{C` a character that is not a digit, or a digit without a partner, switches to code set B. A byte above 127 fits in no code set and prints nothing. The text under the bars is the data without the escapes. |
+| `73` | Code 128 | Rendered | The data carries the code set selection: `{A`, `{B` and `{C` select a set, `{1` to `{4` are the function characters, `{S` is the shift and `{{` is a brace. Data that does not start with a code set, or that holds an escape the table does not have, prints nothing. The encoder puts `{B` in front of a value that does not start with a brace. **Inside `{C` one byte is one digit pair and carries its value, 0 to 99, which is what the specification says and what receiptline and escpos-php send: `{C` `0x15` `0x20` `0x2b` is `213243` and `{C` `0x00` `0x03` is `0003`. A value written as digit characters, `{C1234`, is therefore the pairs 49, 50, 51 and 52 and prints `49505152`, on a printer and here; see [Seen in the wild](#seen-in-the-wild) and the notes of section 16 of the implementation plan.** A byte of 100 or more is no pair and switches to code set B, which is the only thing a printer can do with it. A byte above 127 fits in no code set and prints nothing. The text under the bars is the data without the escapes, with the two digits of every pair of code set C. |
 | `74` | GS1-128 | Rendered | A Code 128 with FNC1 behind the start symbol and the code sets picked for the data. The encoder strips `(`, `)` and `*` from the value before it sends it. |
 | `75` | GS1 DataBar Omnidirectional | Rendered | Thirteen digits, or fourteen with the check digit, which is validated; a wrong one prints nothing. The symbol is the RSS-14 of ISO/IEC 24724, ninety six modules of four data characters and two finder patterns. The height is at least thirty three modules, whatever `GS h` says. |
 | `76` | GS1 DataBar Truncated | Rendered | The same data and the same bars as Omnidirectional, thirteen modules tall, which is the height the specification gives it and which `GS h` does not change. |
@@ -324,3 +325,57 @@ These are the ESC/POS commands the renderer parses but does not render. Every co
 - NV logos and graphics that a utility put in the printer before the stream. An image the stream defines itself is drawn, see [Images](#images) and [Graphics](#graphics); a print of a key code or an image number the stream never defined prints nothing and is reported, because the renderer has never seen what the printer holds.
 - Status and settings commands, `GS I`, `GS r`, `GS a`, `ESC u`, `ESC v`, `GS j`, `GS z`, `FS g`, the `DLE` real time commands and the rest of [Printer state and status](#printer-state-and-status): there is no channel back to the host, and the settings do not change the paper.
 - Maxicode and the composite symbologies, the other selectors of the `GS ( k` group.
+
+<br>
+
+### Seen in the wild
+
+The tables above say what the renderer does with a command. This one says which commands other producers actually send, taken from the external fixtures of [section 16 of the implementation plan](implementation-plan.md): byte streams that [receiptline](https://github.com/receiptline/receiptline), [python-escpos](https://github.com/python-escpos/python-escpos), [escpos-php](https://github.com/mike42/escpos-php) and [ESCPOS_NET](https://github.com/lukevp/ESC-POS-.NET) produced for their own examples and tests, kept in `test/fixtures/external` with their provenance and rendered to golden images.
+
+Every command below is exercised by at least one of those streams. A command that is not in this table is either only sent by ReceiptPrinterEncoder, which the fixtures of the other test files cover, or by nobody the fixtures have seen.
+
+| Command | Name | Status | Seen in |
+|---|---|---|---|
+| `ESC @` | initialize | Rendered | escpos-php, receiptline |
+| `FS .` | cancel Kanji mode | Rendered | receiptline |
+| `ESC E n` | bold | Rendered | escpos-php, python-escpos, receiptline |
+| `ESC G n` | double strike | Rendered | escpos-php |
+| `ESC - n` | underline | Rendered | escpos-php, python-escpos, receiptline |
+| `GS B n` | invert | Rendered | python-escpos, receiptline |
+| `GS ! n` | character size | Rendered | escpos-php, python-escpos, receiptline |
+| `ESC M n` | font | Rendered | escpos-php, python-escpos, receiptline |
+| `ESC ! n` | print mode | Rendered | escpos-php, python-escpos |
+| `ESC { n` | upside down printing | Rendered | python-escpos, receiptline |
+| `ESC 3 n` | line spacing | Rendered | python-escpos, receiptline |
+| `ESC d n` | print and feed n lines | Rendered | escpos-php, python-escpos |
+| `ESC e n` | print and reverse feed n lines | Reported | escpos-php |
+| `ESC a n` | alignment | Rendered | escpos-php, python-escpos, receiptline |
+| `ESC SP n` | right side character spacing | Rendered | receiptline |
+| `ESC $ nL nH` | absolute print position | Rendered | receiptline |
+| `ESC \ nL nH` | relative print position | Rendered | receiptline |
+| `GS L nL nH` | left margin | Rendered | escpos-php, receiptline |
+| `GS W nL nH` | print area width | Rendered | escpos-php, receiptline |
+| `ESC t n` | select codepage | Rendered | escpos-php, python-escpos, receiptline |
+| `FS C n` | Kanji code system | Rendered | receiptline |
+| `FS - n` | multi byte underline | Parsed | receiptline |
+| `FS S n1 n2` | Kanji character spacing | Parsed | receiptline |
+| `FS ( A pL pH fn m` | Kanji font | Reported | receiptline |
+| `GS h n` | barcode height | Rendered | escpos-php, python-escpos, receiptline |
+| `GS w n` | barcode module width | Rendered | escpos-php, python-escpos, receiptline |
+| `GS H n` | HRI position | Rendered | escpos-php, python-escpos, receiptline |
+| `GS f n` | HRI font | Rendered | python-escpos |
+| `GS k m d1..dk NUL` | barcode, function A | Rendered | python-escpos, with `m` of `4`, Code 39 |
+| `GS k m n d1..dn` | barcode, function B | Rendered | escpos-php, with `m` of `65` to `73`, and receiptline, with `69` and `73` |
+| `GS ( k pL pH 49 ..` | QR code | Rendered | escpos-net and escpos-php, functions `65`, `67`, `69`, `80` and `81` |
+| `GS ( k pL pH 48 ..` | PDF417 | Rendered | escpos-php, functions `65`, `67`, `68`, `69`, `70`, `80` and `81` |
+| `GS v 0 m xL xH yL yH d..` | raster bit image | Rendered | python-escpos, receiptline |
+| `GS ( L pL pH 48 112 ..` | store the graphics buffer | Rendered | python-escpos |
+| `GS 8 L p1..p4 48 112 ..` | store the graphics buffer, long form | Rendered | receiptline |
+| `GS ( L pL pH 48 50` | print the graphics buffer | Rendered | python-escpos, receiptline |
+| `GS V m`, `GS V m n` | cut | Rendered | escpos-php, python-escpos, receiptline |
+| `ESC p m t1 t2` | pulse | Rendered | escpos-php |
+| `GS a n` | automatic status back | Reported | receiptline |
+| `GS r n` | transmit status | Reported | receiptline |
+| `GS b n` | smoothing | Reported | python-escpos |
+
+Four of these are **Reported**, which is the interesting part of the table: `ESC e`, the reverse line feed the demo of escpos-php uses, and `GS a`, `GS r` and `GS b`, the status and smoothing commands receiptline and python-escpos put around a job. The three settings change nothing on paper, so reporting them is the whole behaviour; `ESC e` does move the paper on a printer, and a receipt that relies on it comes out taller here, see the notes of section 16 of the implementation plan.

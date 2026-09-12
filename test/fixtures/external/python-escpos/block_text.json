@@ -1,0 +1,16 @@
+{
+  "source": "https://github.com/python-escpos/python-escpos",
+  "file": "examples/block_text.py",
+  "commit": "f5ed42f2dcd1c19cfedb2e186a616701fa41ece8",
+  "licence": "MIT",
+  "setup": "python3 -m venv build/external/python-escpos/venv && build/external/python-escpos/venv/bin/pip install \"git+https://github.com/python-escpos/python-escpos@f5ed42f2dcd1c19cfedb2e186a616701fa41ece8\"",
+  "command": "build/external/python-escpos/venv/bin/python tools/external/python-escpos/capture.py block_text && node tools/external/python-escpos/capture.js block_text",
+  "version": "3.2.dev81+gf5ed42f2d",
+  "language": "esc-pos",
+  "columns": 48,
+  "width": 576,
+  "codepageMapping": "epson",
+  "captured": "2026-09-12",
+  "unknown": 8,
+  "notes": "Profile TM-P80, 42 columns of font A and 576 dots of paper. The renderer draws font A in twelve dots, so the paper holds 48 columns instead of the 42 the profile reports; python-escpos lays its software columns out for 42. Exercises ESC ! print modes, custom size, underline, block text, partial cut. Reviewed as a PNG against what the example prints. The unknown items are GS b, the smoothing mode, which set_with_default() sends with every style change and which changes nothing on paper."
+}

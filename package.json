@@ -18,8 +18,9 @@
     "types": "dist/receipt-printer-renderer.d.ts",
     "scripts": {
         "build": "npm run generate && tsc && rollup -c && rm -rf dist/tmp",
+        "contact-sheet": "node tools/contact-sheet.js",
         "generate": "node tools/generate.js",
-        "lint": "eslint --fix src/*.js src/**/*.js test/*.js test/**/*.js tools/*.js",
+        "lint": "eslint --fix src/*.js src/**/*.js test/*.js test/**/*.js tools/*.js tools/**/*.js",
         "mocha": "mocha test/",
         "test": "npm run lint && npm run mocha",
         "test:types": "tsc -p test/types/tsconfig.json",
@@ -70,6 +71,7 @@
         "jsqr": "^1.4.0",
         "mocha": "^10.2.0",
         "opentype.js": "^2.0.0",
+        "receiptline": "4.0.4",
         "rollup": "^3.20.7",
         "rollup-plugin-dts": "^6.3.0",
         "typescript": "^5.9.3"

@@ -18,6 +18,11 @@ import {toBars} from './pattern.js';
     and has escapes for the function characters, which this module parses.
     StarPRNT strips the selection, so a StarPRNT barcode is encoded the way the
     automatic variant is.
+
+    Inside code set C a byte is the value of a digit pair, 0 to 99, and not two
+    digit characters: the Epson specification says so, and it is what the
+    producers of the external fixtures send, `{C` 0x00 0x03 for 0003. See the
+    notes of section 16 of the implementation plan.
 */
 
 const BARS = [
@@ -118,25 +123,14 @@ export function parse(data) {
 }
 
 /**
- * The human readable text of a parsed barcode: the characters, without the
- * escapes, which is what printer firmware prints below the bars
- *
- * @param  {object[]}   items   The items of parse()
- * @return {string}             The text
- */
-function readable(items) {
-  return items
-      .filter((item) => item.type === 'character')
-      .map((item) => item.value)
-      .join('');
-}
-
-/**
  * Turn the items of parse() into symbol values, switching code set where the
- * data asks for it and where the current set cannot carry a character
+ * data asks for it and where the current set cannot carry a character, and
+ * build the human readable text along with them: the characters without the
+ * escapes, and the two digits of every pair of code set C, which is what
+ * printer firmware prints below the bars.
  *
- * @param  {object[]}        items   The items of parse()
- * @return {number[]|null}           The symbol values, start symbol included, or null
+ * @param  {object[]}      items   The items of parse() or of select()
+ * @return {object|null}           The symbol values, start symbol included, and the text, or null
  */
 function encode(items) {
   if (!items.length || items[0].type !== 'set') {
@@ -148,6 +142,7 @@ function encode(items) {
   const codes = [START[set]];
   const queue = items.slice(1);
 
+  let text = '';
   let shift = false;
 
   while (queue.length) {
@@ -183,15 +178,25 @@ function encode(items) {
       continue;
     }
 
-    /* Code set C takes two digits per symbol. A character that is not a digit,
-       or a digit without a partner, needs another code set */
+    /* A pair, which the automatic selection produces for the runs of digits it
+       puts in code set C */
 
-    if (set === 'C' && !shift) {
-      const next = queue[0];
+    if (item.type === 'pair') {
+      codes.push(item.value);
+      text += String(item.value).padStart(2, '0');
+      continue;
+    }
 
-      if (/^[0-9]$/.test(item.value) && next && next.type === 'character' && /^[0-9]$/.test(next.value)) {
-        codes.push(Number(item.value + next.value));
-        queue.shift();
+    /* Code set C carries a digit pair per symbol, and the byte is the value of
+       that pair, 0 to 99. A byte above that is no pair at all and needs another
+       code set, which is the only thing a printer can do with it */
+
+    if (set === 'C') {
+      const pair = item.value.charCodeAt(0);
+
+      if (pair < 100) {
+        codes.push(pair);
+        text += String(pair).padStart(2, '0');
         continue;
       }
 
@@ -203,6 +208,7 @@ function encode(items) {
     const symbol = value(item.value, current);
 
     shift = false;
+    text += item.value;
 
     if (symbol < 0) {
       /* The other set of A and B can carry everything this one cannot */
@@ -223,7 +229,7 @@ function encode(items) {
     codes.push(symbol);
   }
 
-  return codes.length > 1 ? codes : null;
+  return codes.length > 1 ? {codes, text} : null;
 }
 
 /**
@@ -304,7 +310,16 @@ export function select(data) {
   function fromC(value) {
     const digits = pairs(value);
 
-    items.push({type: 'set', value: 'C'}, ...characters(digits));
+    /* The runs of digits go in as pairs, which is what code set C carries; the
+       data of parse() carries the value of a pair in one byte instead */
+
+    const values = [];
+
+    for (let index = 0; index < digits.length; index += 2) {
+      values.push({type: 'pair', value: Number(digits.slice(index, index + 2))});
+    }
+
+    items.push({type: 'set', value: 'C'}, ...values);
 
     const rest = value.slice(digits.length);
 
@@ -365,9 +380,9 @@ export function code128(data) {
     return null;
   }
 
-  const codes = encode(items);
+  const result = encode(items);
 
-  return codes === null ? null : {bars: bars(codes), text: readable(items)};
+  return result === null ? null : {bars: bars(result.codes), text: result.text};
 }
 
 /**
@@ -383,9 +398,9 @@ export function code128auto(data) {
     return null;
   }
 
-  const codes = encode(select(value));
+  const result = encode(select(value));
 
-  return codes === null ? null : {bars: bars(codes), text: value};
+  return result === null ? null : {bars: bars(result.codes), text: value};
 }
 
 /**
@@ -403,7 +418,7 @@ export function gs1128(data) {
   }
 
   const items = select(value);
-  const codes = encode([items[0], {type: 'function', value: 1}, ...items.slice(1)]);
+  const result = encode([items[0], {type: 'function', value: 1}, ...items.slice(1)]);
 
-  return codes === null ? null : {bars: bars(codes), text: value};
+  return result === null ? null : {bars: bars(result.codes), text: value};
 }

@@ -1,0 +1,16 @@
+{
+  "source": "https://github.com/receiptline/receiptline",
+  "file": "example/data/en/guest.receipt",
+  "commit": "f93b6747d031e03f75ed49d8079d24edbabf63f6",
+  "licence": "Apache-2.0",
+  "setup": "npm install",
+  "command": "node tools/external/receiptline/capture.js guest-stargraphic-48",
+  "version": "4.0.4",
+  "language": "star-prnt",
+  "columns": 48,
+  "width": 576,
+  "codepageMapping": "star",
+  "captured": "2026-09-12",
+  "unknown": 2,
+  "notes": "The TSP100 raster mode of receiptline's stargraphic command set. That set prints images and paper feeds and nothing else: its text, rules and alignment are empty, so the paper holds only the images of the document and the fixture exercises the raster mode wire format, not the layout. Unknown: ESC RS a and ESC ACK SOH, the status commands. Reviewed against receiptline's SVG preview of the same document."
+}

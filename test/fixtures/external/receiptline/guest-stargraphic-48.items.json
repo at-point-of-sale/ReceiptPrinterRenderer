@@ -1,0 +1,31 @@
+[
+  {
+    "type": "unknown",
+    "data": [
+      27,
+      30,
+      97,
+      0
+    ]
+  },
+  {
+    "type": "feed",
+    "height": 40
+  },
+  {
+    "type": "feed",
+    "height": 281
+  },
+  {
+    "type": "cut",
+    "value": "partial"
+  },
+  {
+    "type": "unknown",
+    "data": [
+      27,
+      6,
+      1
+    ]
+  }
+]

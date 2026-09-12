@@ -1,0 +1,16 @@
+{
+  "source": "https://github.com/python-escpos/python-escpos",
+  "file": "examples/software_columns.py",
+  "commit": "f5ed42f2dcd1c19cfedb2e186a616701fa41ece8",
+  "licence": "MIT",
+  "setup": "python3 -m venv build/external/python-escpos/venv && build/external/python-escpos/venv/bin/pip install \"git+https://github.com/python-escpos/python-escpos@f5ed42f2dcd1c19cfedb2e186a616701fa41ece8\"",
+  "command": "build/external/python-escpos/venv/bin/python tools/external/python-escpos/capture.py software_columns && node tools/external/python-escpos/capture.js software_columns",
+  "version": "3.2.dev81+gf5ed42f2d",
+  "language": "esc-pos",
+  "columns": 33,
+  "width": 400,
+  "codepageMapping": "epson",
+  "captured": "2026-09-12",
+  "unknown": 0,
+  "notes": "Profile TM-U220, 42 columns of font A and 400 dots of paper. The renderer draws font A in twelve dots, so the paper holds 33 columns instead of the 42 the profile reports; python-escpos lays its software columns out for 42. Exercises software columns, font A. Reviewed as a PNG against what the example prints."
+}

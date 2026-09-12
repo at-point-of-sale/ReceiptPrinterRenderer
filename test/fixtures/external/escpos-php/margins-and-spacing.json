@@ -1,0 +1,16 @@
+{
+  "source": "https://github.com/mike42/escpos-php",
+  "file": "example/margins-and-spacing.php",
+  "commit": "e5496cf819b048b11877117bd14a9cea4fb17c03",
+  "licence": "MIT",
+  "setup": "composer require mike42/escpos-php:v2.2 -d build/external/escpos-php",
+  "command": "php tools/external/escpos-php/capture.php margins-and-spacing && node tools/external/escpos-php/capture.js margins-and-spacing",
+  "version": "v2.2",
+  "language": "esc-pos",
+  "columns": 48,
+  "width": 576,
+  "codepageMapping": "epson",
+  "captured": "2026-09-12",
+  "unknown": 0,
+  "notes": "Exercises GS L left margin, GS W print area width, ESC 3 line spacing. The example prints to a FilePrintConnector on php://stdout; the default capability profile names no paper, so the fixture is rendered on the 80 mm paper of the other fixtures. Reviewed as a PNG against what the example prints."
+}

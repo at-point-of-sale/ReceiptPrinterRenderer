@@ -353,11 +353,25 @@ const receipts = {
      Both values are ones the automatic selection encodes the same way, so that
      the two languages still print the same bars */
 
-  'code128': (encoder) => encoder
-      .align('center')
-      .barcode('{BABC-123', 'code128', {height: 60, width: 2, text: true})
-      .barcode('{C1234', 'code128', {height: 60, width: 2, text: true})
-      .align('left'),
+  'code128': (encoder, language) => {
+    encoder
+        .align('center')
+        .barcode('{BABC-123', 'code128', {height: 60, width: 2, text: true});
+
+    /* Code set C carries the value of a digit pair in one byte, 0 to 99, which
+       is what the ESC/POS specification says and what receiptline and
+       escpos-php send: these four bytes are the pairs 00, 03, 12 and 34. The
+       StarPRNT encoding strips the code set selection, so the same value is
+       read as four characters there and prints something else; the case is
+       therefore in the ESC/POS fixture alone and `code128` is an exception of
+       the parity test, see test/parity.js */
+
+    if (language === 'esc-pos') {
+      encoder.barcode('{C\x00\x03\x0c\x22', 'code128', {height: 60, width: 2, text: true});
+    }
+
+    return encoder.align('left');
+  },
 
   /* Code 128 with the code sets picked by the printer, and GS1-128, which is a
      Code 128 with FNC1 in front of the data. Both are addressed by the number

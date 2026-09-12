@@ -1,0 +1,16 @@
+{
+  "source": "https://github.com/lukevp/ESC-POS-.NET",
+  "file": "ESCPOS_NET.UnitTest/EmittersBased/EPSONTests/BarCode.cs",
+  "commit": "ac185fc58bf9e5ad937750b8fc92c02baf344cc9",
+  "licence": "MIT",
+  "setup": "npm install",
+  "command": "node tools/external/escpos-net/capture.js qrcode-model2-normal-15",
+  "version": "ac185fc",
+  "language": "esc-pos",
+  "columns": 48,
+  "width": 576,
+  "codepageMapping": "epson",
+  "captured": "2026-09-12",
+  "unknown": 0,
+  "notes": "PrintQRCode_Success of ESCPOS_NET.UnitTest/EmittersBased/EPSONTests/BarCode.cs, line 76, the theory row QRCODE_MODEL2, NORMAL, PERCENT_15. The bytes are the array the test expects, not a run of the library. Reviewed as a PNG and decoded with jsQR."
+}

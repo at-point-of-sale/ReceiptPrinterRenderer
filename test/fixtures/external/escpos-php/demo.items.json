@@ -1,0 +1,92 @@
+[
+  {
+    "type": "cut",
+    "value": "full"
+  },
+  {
+    "type": "feed",
+    "height": 192
+  },
+  {
+    "type": "unknown",
+    "data": [
+      27,
+      101,
+      3
+    ]
+  },
+  {
+    "type": "cut",
+    "value": "full"
+  },
+  {
+    "type": "cut",
+    "value": "full"
+  },
+  {
+    "type": "cut",
+    "value": "full"
+  },
+  {
+    "type": "cut",
+    "value": "partial"
+  },
+  {
+    "type": "cut",
+    "value": "full"
+  },
+  {
+    "type": "cut",
+    "value": "full"
+  },
+  {
+    "type": "cut",
+    "value": "full"
+  },
+  {
+    "type": "cut",
+    "value": "full"
+  },
+  {
+    "type": "cut",
+    "value": "full"
+  },
+  {
+    "type": "feed",
+    "height": 36
+  },
+  {
+    "type": "cut",
+    "value": "full"
+  },
+  {
+    "type": "cut",
+    "value": "full"
+  },
+  {
+    "type": "cut",
+    "value": "full"
+  },
+  {
+    "type": "feed",
+    "height": 38
+  },
+  {
+    "type": "feed",
+    "height": 38
+  },
+  {
+    "type": "feed",
+    "height": 37
+  },
+  {
+    "type": "cut",
+    "value": "full"
+  },
+  {
+    "type": "pulse",
+    "device": 0,
+    "on": 120,
+    "off": 240
+  }
+]

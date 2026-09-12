@@ -1,0 +1,16 @@
+{
+  "source": "https://github.com/mike42/escpos-php",
+  "file": "example/character-encodings.php",
+  "commit": "e5496cf819b048b11877117bd14a9cea4fb17c03",
+  "licence": "MIT",
+  "setup": "composer require mike42/escpos-php:v2.2 -d build/external/escpos-php",
+  "command": "php tools/external/escpos-php/capture.php character-encodings && node tools/external/escpos-php/capture.js character-encodings",
+  "version": "v2.2",
+  "language": "esc-pos",
+  "columns": 48,
+  "width": 576,
+  "codepageMapping": "epson",
+  "captured": "2026-09-12",
+  "unknown": 0,
+  "notes": "Exercises ESC t codepage switching through its own encoding. The example prints to a FilePrintConnector on php://stdout; the default capability profile names no paper, so the fixture is rendered on the 80 mm paper of the other fixtures. Reviewed as a PNG against what the example prints. The Latin, Greek, Cyrillic and Vietnamese lines all print with their accents, which is the codepage switching working end to end. The half width Katakana line and the Thai line print the fallback box: there is no CJK or Thai font here, as the reference pages say. The Hiragana, full width Katakana, Arabic and Hebrew lines are question marks and boxes in the stream itself, escpos-php could not encode them either."
+}

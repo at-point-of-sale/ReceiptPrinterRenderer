@@ -1,0 +1,325 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
+import ReceiptPrinterRenderer from '../src/receipt-printer-renderer.js';
+import {stitch} from '../src/formats/stitch.js';
+import {commands} from './helpers/items.js';
+import {diff} from './helpers/ascii.js';
+import {
+  libraries, fixtures, external, options, directory,
+  PROVENANCE_FIELDS, LICENCES,
+} from './helpers/external.js';
+import {assert} from 'chai';
+
+/*
+    The fixtures from the wild, section 16.
+
+    Every fixture in test/fixtures/external is a byte stream another library
+    produced, captured by the scripts in tools/external and frozen with the
+    render this package makes of it. This file walks all of them and makes the
+    three checks the implementation plan asks for:
+
+      - the paper equals the golden PBM,
+      - the items that are not images equal items.json,
+      - the `unknown` count of the provenance equals the number of unknown items
+        in items.json, so that the two files cannot drift apart.
+
+    A newly supported command therefore changes the recorded count and shows up
+    as a fixture change that is reviewed like any other, and a command that is
+    not supported is visible from the first capture.
+
+    Every fixture is rendered with the unified renderer, with the language, the
+    width and the codepage mapping of its own provenance and with every command
+    type in the output. Nothing here runs a capture script, the streams are what
+    the repository carries.
+
+    The receiptline fixtures carry the same document in five command sets and
+    two languages, so they also make the parity check at the bottom of this
+    file.
+*/
+
+/**
+ * @typedef {import('./helpers/external.js').Provenance} Provenance
+ */
+
+/**
+ * The dots of a bitmap, as a string, so that two renders can be compared
+ *
+ * @param  {object}   bitmap   The bitmap
+ * @return {string}            The dots
+ */
+function dots(bitmap) {
+  return `${bitmap.width}x${bitmap.height}:${Array.from(bitmap.data).join(',')}`;
+}
+
+/**
+ * Render a fixture the way its provenance says
+ *
+ * @param  {object}   entry   What external() returned
+ * @return {object[]}         The items
+ */
+function render(entry) {
+  return new ReceiptPrinterRenderer(options(entry.provenance)).render(entry.bytes);
+}
+
+describe('external fixtures', function() {
+  it('should have at least the receiptline and the python-escpos set', function() {
+    assert.includeMembers(libraries(), ['receiptline', 'python-escpos']);
+  });
+
+  for (const library of libraries()) {
+    describe(library, function() {
+      it('should keep the licence text of the library', function() {
+        const licence = path.join(directory, library, 'LICENSE');
+
+        assert.isTrue(fs.existsSync(licence), `${library} has no LICENSE file`);
+        assert.isAbove(fs.readFileSync(licence, 'utf8').length, 0);
+      });
+
+      it('should have fixtures', function() {
+        assert.isAbove(fixtures(library).length, 0);
+      });
+
+      for (const name of fixtures(library)) {
+        describe(name, function() {
+          /* Loading and rendering happens inside the tests, so that a fixture
+             that fails does not take the rest of the file down with it */
+
+          it('should have a provenance with the documented fields', function() {
+            const provenance = external(library, name).provenance;
+
+            assert.deepEqual(Object.keys(provenance), PROVENANCE_FIELDS);
+            assert.isAbove(provenance.setup.length, 0);
+            assert.isAbove(provenance.command.length, 0);
+            assert.include(LICENCES, provenance.licence);
+            assert.include(ReceiptPrinterRenderer.languages, provenance.language);
+            assert.match(provenance.captured, /^\d{4}-\d{2}-\d{2}$/);
+            assert.equal(provenance.width % 8, 0);
+          });
+
+          it('should render the paper of the fixture', function() {
+            const expected = external(library, name);
+            const paper = stitch(render(expected), {width: expected.provenance.width});
+
+            if (dots(paper) !== dots(expected.paper)) {
+              assert.fail(`${library}/${name} does not match its fixture\n${diff(paper, expected.paper)}`);
+            }
+          });
+
+          it('should emit the commands of the fixture', function() {
+            const expected = external(library, name);
+
+            assert.deepEqual(commands(render(expected)), expected.commands);
+          });
+
+          it('should emit the number of unknown items the provenance records', function() {
+            const expected = external(library, name);
+            const unknown = expected.commands.filter((item) => item.type === 'unknown');
+
+            assert.equal(unknown.length, expected.provenance.unknown);
+          });
+        });
+      }
+    });
+  }
+});
+
+/*
+    Parity over the receiptline fixtures.
+
+    One ReceiptLine document is turned into ESC/POS, StarPRNT and Star Line mode
+    by receiptline's command sets, so the same receipt has to come out of the
+    renderers as the same paper. It is the parity test of test/parity.js over
+    streams this package did not produce, and it is the reason the receiptline
+    fixtures are captured in more than one language at all.
+
+    Both renders use the same profile, the way test/parity.js does it, so that
+    only the languages differ and not the printer family defaults.
+
+    What receiptline itself writes differently per language is listed below,
+    each entry with its reason. They are properties of receiptline's command
+    sets, not of the renderers.
+*/
+
+const PARITY_OPTIONS = {profile: 'epson'};
+
+/*
+    The command sets of the fixture names, with the group a set belongs to for
+    the comparison: the two ESC/POS sets have to agree with each other, the two
+    Star text sets as well, and the groups have to agree with each other unless
+    the document is an exception.
+*/
+
+const SETS = {
+  'escpos': 'esc-pos',
+  'generic': 'esc-pos',
+  'starsbcs': 'star',
+  'starlinesbcs': 'star',
+  'stargraphic': 'raster',
+};
+
+/*
+    The documents whose two groups differ, with the reason receiptline writes
+    them differently.
+
+    - The corners of a box. receiptline draws the ruled lines of ESC/POS out of
+      the Epson katakana page, where the four corners are the rounded ╭ ╮ ╰ ╯,
+      and the ones of StarPRNT out of cp437, where they are the square ┌ ┐ └ ┘.
+      Every document with a `{border:line}` or a column border is therefore two
+      dots different per corner.
+
+    - The underline. receiptline asks ESC/POS for the two dot underline with
+      ESC - 2 and StarPRNT for its only one with ESC - 1.
+
+    Code 128 used to be a third difference: receiptline writes the data of a
+    Code 128 for ESC/POS as the code set selection {C followed by the value of
+    every digit pair, and for StarPRNT as the digits themselves, which the
+    printer encodes itself. Both come out as the same symbol since the renderer
+    reads {C the way the specification describes, see the notes of section 16.
+*/
+
+const EXCEPTIONS = {
+  'receipt': 'the corners of the box are rounded in ESC/POS and square in StarPRNT',
+  'receipt2': 'the corners of the box are rounded in ESC/POS and square in StarPRNT, ' +
+    'and the underline is two dots thick in ESC/POS and one in StarPRNT',
+  'guest': 'the corners of the boxes are rounded in ESC/POS and square in StarPRNT',
+  'kitchen': 'the corners of the boxes are rounded in ESC/POS and square in StarPRNT',
+  'column-border1': null,
+  'column-border2': 'the corners of the box are rounded in ESC/POS and square in StarPRNT',
+  'line-align': 'the corners of the boxes are rounded in ESC/POS and square in StarPRNT',
+  'text-decoration': 'the corners of the box are rounded in ESC/POS and square in StarPRNT, ' +
+    'and the underline is two dots thick in ESC/POS and one in StarPRNT',
+  'text-wrap1': 'the corners of the box are rounded in ESC/POS and square in StarPRNT',
+  'text-wrap2': 'the corners of the box are rounded in ESC/POS and square in StarPRNT',
+  'text-wrap3': 'the corners of the box are rounded in ESC/POS and square in StarPRNT',
+  'text-wrap4': 'the corners of the box are rounded in ESC/POS and square in StarPRNT',
+};
+
+/**
+ * The document, the width and the encoding of a fixture name, which is what the
+ * renders of a document have in common, and the command set, which is what
+ * makes them differ
+ *
+ * @param  {string}   name   Name of the fixture
+ * @return {object}          The document and the set
+ */
+function parse(name) {
+  const match = name.match(/^(.+)-(escpos|generic|starsbcs|starlinesbcs|stargraphic)-(\d+)(-\w+)?$/);
+
+  return match ?
+    {document: match[1], set: match[2], key: `${match[1]}-${match[3]}${match[4] || ''}`} :
+    null;
+}
+
+describe('parity over the receiptline fixtures', function() {
+  const documents = new Map();
+
+  for (const name of fixtures('receiptline')) {
+    const parsed = parse(name);
+
+    if (!parsed) {
+      continue;
+    }
+
+    if (!documents.has(parsed.key)) {
+      documents.set(parsed.key, []);
+    }
+
+    documents.get(parsed.key).push(Object.assign({name}, parsed));
+  }
+
+  it('should recognise every fixture name', function() {
+    assert.deepEqual(fixtures('receiptline').filter((name) => !parse(name)), []);
+  });
+
+  /* A key that names no document is a leftover of a fixture that was renamed or
+     dropped, and it would silently stop checking anything */
+
+  it('should have a fixture for every document the exception list names', function() {
+    const known = new Set(
+        [...documents.values()].map((list) => list[0].document),
+    );
+
+    assert.deepEqual(Object.keys(EXCEPTIONS).filter((document) => !known.has(document)), []);
+  });
+
+  for (const [key, list] of documents) {
+    describe(key, function() {
+      /* The Star raster mode of the stargraphic command set carries no text at
+         all, see the notes of section 16, so it is not part of the comparison */
+
+      const groups = new Map();
+
+      for (const entry of list) {
+        const group = SETS[entry.set];
+
+        if (group === 'raster') {
+          continue;
+        }
+
+        if (!groups.has(group)) {
+          groups.set(group, []);
+        }
+
+        groups.get(group).push(entry);
+      }
+
+      for (const [group, entries] of groups) {
+        if (entries.length < 2) {
+          continue;
+        }
+
+        it(`should render the same paper in every ${group} command set`, function() {
+          const papers = entries.map((entry) => {
+            const fixture = external('receiptline', entry.name);
+            const items = new ReceiptPrinterRenderer(
+                Object.assign(options(fixture.provenance), PARITY_OPTIONS),
+            ).render(fixture.bytes);
+
+            return {name: entry.name, paper: stitch(items, {width: fixture.provenance.width})};
+          });
+
+          for (const other of papers.slice(1)) {
+            if (dots(other.paper) !== dots(papers[0].paper)) {
+              assert.fail(
+                  `${other.name} and ${papers[0].name} are not the same paper\n` +
+                diff(other.paper, papers[0].paper),
+              );
+            }
+          }
+        });
+      }
+
+      if (groups.has('esc-pos') && groups.has('star')) {
+        const document = list[0].document;
+        const reason = EXCEPTIONS[document];
+
+        it(reason ?
+          `should differ between the languages, because ${reason}` :
+          'should render the same paper in both languages', function() {
+          const papers = ['esc-pos', 'star'].map((group) => {
+            const entry = groups.get(group)[0];
+            const fixture = external('receiptline', entry.name);
+            const items = new ReceiptPrinterRenderer(
+                Object.assign(options(fixture.provenance), PARITY_OPTIONS),
+            ).render(fixture.bytes);
+
+            return {name: entry.name, paper: stitch(items, {width: fixture.provenance.width})};
+          });
+
+          if (reason) {
+            assert.notEqual(dots(papers[0].paper), dots(papers[1].paper));
+            return;
+          }
+
+          if (dots(papers[0].paper) !== dots(papers[1].paper)) {
+            assert.fail(
+                `${papers[0].name} and ${papers[1].name} are not the same paper\n` +
+              diff(papers[1].paper, papers[0].paper),
+            );
+          }
+        });
+      }
+    });
+  }
+});

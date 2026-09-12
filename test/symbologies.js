@@ -342,9 +342,23 @@ describe('symbologies', function() {
   });
 
   describe('Code 128', function() {
+    /* Inside code set C a byte is the value of a digit pair, 0 to 99, which is
+       what the ESC/POS specification says, so the digits 1234 are the two bytes
+       12 and 34, see the notes of section 16 of the implementation plan */
+
+    /**
+     * The bytes of a run of digit pairs, as code set C carries them
+     *
+     * @param  {string}   digits   An even number of digits
+     * @return {string}            One character per pair
+     */
+    function pairs(digits) {
+      return String.fromCharCode(...(digits.match(/../g) || []).map(Number));
+    }
+
     it('should encode a code set the same way as the reference', function() {
       assert.equal(pattern('code128', '{BHello'), reference('CODE128B', 'Hello'));
-      assert.equal(pattern('code128', '{C12345678'), reference('CODE128C', '12345678'));
+      assert.equal(pattern('code128', `{C${pairs('12345678')}`), reference('CODE128C', '12345678'));
       assert.equal(pattern('code128', '{AHELLO'), reference('CODE128A', 'HELLO'));
     });
 
@@ -353,8 +367,32 @@ describe('symbologies', function() {
       assert.equal(barcode('code128', '{B{{brace').text, '{brace');
     });
 
+    it('should read a byte of code set C as the value of a digit pair', function() {
+      const value = barcode('code128', `{C${pairs('00031234')}`);
+
+      assert.equal(value.text, '00031234');
+      assert.equal(toPattern(value.bars).replace(/0+$/, ''), reference('CODE128C', '00031234'));
+    });
+
+    it('should read the digits of a value that carries them as characters as pairs as well', function() {
+      /* What a caller who writes {C1234 gets, on paper and here: the four
+         bytes are the pairs 49, 50, 51 and 52. ReceiptPrinterEncoder passes
+         such a value through unchanged, so this is the printer's reading */
+
+      assert.equal(barcode('code128', '{C1234').text, '49505152');
+    });
+
+    it('should switch to code set B for a byte that is no digit pair', function() {
+      /* A byte of 100 or more is not a pair, and code set B is the only thing
+         a printer can do with it, so the implicit switch has to draw what the
+         explicit one draws */
+
+      assert.equal(pattern('code128', `{C${pairs('12')}d`), pattern('code128', `{C${pairs('12')}{Bd`));
+      assert.equal(barcode('code128', `{C${pairs('12')}d`).text, '12d');
+    });
+
     it('should switch code set where the data says', function() {
-      assert.equal(pattern('code128', '{BAB{C1234'), code128(`${START_B}AB${TO_C}1234`));
+      assert.equal(pattern('code128', `{BAB{C${pairs('1234')}`), code128(`${START_B}AB${TO_C}1234`));
     });
 
     it('should switch code set when the current one cannot carry a character', function() {

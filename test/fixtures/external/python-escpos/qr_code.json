@@ -1,0 +1,16 @@
+{
+  "source": "https://github.com/python-escpos/python-escpos",
+  "file": "examples/qr_code.py",
+  "commit": "f5ed42f2dcd1c19cfedb2e186a616701fa41ece8",
+  "licence": "MIT",
+  "setup": "python3 -m venv build/external/python-escpos/venv && build/external/python-escpos/venv/bin/pip install \"git+https://github.com/python-escpos/python-escpos@f5ed42f2dcd1c19cfedb2e186a616701fa41ece8\"",
+  "command": "build/external/python-escpos/venv/bin/python tools/external/python-escpos/capture.py qr_code \"https://github.com/python-escpos/python-escpos\" && node tools/external/python-escpos/capture.js qr_code",
+  "version": "3.2.dev81+gf5ed42f2d",
+  "language": "esc-pos",
+  "columns": 32,
+  "width": 384,
+  "codepageMapping": "epson",
+  "captured": "2026-09-12",
+  "unknown": 0,
+  "notes": "Profile POS5890 Series, 32 columns of font A and 384 dots of paper. Exercises GS ( k native QR code, centring. The example constructs a Usb printer, which the capture replaced with a Dummy of the same profile. Reviewed as a PNG against what the example prints."
+}

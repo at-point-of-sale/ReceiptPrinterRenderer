@@ -21,8 +21,8 @@ import {assert} from 'chai';
     9 by 17 against 9 by 24, so both renders use the same profile. That is what
     the design's Testing section prescribes.
 
-    There are two exceptions, the hri and the pdf417-truncated fixture, which
-    the EXCEPTIONS table below names with their reason. Every other difference
+    There are three exceptions, the hri, the pdf417-truncated and the code128
+    fixture, which the EXCEPTIONS table below names with their reason. Every other difference
     the encoder produces between the two languages is avoided by the fixture
     receipts, and each of those is listed here with the reason:
 
@@ -44,8 +44,11 @@ import {assert} from 'chai';
 
     - Code 128 code set selection. The encoder strips the {A, {B and {C prefix
       for StarPRNT and passes it through for ESC/POS, where the printer picks
-      the code sets itself. The code128 fixture uses two values that both
-      encodings agree on, {BABC-123 and {C1234, so the bars are the same.
+      the code sets itself. The code128 fixture prints {BABC-123, which both
+      encodings agree on, and, on ESC/POS alone, a code set C value whose bytes
+      are the values of digit pairs: that is what the specification says the
+      data of {C is, and a StarPRNT printer that never saw the selection reads
+      the same bytes as characters. It is the exception below.
 
     - The module width of a barcode. The encoder writes its width option, 1 to
       3, as n3 on StarPRNT and as GS w n on ESC/POS, where n is the option plus
@@ -108,6 +111,26 @@ const OPTIONS = {width: WIDTH, profile: 'epson', commands: COMMANDS};
 const EXCEPTIONS = {
   'hri': 'the third barcode prints its human readable text in font B, which only ESC/POS can select',
   'pdf417-truncated': 'the truncated form of a PDF417 is an ESC/POS option, StarPRNT has no command for it',
+  'code128': 'the ESC/POS receipt prints a second barcode, a code set C value whose bytes are the values of ' +
+    'digit pairs, which the StarPRNT encoding cannot carry because it strips the code set selection',
+};
+
+/*
+    What the items of an exception do, for the fixtures where the paper is not
+    the only difference:
+
+    - `feed`: only the height of a feed item differs, because the last line of
+      text is in another font in the two languages and the two fonts do not put
+      their deepest ink on the same row.
+    - `extra`: one language prints a block the other does not, so its items are
+      the items of the other one with the ones of that block behind them.
+
+    Every other exception emits exactly the same items in both languages.
+*/
+
+const ITEMS = {
+  'hri': 'feed',
+  'code128': 'extra',
 };
 
 /**
@@ -151,21 +174,27 @@ describe('parity between the renderers', function() {
         }
       });
 
-      it(EXCEPTIONS[name] ?
-        'should emit the same commands in both languages, apart from the height of a feed' :
-        'should emit the same commands in both languages', function() {
+      it({
+        feed: 'should emit the same commands in both languages, apart from the height of a feed',
+        extra: 'should emit the commands of the StarPRNT render and the ones of the extra block behind them',
+      }[ITEMS[name]] || 'should emit the same commands in both languages', function() {
         const left = new EscPosRenderer(OPTIONS).render(fixture('esc-pos', name).bytes);
         const right = new StarPrntRenderer(OPTIONS).render(fixture('star-prnt', name).bytes);
 
-        /* The exception prints its last line of text in another font, and the
-           two fonts do not put their deepest ink on the same row, so the blank
-           run that follows it, and with it the feed item, is a dot longer in
-           one language than in the other. The commands themselves are the same */
+        /* The height of a feed is the one difference the fonts make, see ITEMS */
 
-        if (EXCEPTIONS[name]) {
-          const shape = (item) => item.type === 'feed' ? {type: item.type} : item;
+        const shape = (item) => item.type === 'feed' ? {type: item.type} : item;
 
+        if (ITEMS[name] === 'feed') {
           assert.deepEqual(commands(right).map(shape), commands(left).map(shape));
+          return;
+        }
+
+        if (ITEMS[name] === 'extra') {
+          const star = commands(right).map(shape);
+
+          assert.isAbove(commands(left).length, star.length);
+          assert.deepEqual(commands(left).map(shape).slice(0, star.length), star);
           return;
         }
 

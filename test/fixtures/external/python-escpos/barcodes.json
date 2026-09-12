@@ -1,0 +1,16 @@
+{
+  "source": "https://github.com/python-escpos/python-escpos",
+  "file": "examples/barcodes.py",
+  "commit": "f5ed42f2dcd1c19cfedb2e186a616701fa41ece8",
+  "licence": "MIT",
+  "setup": "python3 -m venv build/external/python-escpos/venv && build/external/python-escpos/venv/bin/pip install \"git+https://github.com/python-escpos/python-escpos@f5ed42f2dcd1c19cfedb2e186a616701fa41ece8\"",
+  "command": "build/external/python-escpos/venv/bin/python tools/external/python-escpos/capture.py barcodes && node tools/external/python-escpos/capture.js barcodes",
+  "version": "3.2.dev81+gf5ed42f2d",
+  "language": "esc-pos",
+  "columns": 42,
+  "width": 512,
+  "codepageMapping": "epson",
+  "captured": "2026-09-12",
+  "unknown": 0,
+  "notes": "Profile TM-T88II, 42 columns of font A and 512 dots of paper. Exercises hardware barcodes, software barcodes, GS k Code 39. The example constructs a Usb printer, which the capture replaced with a Dummy of the same profile. Reviewed as a PNG against what the example prints."
+}

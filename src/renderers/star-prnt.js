@@ -127,15 +127,46 @@ const SYMBOLOGIES = Object.assign(Object.create(null), {
   13: 'gs1-databar-expanded',
 });
 
+/* The same table addressed by the ASCII digit of the number, which is how a
+   Star printer takes the arguments of most of its commands and how receiptline
+   writes them, see the notes of section 16. The two forms cannot be confused:
+   the binary numbers stop at thirteen and the digits start at forty eight.
+
+   Only the ten symbologies that have a digit get one. The numbers 10 to 13 have
+   no single digit, and the bytes behind the nine, ':' to '=', are not digits at
+   all: a stream that carries one of those is reported instead of drawn */
+
+for (const [number, symbology] of Object.entries(SYMBOLOGIES)) {
+  if (Number(number) < 10) {
+    SYMBOLOGIES[0x30 + Number(number)] = symbology;
+  }
+}
+
 /* The width of the narrowest bar in dots, by the value of n3 of ESC b.
 
-   The Star documentation describes the three widths per symbology in tables of
-   narrow and wide element widths instead of in dots. Two, three and four dots
-   is the reading that makes a Star barcode the same size as the ESC/POS barcode
-   the encoder produces from the same receipt: the encoder writes its own width
-   option, 1 to 3, as n3 here and as GS w n plus one on ESC/POS */
+   The Star documentation describes the widths per symbology in tables of narrow
+   and wide element widths instead of in dots. Two, three and four dots for n3 of
+   1, 2 and 3 is the reading that makes a Star barcode the same size as the
+   ESC/POS barcode the encoder produces from the same receipt: the encoder writes
+   its own width option, 1 to 3, as n3 here and as GS w n plus one on ESC/POS.
 
-const MODULE_WIDTHS = Object.assign(Object.create(null), {1: 2, 2: 3, 3: 4});
+   The values above three are the ones receiptline writes, which is the only
+   evidence of those tables there is here, see the notes of section 16: 4, 5 and
+   6 are the three widths of Code 39 and Codabar, and 8 is the middle width of
+   ITF. The table is flat, so a value that means different widths for different
+   symbologies keeps the one of the general case: ITF is the only symbology with
+   such a value, its widest, which draws three dots here instead of four.
+
+   Every value is accepted as the binary number and as the ASCII digit of it,
+   the way the symbologies are, because that is how receiptline writes them */
+
+const MODULE_WIDTHS = Object.assign(Object.create(null), {
+  1: 2, 2: 3, 3: 4, 4: 2, 5: 3, 6: 4, 8: 3,
+});
+
+for (const [number, width] of Object.entries(MODULE_WIDTHS)) {
+  MODULE_WIDTHS[0x30 + Number(number)] = width;
+}
 
 /* The error correction levels of the QR code commands */
 
@@ -336,6 +367,28 @@ function bitImageArguments(bytes, index) {
   return 2 + bytes[index] + bytes[index + 1] * 256;
 }
 
+/* The number of dot rows an ESC k band carries, which the command does not
+   name: the height of a band is fixed, the width bytes are the only argument */
+
+const BAND_ROWS = 24;
+
+/**
+ * Arguments of ESC k n1 n2 d1..dk, the twenty four dot band of Star Line Mode:
+ * the width of the band in bytes of eight dots, followed by twenty four rows of
+ * that many bytes
+ *
+ * @param  {Uint8Array}   bytes   The whole stream
+ * @param  {number}       index   Position of the first argument
+ * @return {number}               Number of argument bytes, or -1 when the stream is too short
+ */
+function bandImageArguments(bytes, index) {
+  if (index + 2 > bytes.length) {
+    return -1;
+  }
+
+  return 2 + (bytes[index] + bytes[index + 1] * 256) * BAND_ROWS;
+}
+
 /**
  * Arguments of ESC GS S m n1 n2 n3 n4 n5 d1..dk, the raster image: the width of
  * the image in bytes of eight dots, its height in dots, a fixed byte, and the
@@ -446,11 +499,13 @@ function rasterArguments(bytes, index) {
 
 const UNKNOWN_ARGUMENTS = {
   [GROUP_ESC]: {
+    0x06: 1, /* ESC ACK SOH, the real time status of a raster mode printer */
     0x20: 1, /* right side character spacing, see the notes: the length is a best effort */
     0x28: 1, /* select character expansion */
     0x29: 1, /* cancel character expansion */
     0x31: 0, /* select 1/8 inch line spacing, legacy */
     0x63: 1, /* select character set */
+    0x73: 2, /* ESC s n1 n2, a printer setting, see the notes: the length is what receiptline sends */
   },
 
   [GROUP_FS]: {
@@ -841,13 +896,15 @@ class StarPrntRenderer {
         0x64: {args: 1, run: (a) => this.#cut(a[0])},
         0x68: {args: 1, run: (a) => this.#height(a[0])},
         0x69: {args: 2, run: (a) => this.#size(a[0], a[1])},
-        0x6b: {args: bitImageArguments, run: (a) => this.#bitImage(a, 1)}, /* bit image, quadruple density */
+        0x6b: {args: bandImageArguments, run: (a) => this.#bandImage(a)}, /* bit image, twenty four dot band */
         0x6c: {args: 1, run: (a) => this.#leftMargin(a[0])},
         0x7a: {args: 1, run: (a) => this.#lineSpacing(a[0])},
       },
 
       [GROUP_GS]: {
+        0x41: {args: 2, run: (a) => this.#painter.position(a[0] + a[1] * 256)},
         0x50: {args: 1, run: null}, /* print mode, the encoder flushes with it, no effect on paper */
+        0x52: {args: 2, run: (a) => this.#relative(a)},
         0x53: {args: rasterImageArguments, run: (a, consumed) => this.#rasterImage(a, consumed)},
         0x61: {args: 1, run: (a) => this.#align(a[0])},
         0x74: {args: 1, run: (a) => this.#selectCodepage(a[0])},
@@ -1025,7 +1082,8 @@ class StarPrntRenderer {
      * in two bytes. The single density image prints every column twice, so that
      * it keeps its proportions at half the resolution.
      *
-     * The encoder emits neither command, it uses ESC X for every image.
+     * The encoder emits neither command, it uses ESC X for every image, and no
+     * external producer of section 16 emits them either.
      *
      * @param  {Uint8Array}   args    The arguments of the command
      * @param  {number}       repeat  How often a column is printed
@@ -1035,6 +1093,33 @@ class StarPrntRenderer {
     const strip = this.#strip(args.subarray(2), columns, 1);
 
     this.#painter.strip(Bitmap.scale(strip, repeat, 1));
+  }
+
+  /**
+     * ESC k n1 n2 d.., the twenty four dot band of Star Line Mode: a band of
+     * twenty four dot rows, `n1 + n2 * 256` bytes of eight dots per row, in
+     * raster format, one row after another. The band goes into the line that is
+     * being composed and the LF behind the command commits it, the way the
+     * strips of ESC X do, and the producer sets the line spacing to twenty four
+     * dots with ESC 0 so that the bands of an image join up.
+     *
+     * The encoder emits neither this command nor ESC K and ESC L, it uses ESC X
+     * for every image; receiptline prints its images with this one, see the
+     * notes of section 16.
+     *
+     * @param  {Uint8Array}   args   The arguments of the command
+     */
+  #bandImage(args) {
+    const width = args[0] + args[1] * 256;
+
+    /* A band without dots is not an image, and a strip of nothing would still
+       give the line the height of a band */
+
+    if (width === 0) {
+      return;
+    }
+
+    this.#painter.strip(Bitmap.fromRaster(args.subarray(2), width * 8, BAND_ROWS));
   }
 
   /**
@@ -1172,6 +1257,20 @@ class StarPrntRenderer {
     if (table) {
       this.#characterSet = table;
     }
+  }
+
+  /**
+     * ESC GS R n1 n2, the relative print position, in dots. The distance is
+     * signed, a negative one moves the cursor back towards the left margin,
+     * the way ESC \ does in ESC/POS.
+     *
+     * @param  {Uint8Array}   args   The arguments of the command
+     */
+  #relative(args) {
+    const value = args[0] + args[1] * 256;
+    const distance = value > 32767 ? value - 65536 : value;
+
+    this.#painter.position(this.#painter.cursor + distance);
   }
 
   /**

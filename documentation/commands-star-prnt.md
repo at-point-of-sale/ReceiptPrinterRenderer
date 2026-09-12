@@ -23,6 +23,7 @@ Render the ESC/POS and StarPRNT commands created by [ReceiptPrinterEncoder](http
   - [Cut and drawer](#cut-and-drawer)
   - [Printer state and status](#printer-state-and-status)
   - [Not supported yet](#not-supported-yet)
+  - [Seen in the wild](#seen-in-the-wild)
 - [Design document](design.md)
 
 <br>
@@ -33,7 +34,7 @@ This page lists every command `StarPrntRenderer` recognises, what it does to the
 
 The renderer emulates a Star printer. It interprets the bytes the way the firmware does, including the cases where the firmware prints nothing at all: a barcode with invalid data, a symbol wider than the paper, an argument outside the range of its command, which leaves the setting as it was rather than clipping it.
 
-It deliberately differs from the hardware in a few places, each of them because the behaviour is not on the wire and no hardware check settled it. They are marked in the notes below, and these are all of them: the module widths of `ESC b`, the line spacing of an `ESC z n` that is not `0` or `1`, the feeds of `ESC I`, `ESC J` and `ESC a`, the four dot gap between the bars of a barcode and its human readable text, the reading of `ESC GS x S 0`, a QR model 1 drawn as a model 2 symbol, the basic 43 character set of Code 93, the minimum of three data codewords of a PDF417 symbol, the reading of `ESC h n` and `ESC Q n`, `ESC R n` leaving the sets above 13 alone, `ESC SP n`, whose length and effect are both unsettled, the tear bar mode of raster mode read as a partial cut, the quadruple density of `ESC k` drawn at the resolution of the head, the layout of `ESC GS S` and its alignment, the assumed layout of `ESC FS q`, and the heights of the GS1 DataBar family, which are a reading of the specification pending a hardware check.
+It deliberately differs from the hardware in a few places, each of them because the behaviour is not on the wire and no hardware check settled it. They are marked in the notes below, and these are all of them: the module widths of `ESC b`, the line spacing of an `ESC z n` that is not `0` or `1`, the feeds of `ESC I`, `ESC J` and `ESC a`, the four dot gap between the bars of a barcode and its human readable text, the reading of `ESC GS x S 0`, a QR model 1 drawn as a model 2 symbol, the basic 43 character set of Code 93, the minimum of three data codewords of a PDF417 symbol, the reading of `ESC h n` and `ESC Q n`, `ESC R n` leaving the sets above 13 alone, `ESC SP n`, whose length and effect are both unsettled, the tear bar mode of raster mode read as a partial cut, the twenty four dot band of `ESC k`, the length of `ESC s n1 n2`, the module widths above three of `ESC b`, the layout of `ESC GS S` and its alignment, the assumed layout of `ESC FS q`, and the heights of the GS1 DataBar family, which are a reading of the specification pending a hardware check.
 
 Two differences are the printer itself rather than the renderer, and both show up when the same receipt is printed in both languages: a pulse to the second drawer is fixed at 200 ms on and 200 ms off, because the width is not on the wire, and the size multipliers of `ESC i` stop at six where `GS ! n` of ESC/POS goes to eight.
 
@@ -120,6 +121,8 @@ Runs of blank rows of at least `feedThreshold` dots become `feed` items and spli
 | `ESC l n` | left margin | Rendered | The left margin, `n` characters of the current font. The command is only effective at the beginning of a line: a line that already holds characters, or whose cursor was moved, makes the printer drop it, and this renderer drops it too. |
 | `ESC Q n` | right margin | Rendered | The column the print area ends at, counted from the left edge of the paper, so the area is `n` minus the left margin characters wide. It is only effective at the beginning of a line, like `ESC l`. A value that is not beyond the left margin leaves the area at the paper minus the left margin, which is where a printer without a right margin prints. Wrapping, the alignment and the tab stops all work inside the area. **That the right margin is a column rather than a width is the reading that makes `ESC l` and `ESC Q` line up with `GS L` and `GS W` of ESC/POS; no hardware check settled it.** |
 | `ESC SP n` | right side character spacing | Reported | Consumed with one argument byte, so that the stream stays in sync, and reported. **The Star Line Mode specification text that was available here does not define this command at all, so neither its length nor its effect is settled: the one argument byte is a best effort and nothing is rendered.** |
+| `ESC GS A n1 n2` | absolute print position | Rendered | `n1 + n2 * 256` dots from the left margin, the Star counterpart of `ESC $`. A position beyond the print area is ignored. Cells that were already placed stay where they are, so moving back and printing again overprints, the way a printer overprints. |
+| `ESC GS R n1 n2` | relative print position | Rendered | The same, relative to the cursor and signed: a value above 32767 is the negative distance below it, which moves back towards the left margin. A distance that lands outside the print area is ignored. |
 | `ESC RS A n` | print area | Reported | |
 | `ESC GS \ n1 n2` | vertical position | Reported | |
 
@@ -139,7 +142,7 @@ Runs of blank rows of at least `feedThreshold` dots become `feed` items and spli
 
 | Command | Name | Status | Notes |
 |---|---|---|---|
-| `ESC b n1 n2 n3 n4 d.. RS` | barcode | Rendered | `n1` is the symbology, see the table below. `n2` is `2` or `50` for the human readable text below the bars, which a Star printer draws in font A, and anything else for a barcode without text. `n3` is the module width, `1`, `2` and `3` for 2, 3 and 4 dots, and any other value is read as `1`. `n4` is the height of the bars in dots, with `0` read as one dot. The data runs to the record separator and is read as ASCII; data that holds a `0x1e` byte itself therefore ends the command early, which is inherent to the framing of the command, and the encoder never sends one. |
+| `ESC b n1 n2 n3 n4 d.. RS` | barcode | Rendered | `n1` is the symbology, see the table below, as the number or as the ASCII digit of it, so `4` and `52` are both Code 39. Only the symbologies numbered 0 to 9 have a digit; `58` to `61`, the bytes behind the nine, are not digits and are reported like any other value the command does not define. `n2` is `2` or `50` for the human readable text below the bars, which a Star printer draws in font A, and anything else for a barcode without text. `n3` is the module width: `1`, `2` and `3` are 2, 3 and 4 dots, `4`, `5` and `6` are the same three widths of Code 39 and Codabar, and `8` is the middle width of ITF, each of them as the number and as the ASCII digit of it. Any other value is read as `1`. **Star gives `n3` a table of narrow and wide element widths per symbology, and the values above three are the ones receiptline writes, which is the only evidence of those tables there is here. The table is flat, so a value that means different widths for different symbologies keeps the one of the general case: ITF is the only symbology with such a value, its widest, which draws three dots here instead of four.** `n4` is the height of the bars in dots, with `0` read as one dot. The data runs to the record separator and is read as ASCII; data that holds a `0x1e` byte itself therefore ends the command early, which is inherent to the framing of the command, and the encoder never sends one. |
 
 **The three module widths are an assumption.** The Star documentation describes them in narrow and wide element widths per symbology rather than in dots; 2, 3 and 4 dots is the reading that makes a Star barcode the same size as the ESC/POS barcode the encoder produces from the same receipt, where the same width option is written as `GS w n` plus one. No hardware check settled it.
 
@@ -219,7 +222,7 @@ A symbol never holds fewer than three data codewords: one codeword of data and t
 | `ESC X nL nH d..` | column mode image, 24 dots | Rendered | `nL + nH * 256` columns, three bytes per column, the most significant bit of the first byte at the top. The strip goes into the line that is being composed, like one wide cell, and the `LF CR` behind it commits the line; the encoder writes `ESC 0` in front of an image so that the 24 dot strips join up. This is the only image command the encoder emits. |
 | `ESC L nL nH d..` | bit image, fine density | Rendered | A strip of eight rows, one byte per column, with the number of data bytes in the two length bytes. One dot per column. |
 | `ESC K nL nH d..` | bit image, normal density | Rendered | The same, but every column is printed twice, so the image keeps its proportions at half the resolution. |
-| `ESC k nL nH d..` | bit image, quadruple density | Rendered | A strip of eight rows, one byte per column, like `ESC L`, and drawn with one dot per column. **A print head of 203 dpi cannot print more dots per inch than `ESC L` already gives it, so the quadruple density is drawn at the resolution of the head and the image comes out as wide as the same data under `ESC L`. No Star Line Mode specification text was available here to settle what the printer does instead; merging pairs of columns, the other reading, would lose dots, which this renderer does not do.** |
+| `ESC k nL nH d..` | bit image, twenty four dot band | Rendered | A band of twenty four dot rows: `nL + nH * 256` is the width of a row in bytes of eight dots, and that many bytes follow per row, twenty four rows of them, in raster format. The band goes into the line that is being composed, like one wide cell, and the `LF` behind it commits the line; a producer writes `ESC 0` in front of an image so that the bands join up. A band of zero bytes prints nothing. **This is the reading receiptline sends, see [Seen in the wild](#seen-in-the-wild) and the notes of section 16 of the implementation plan: it prints its images in Star Line Mode as bands of twenty four rows behind `ESC 0`, and the render of the same document is then dot for dot the ESC/POS one. No Star Line Mode specification text was available here; the earlier reading of this page, an eight row strip of one byte per column like `ESC L`, printed the remaining twenty three rows of every band as text and is what the capture of section 16 corrected.** |
 | `ESC GS S m n1 n2 n3 n4 n5 d..` | raster image | Rendered | The raster image the Star SDKs print a picture with. `m` of `1`, and the ASCII digit `49` for the same, is the raster bit image; any other value is a variant this renderer does not know and is reported, its data consumed. `n1 + n2 * 256` is the width of the image in bytes of eight dots, `n3 + n4 * 256` its height in dots, and `n5` is the fixed byte the command carries, which is consumed and ignored. The dots follow in raster format, one row after another, exactly as `GS v 0` carries them on ESC/POS. Drawn as a block of its own, aligned the way `ESC GS a` says and inside the print area of `ESC l` and `ESC Q`, like every other block. **The layout is the one of the plan and of this page; no Star specification text was available here to confirm it, and a variant with two bytes in front of the size is described elsewhere and is not what this renderer reads.** |
 | `ESC FS p n m` | print an NV logo | Reported | The logo is stored in the printer by a utility, so the renderer has never seen it and prints nothing. Two argument bytes, the number of the logo and the mode. |
 | `ESC FS q n [xL xH yL yH d..]..` | define logos | Reported | **Consumed with the layout of the ESC/POS command of the same name, `n` images of `x` bytes wide and `y` bytes of eight dots tall, because no Star specification text that was available here settles the layout of this command. Nothing is kept and nothing is drawn, so a logo this command defines is not printed by `ESC FS p` either.** |
@@ -283,6 +286,8 @@ These commands change nothing about the paper of the receipt that is being rende
 | `ESC GS b n` | blackmark and sensor settings | Reported | |
 | `ESC GS c n` | colour | Reported | |
 | `ESC RS a n` | print start control | Reported | |
+| `ESC ACK SOH` | real time status | Reported | The three bytes of the Star Graphic Mode status request. receiptline ends every raster mode job with it, see [Seen in the wild](#seen-in-the-wild). |
+| `ESC s n1 n2` | printer setting | Reported | **Consumed with two argument bytes, which is the length receiptline writes it with in its printer setup, `ESC s 0 0`; no Star specification text that was available here names this command, so neither its name nor its effect is settled and nothing is rendered for it.** |
 | `ESC RS d n` | print density | Reported | |
 | `ESC RS r n` | print speed | Reported | |
 | `ESC GS BEL m n1 n2` | buzzer | Reported | Three argument bytes. The buzzer is not part of the paper and the item stream has no sound, so it is reported and nothing happens. |
@@ -301,3 +306,39 @@ These are the StarPRNT and Star Line Mode commands the renderer parses but does 
 - Status and settings commands, `ESC GS ETX`, `ESC GS #`, `ESC GS b`, `ESC GS c`, `ESC RS a`, `ESC RS d`, `ESC RS r` and the rest of [Printer state and status](#printer-state-and-status): there is no channel back to the host, and the settings do not change the paper.
 - The buzzer, `ESC GS BEL` and `ESC GS EM`: the item stream carries paper, cuts and drawers, and no sound.
 - Maxicode and the composite symbologies, which this command set has no selector for in anything the renderer parses.
+
+<br>
+
+### Seen in the wild
+
+The tables above say what the renderer does with a command. This one says which commands another producer actually sends, taken from the external fixtures of [section 16 of the implementation plan](implementation-plan.md): byte streams that [receiptline](https://github.com/receiptline/receiptline) produced for its own example documents, kept in `test/fixtures/external/receiptline` with their provenance and rendered to golden images.
+
+receiptline is the only library of that set with a Star back end, and it has three: `starsbcs` is StarPRNT, `starlinesbcs` is Star Line Mode, and `stargraphic` is the raster mode of a TSP100. The same twenty one documents also go through its ESC/POS command sets, which is what the parity test of `test/external.js` compares.
+
+| Command | Name | Status | Seen in |
+|---|---|---|---|
+| `ESC @` | initialize | Rendered | receiptline, every command set |
+| `ESC E`, `ESC F` | bold on and off | Rendered | receiptline |
+| `ESC - n` | underline | Rendered | receiptline, always with the one dot thickness Star has |
+| `ESC 4`, `ESC 5` | invert on and off | Rendered | receiptline |
+| `ESC i n1 n2` | character size | Rendered | receiptline |
+| `ESC RS F n` | font | Rendered | receiptline |
+| `ESC 0` | line spacing of 24 dots | Rendered | receiptline, once in its printer setup and again in front of every image and every ruled line |
+| `ESC GS a n` | alignment | Rendered | receiptline |
+| `ESC l n` | left margin | Rendered | receiptline |
+| `ESC Q n` | right margin | Rendered | receiptline |
+| `ESC GS A n1 n2` | absolute print position | Rendered | receiptline, for every column of a table |
+| `ESC GS R n1 n2` | relative print position | Rendered | receiptline, for every vertical rule |
+| `ESC SP n` | right side character spacing | Reported | receiptline, in its printer setup |
+| `ESC GS t n` | select codepage | Rendered | receiptline, cp437 for the text and cp437 for the box drawing of its rules |
+| `ESC b n1 n2 n3 n4 d.. RS` | barcode | Rendered | receiptline, with the symbology and the module width as ASCII digits, Code 39 and Code 128 |
+| `ESC k nL nH d..` | bit image, twenty four dot band | Rendered | receiptline, for every image in Star Line Mode |
+| `ESC GS S m n1..n5 d..` | raster image | Rendered | receiptline, for every image in StarPRNT |
+| `ESC * r ..` | raster mode group | Rendered | receiptline, the `stargraphic` command set: `ESC * r A` to enter, `ESC * r P` for the page mode, `ESC * r Y` for every line feed, `b` for every row of dots and `ESC * r B` to leave, which prints the buffer and cuts in the default mode |
+| `ESC d n` | cut | Rendered | receiptline |
+| `ESC s n1 n2` | printer setting | Reported | receiptline, in its printer setup |
+| `ESC GS ETX s n1 n2` | automatic status | Reported | receiptline, at the end of every job |
+| `ESC RS a n` | print start control | Reported | receiptline, in its printer setup |
+| `ESC ACK SOH` | real time status | Reported | receiptline, at the end of every raster mode job |
+
+Four of these are **Reported**: `ESC SP`, `ESC s`, `ESC RS a` and `ESC GS ETX` in the text command sets, and `ESC RS a` and `ESC ACK SOH` in the raster one. They are the printer setup and the status channel, and none of them changes the paper.

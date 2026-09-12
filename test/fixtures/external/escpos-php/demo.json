@@ -1,0 +1,16 @@
+{
+  "source": "https://github.com/mike42/escpos-php",
+  "file": "example/demo.php",
+  "commit": "e5496cf819b048b11877117bd14a9cea4fb17c03",
+  "licence": "MIT",
+  "setup": "composer require mike42/escpos-php:v2.2 -d build/external/escpos-php",
+  "command": "php tools/external/escpos-php/capture.php demo && node tools/external/escpos-php/capture.js demo",
+  "version": "v2.2",
+  "language": "esc-pos",
+  "columns": 48,
+  "width": 576,
+  "codepageMapping": "epson",
+  "captured": "2026-09-12",
+  "unknown": 1,
+  "notes": "Exercises text, fonts, justification, underline, emphasis, sizes, cut, pulse, barcodes. The example prints to a FilePrintConnector on php://stdout; the default capability profile names no paper, so the fixture is rendered on the 80 mm paper of the other fixtures. Reviewed as a PNG against what the example prints. The reverse feed of ESC e is reported and not performed, so the second line sits three lines lower than it would on paper. The two \"Failed to load image\" lines are the example's own output, its image loader returns an empty image on this PHP."
+}

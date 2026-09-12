@@ -989,9 +989,12 @@ Symbologies:
   encoder implements, so every value can be checked against it. The selection
   never uses SHIFT, which only saves a symbol when one character of the other
   code set stands between two characters of this one.
-- **Code set C ends where the digits end.** A character that is not a digit, or
-  a digit without a partner, switches to code set B, which is the only thing a
-  printer can do with data that says `{C` and then does not hold digit pairs.
+- **Code set C ends where the pairs end.** A byte of code set C is the value of
+  a digit pair, 0 to 99; a byte above that is no pair and switches to code set
+  B, which is the only thing a printer can do with it. **This note read
+  differently until section 16: the data behind `{C` was taken for digit
+  characters until the captures of receiptline and escpos-php showed the
+  specification form, see the notes of that section.**
 - **GS1-128** is a Code 128 with the code sets picked for the data and FNC1
   behind the start symbol.
 
@@ -2741,3 +2744,282 @@ Acceptance:
 The golden fixtures were regenerated with ReceiptPrinterEncoder 4.0.0, linked from the local checkout before it was published. 38 byte streams changed, because version 4 emits fewer style commands, orders a pending font change before the alignment padding and no longer feeds after lines that only change printer state. On paper 36 fixtures changed: every block fixture lost the blank line that used to precede the block, 30 dots on ESC/POS and 32 on StarPRNT, and the `receipt` and `hri` fixtures kept their height but gained a centred first line, which the encoder's initialize fix made possible. The text fixtures are byte for byte the same paper as before, which is the end-to-end check of both libraries the design asked for.
 
 The devDependency range stays at `^3.0.0` until 4.0.0 is published, so a fresh `npm install` resolves; regenerating with 3.0.3 would revert these fixtures, so bump the range and regenerate together once the encoder is on npm.
+
+### Section 16
+
+The fixture layout, the provenance format and the generic test:
+
+- **`test/fixtures/external/<library>/`** holds the four files per fixture the
+  plan asks for, `<example>.bin`, `.pbm`, `.items.json` and `.json`, plus the
+  `LICENSE` of the library once. The provenance has the thirteen fields of the
+  plan and one more, in the order the plan writes them; the typedef and the
+  field list live in `test/helpers/external.js`, which is also what the test
+  reads them with, and `tools/external/shared.js` writes them through that list,
+  so a capture script cannot invent a field or leave one out.
+- **The one added field is `setup`**, which the plan allows when the typedef and
+  the test's field list are updated with it, and both are. A capture that needs
+  a virtual environment or a composer install is only reproducible when the
+  install is written down next to the invocation, and folding both into
+  `command` makes that field unreadable. `setup` prepares the machine and
+  `command` produces the bytes:
+
+  | Library | `setup` | `command` |
+  |---|---|---|
+  | receiptline | `npm install` | `node tools/external/receiptline/capture.js <name>` |
+  | python-escpos | `python3 -m venv build/external/python-escpos/venv && …/bin/pip install "git+…@<commit>"` | `build/external/python-escpos/venv/bin/python tools/external/python-escpos/capture.py <name> && node …/capture.js <name>` |
+  | escpos-php | `composer require mike42/escpos-php:v2.2 -d build/external/escpos-php` | `php tools/external/escpos-php/capture.php <name> && node …/capture.js <name>` |
+  | ESCPOS_NET | `npm install` | `node tools/external/escpos-net/capture.js <name>` |
+
+  The virtual environment and the composer install live under `build/`, which is
+  gitignored, so the paths in the two fields are the ones that work from a fresh
+  checkout.
+- **A capture of one fixture leaves the others alone.** The Python and the PHP
+  script hand what they captured to their Node side through an `index.json`
+  under `build/`, and they merge their entries into that file instead of
+  replacing it, so running the `command` of one provenance does not throw the
+  index of the other fixtures of the library away.
+- **`test/external.js`** walks every library and every fixture and makes the
+  three checks: the paper equals the golden PBM, the items equal `items.json`,
+  and the `unknown` count of the provenance equals the number of unknown items
+  in `items.json`. It also checks that the provenance has the documented fields
+  and nothing else, that the licence is one of the permissive three, and that
+  the library has a `LICENSE` file. Every fixture is rendered with the unified
+  renderer, with `commands: ['cut', 'pulse', 'feed', 'unknown']` and the
+  language, width and mapping of its own provenance.
+- **`npm run contact-sheet`** renders every fixture to PNG under
+  `build/contact-sheet/`, writes the SVG preview of receiptline's documents next
+  to them and an `index.html` that lists every fixture with its provenance.
+  `build/` is in `.gitignore` and nothing it writes is committed.
+
+Libraries, 104 fixtures with 296 unknown items in total:
+
+| Library | Fixtures | Unknown items | Which commands |
+|---|---|---|---|
+| receiptline 4.0.4 | 84 | 269 | `GS a` 37, `GS r` 37, `FS ( A` 27, `ESC RS a` 47, `ESC SP` 37, `ESC s` 37, `ESC GS ETX` 37, `ESC ACK SOH` 10 |
+| python-escpos 3.2.dev81 | 7 | 26 | `GS b`, the smoothing mode, 26 |
+| escpos-php v2.2 | 8 | 1 | `ESC e`, the reverse line feed, 1 |
+| ESCPOS_NET ac185fc | 5 | 0 | none |
+
+Every unknown item is a status, a setup or a smoothing command that changes
+nothing on the paper, with one exception: `ESC e`, the reverse line feed of the
+escpos-php demo, which a printer performs and this renderer does not, so that
+fixture is three lines taller than the paper would be.
+
+What the captures found in the renderer, all three fixed here:
+
+- **`ESC GS A` and `ESC GS R`, the Star print positions, were missing.**
+  receiptline lays every column of every table out with them, and without them
+  the two argument bytes of each command printed as text and the columns
+  collapsed: the first capture of `receipt-starsbcs-48` was visibly corrupt.
+  They are now rendered as the dot positions they are, absolute and relative
+  from the left margin, the counterparts of `ESC $` and `ESC \`. The proof is
+  the parity test: the same document through `escpos` and through `starsbcs` is
+  now the same paper, dot for dot, apart from the three differences receiptline
+  itself makes.
+- **`ESC k` is a band of twenty four dot rows, not an eight dot strip.** Section
+  13 had to guess this command without a specification text and read it as an
+  `ESC L` at quadruple density: two length bytes and one byte per column.
+  receiptline prints every image of Star Line Mode with it, as `ESC 0` followed
+  by bands of `nL + nH * 256` bytes per row and twenty four rows each, and under
+  the old reading the remaining twenty three rows of every band printed as text.
+  Under the new one the logo of `receipt-starlinesbcs-48` is dot for dot the
+  ESC/POS logo of the same document, which is what settles it. The reference
+  page says where the reading comes from.
+- **`ESC b` takes its symbology and its module width as ASCII digits too.**
+  receiptline writes `ESC b '6' '1' '1' 48` for a Code 128, the way a Star
+  printer takes most of its arguments, and the renderer only had the binary
+  numbers, so the barcode of `line-width-starsbcs-48` was reported and not
+  drawn. Both tables carry the digit forms now, which cannot collide: the
+  numbers stop at thirteen and the digits start at forty eight. Only the
+  symbologies numbered 0 to 9 get one, so the four bytes behind the nine, `:`
+  to `=`, stay undefined and are reported rather than drawn. The module width
+  table gained the values receiptline writes for the symbologies Star gives
+  their own element widths, 4, 5 and 6 for Code 39 and Codabar and 8 for ITF;
+  it stays flat, so the one value that means two things, the widest ITF, keeps
+  the width of the general case. No golden changed with it: the only external
+  fixture with one of those values is the Code 39 of `guest`, at the width where
+  the flat table already gave the right answer.
+- Two lengths were wrong as well and made the stream drift: `ESC s n1 n2`, which
+  receiptline sends in its printer setup, consumed two bytes instead of four,
+  and `ESC ACK SOH` two instead of three. Both are in the argument length table
+  now and are reported.
+
+**The data of code set C is a sequence of pair values, not digit characters.**
+receiptline writes an ESC/POS Code 128 as `{C` `0x00` `0x03` for `0003` and
+escpos-php as `{C` `0x15` `0x20` `0x2b` for `213243`: one byte per digit pair,
+carrying the value of that pair, 0 to 99. That is what the Epson specification
+says the data of `{C` is, and two independent libraries send it that way, so the
+renderer follows the specification now and the reading of section 4 changed:
+
+- Inside `{C` a byte is a pair value. A byte of 100 or more is no pair and
+  switches to code set B, which is the only thing a printer can do with it, and
+  the human readable text of a code set C run is the two digits of every pair.
+- **The `code128` fixture of section 4 was regenerated in both languages.** It
+  drops the `{C1234` case, which was the digit form, keeps `{BABC-123`, and
+  prints a specification form `{C` `0x00` `0x03` `0x0c` `0x22`, the pairs 00,
+  03, 12 and 34, on ESC/POS alone: the StarPRNT encoding strips the code set
+  selection, so the same value is read as four characters there. `code128` is
+  therefore an exception of `test/parity.js`, with its reason and with the rule
+  for its items in the new `ITEMS` table next to `EXCEPTIONS`.
+- StarPRNT does not change at all. It never sees a `{C`, the encoder strips it,
+  and the printer picks the code sets from the digits.
+- **An encoder pitfall to document in ReceiptPrinterEncoder**: it passes a
+  user-supplied `{C` through unchanged, digit characters included, so
+  `barcode('{C1234', 'code128')` prints `49505152` on a real printer and here.
+  The encoder never emits `{C` itself, it prepends `{B` to a value without a
+  brace and its version 3 documentation dropped code set selection altogether,
+  so only a legacy caller writes one, and that caller's receipt is wrong on
+  paper too. Worth a line in the encoder's barcode documentation.
+- The goldens that changed with it: `esc-pos/code128`, `star-prnt/code128` and
+  the two external fixtures that carry a code set C barcode,
+  `receiptline/line-width-escpos-48` and `escpos-php/barcode`.
+
+receiptline, the decisions of the open items and what the review found:
+
+- **84 fixtures**: the twenty one English documents through `escpos` and
+  `starsbcs` at 48 columns, 42 of them; the five documents of the subset,
+  `receipt`, `receipt2`, `guest`, `column_border1` and `text_decoration`,
+  through `generic`, `starlinesbcs` and `stargraphic` at 48 columns and through
+  all five sets at 32 columns, 40 of them; and `receipt` through `escpos` and
+  `starsbcs` once more in the `multilingual` encoding, 2 of them. Everything
+  else is `cp437`.
+- **The documents are not copied.** They ship with the npm package, in
+  `example/data/en`, and the capture script reads them out of `node_modules`;
+  the provenance names the repository, the file and the commit of the v4.0.4
+  tag, `f93b674`.
+- **The mapping of the ESC/POS sets is `epson`.** `escpos` and `generic` share
+  the codepage table of receiptline's `_escpos`, which is the Epson one:
+  `ESC t 0` cp437, `ESC t 16` windows1252, `ESC t 19` cp858. They also draw
+  every ruled line with `ESC t 1` and the bytes `0x90` to `0x9f`, which are the
+  box drawing characters of the Epson katakana page, and no other mapping
+  decodes those to lines. `generic` differs from `escpos` in its images, `GS v 0`
+  instead of `GS 8 L`, and in writing its arguments as binary numbers rather
+  than ASCII digits; both render the same paper, which the parity test checks.
+- **The `multilingual` encoding changes nothing visible here**, because the
+  English documents are ASCII: receiptline's `multiconv` only emits an `ESC t`
+  for a byte above 127, so the two multilingual fixtures carry no codepage
+  command for their text at all and exercise the initial codepage instead. The
+  codepage switching the plan wanted from this encoding is in the Japanese
+  documents, which are out of scope.
+- **`stargraphic` prints images and paper feeds and nothing else.** Its command
+  set inherits the empty `text`, `align`, `hr` and `vr` of receiptline's base
+  set, so a document without an image comes out as blank paper of the right
+  height, and one with an image comes out as the image alone. receiptio, the
+  console application, rasterizes the whole receipt itself before it hands it to
+  this command set; `receiptline.transform()` alone does not. The ten
+  `stargraphic` fixtures are therefore a test of the raster mode wire format,
+  `ESC * r A`, `ESC * r P`, `ESC * r Y`, the `b` rows and `ESC * r B` with the
+  cut of its default mode, and not of the layout. They are kept for that, and
+  they are the only fixtures whose golden image is nearly empty.
+- **The review** compared every golden image with receiptline's own SVG preview
+  of the same document. 74 of the 84 renders are exactly the size of the
+  preview, width and height; the previews are not committed, as the plan
+  decided, and the contact sheet regenerates them. The ten that differ are the
+  eight `stargraphic` ones above, and the two `kitchen` fixtures, where the
+  lines of equals signs of the document are paper cuts: the preview draws a cut
+  as a line of its own and this renderer reports it as an item and draws
+  nothing, so the paper is two lines shorter. Every fixture was also read as a
+  PNG next to receiptline's plain text rendering of the same document.
+- **The parity test** groups the fixtures by document, width and encoding, and
+  checks that the two ESC/POS sets render the same paper, that the two Star text
+  sets do, and that the two groups agree with each other. `stargraphic` is
+  outside the comparison for the reason above. Three differences receiptline
+  itself makes are in the exception list, each with its reason:
+  - **The corners of a box.** receiptline draws the ruled lines of ESC/POS out
+    of the Epson katakana page, where the corners are the rounded `╭ ╮ ╰ ╯`, and
+    the ones of StarPRNT out of cp437, where they are the square `┌ ┐ └ ┘`. Two
+    dots per corner, and it is why almost every document with a border is an
+    exception.
+  - **The underline.** receiptline asks ESC/POS for the two dot underline with
+    `ESC - 2` and StarPRNT for the one dot it has with `ESC - 1`.
+
+  Code 128 was a third difference until the capture settled it, see the decision
+  below; the two languages now draw the same symbol for the same document.
+
+python-escpos:
+
+- **7 fixtures** from the examples of the repository at commit `f5ed42f`, run
+  against its `Dummy` printer in a throwaway virtual environment under `build/`
+  with the library installed from that same commit, so that the examples and the
+  library match. The printer classes the capture replaces with its own `Dummy`
+  are snapshotted before an example runs and put back in a `finally` behind it,
+  so that the next example subclasses the library's own class again and no
+  profile leaks from one capture to the next. The examples: `barcodes`, `block_text`, `font_variations`, `qr_code`, `receipt`,
+  `software_barcode` and `software_columns`. The capture replaces the `Usb`
+  printer of two of them with a `Dummy` of the same profile and changes nothing
+  else.
+- **Three examples of the directory are skipped** and the capture script says
+  why: `weather` fetches a forecast over the network, `docker-flask` is a web
+  service, and `codepage_tables` passes strings to `_raw()`, which `Dummy.output`
+  cannot join in this version, so it raises before it prints anything. The
+  codepage switching the plan wanted from python-escpos is therefore not in the
+  set; `ESC t` is still exercised, by the magic encode of the other examples.
+- **The profile decides the width.** The provenance records the profile and the
+  print width comes from the paper of that profile, rounded down to whole bytes:
+  `TM-T88II` 512 dots, `TM-P80` 576, `POS5890 Series` 384, `TM-U220` 400. Where
+  the profile's own column count disagrees with that paper at the twelve dot
+  cell of font A, the notes of the fixture say so. It is visible in
+  `software_columns`: the `TM-U220` profile reports 42 columns because the font
+  of a dot impact printer is narrower than a thermal one, its paper is 400 dots,
+  and the third column of every row therefore wraps here.
+- **Its QR code is an image.** `qr()` defaults to the software implementation,
+  so `qr_code` is a `GS ( L` graphic and not the native `GS ( k` symbol. The
+  render decodes to the URL the example encodes, checked with jsQR.
+- **The software barcode of `barcodes` is cropped in the source image**: the
+  human readable text runs into the last row of the image python-escpos sent,
+  so it prints clipped. That is in the bytes, not in the render.
+- The one unknown command is `GS b`, the smoothing mode, which
+  `set_with_default()` sends with every style change.
+
+escpos-php:
+
+- **8 fixtures** from the examples the composer package ships, v2.2, commit
+  `e5496cf`, captured by running each example against its `FilePrintConnector`
+  on `php://stdout`: `demo`, `barcode`, `character-encodings`,
+  `character-tables`, `margins-and-spacing`, `pdf417-code`, `qr-code` and
+  `text-size`. PHP 8.4 is on this machine, so the capture runs rather than
+  taking streams from the tests.
+- **The subprocess is told `display_errors=stderr`.** escpos-php 2.2 has
+  deprecations on PHP 8.4 and PHP CLI writes its notices to stdout, which is the
+  same stream the receipt goes to; without the flag the notices land in the
+  middle of the byte stream, which the first capture showed.
+- **Four examples are skipped for the image loader.** `EscposImage::load()`
+  returns a zero by zero image on PHP 8.4 with the gd of this machine, so
+  `graphics`, `bit-image`, `print-from-html` and
+  `character-encodings-with-images` print an error message and no image. Those
+  are the examples that would have exercised `ESC *`, `GS v 0` and `GS ( L`;
+  the python-escpos fixtures cover all three instead. `customer-display` opens a
+  serial device, `print-from-pdf` needs imagick, `rawbt-receipt` stops on an
+  undefined variable and `receipt-with-logo` needs a class the example directory
+  does not carry.
+- The one unknown command is `ESC e`, the reverse line feed of the demo.
+
+ESCPOS_NET:
+
+- **5 fixtures** and nothing run: the byte arrays of `PrintQRCode_Success` in
+  `ESCPOS_NET.UnitTest/EmittersBased/EPSONTests/BarCode.cs`, commit `ac185fc`,
+  assembled the way the test assembles them. The theory has sixty rows over
+  three QR models, five module sizes and four correction levels; five rows are
+  captured, spread over the models and the sizes, so that the eye review stays
+  possible. All five decode to the URL the test encodes, checked with jsQR; the
+  micro model is drawn as a model 2 symbol, which is the documented divergence
+  of the QR commands.
+
+react-thermal-printer and node-escpos are **not captured**, and the reason is
+the same for both: neither library's own examples run under Node. The example of
+react-thermal-printer is a Vite application in TSX that drives a Web Serial
+port, and the demo of node-escpos is TypeScript built with unbuild that prints
+through the USB adapter, which needs the native `usb` module. Driving either
+library from a receipt written here instead would be capturing our own example
+rather than theirs, which is what this section is not for. They are the
+follow-up the plan allows for the last three libraries.
+
+Acceptance:
+
+- `npm test` 2029 passing, lint clean over the new tools and tests. The
+  fixtures of sections 2 to 14 did not change a dot; the three renderer fixes
+  above are additions and one corrected reading, and the only test that changed
+  is the `ESC k` test of `test/star-prnt.js`, which now checks the band.
+- The contact sheet builds and shows all 104 fixtures with their provenance and,
+  for receiptline, the SVG preview next to the render.
+- Version stays 0.3.0, nothing committed.
