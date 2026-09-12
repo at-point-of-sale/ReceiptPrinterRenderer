@@ -274,6 +274,37 @@ function userMemoryArguments(bytes, index) {
 }
 
 /**
+ * Arguments of FS q n [xL xH yL yH d1..dk]1..[..]n, the definition of n NV bit
+ * images, each x bytes wide and y bytes of eight dots tall
+ *
+ * @param  {Uint8Array}   bytes   The whole stream
+ * @param  {number}       index   Position of the first argument
+ * @return {number}               Number of argument bytes, or -1 when the stream is too short
+ */
+function nvBitImageArguments(bytes, index) {
+  if (index + 1 > bytes.length) {
+    return -1;
+  }
+
+  let length = 1;
+
+  for (let image = 0; image < bytes[index]; image++) {
+    const header = index + length;
+
+    if (header + 4 > bytes.length) {
+      return -1;
+    }
+
+    const width = bytes[header] + bytes[header + 1] * 256;
+    const height = bytes[header + 2] + bytes[header + 3] * 256;
+
+    length += 4 + width * height * 8;
+  }
+
+  return length;
+}
+
+/**
  * Arguments of GS * x y d1..dk, a downloaded bitmap
  *
  * @param  {Uint8Array}   bytes   The whole stream
@@ -363,7 +394,7 @@ const UNKNOWN_ARGUMENTS = {
     0x57: 1, /* quadruple size Kanji */
     0x67: userMemoryArguments, /* write and read the user memory */
     0x70: 2, /* print NV bit image */
-    0x71: 0, /* define NV bit image, variable */
+    0x71: nvBitImageArguments, /* define NV bit image, n images with their sizes */
   },
 };
 

@@ -16,6 +16,8 @@ Render the ESC/POS and StarPRNT commands created by [ReceiptPrinterEncoder](http
   - [Previewing a receipt](#previewing-a-receipt)
   - [Drivers and applications](#drivers-and-applications)
   - [What is not rendered](#what-is-not-rendered)
+- [ESC/POS commands](commands-esc-pos.md)
+- [StarPRNT commands](commands-star-prnt.md)
 - [Design document](design.md)
 
 <br>
@@ -360,3 +362,5 @@ The renderer covers the commands ReceiptPrinterEncoder version 3 emits. A few th
 - **Commands the parser does not know.** Skipped according to the argument lengths of the specification and reported as an `unknown` item, so that one command the renderer has never seen does not derail the text after it.
 
 An `unknown` item only reaches you when `unknown` is in `commands`, otherwise it is dropped. It carries the bytes of the command, which makes it the place to look when something is missing from a render.
+
+The two command references list every command of a language, what it does to the paper and the values it accepts: [ESC/POS commands](commands-esc-pos.md) and [StarPRNT commands](commands-star-prnt.md).
