@@ -141,7 +141,7 @@ export function styles() {
     border-radius: 6px; color: #000; text-decoration: none; font-size: 10pt; }
   .toolbar .libraries a:hover { background: #eaeaea; }
   header .filters { margin-left: auto; display: flex; }
-  .print { margin-top: 15px; display: flex; gap: 12px; align-items: center; }
+  .print { display: flex; gap: 12px; align-items: center; margin-top: -4px; }
   .print button { border: none; border-radius: 6px; height: 32px; padding: 0 12px; cursor: pointer;
     font-family: system-ui; font-weight: 600; font-size: 10pt; background: #eaeaea; }
   .print button:disabled { cursor: default; opacity: .5; }
@@ -184,7 +184,7 @@ export function header(found, languages, widths, libraries) {
     </span>
     <button id="connect">Connect</button>
     <button id="disconnect" hidden>Disconnect</button>
-    <span class="status off" id="status">Not connected.</span>
+    <span class="status off" id="status"></span>
     <span class="filters">
       <select id="language" title="Language">
       ${filter}
@@ -330,7 +330,7 @@ function disconnected() {
   printer = null;
   device = null;
 
-  report('Not connected.', 'off');
+  report('', 'off');
 
   connect.hidden = false;
   disconnect.hidden = true;

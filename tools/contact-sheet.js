@@ -169,19 +169,21 @@ async function sheet(library, rows, bytes) {
 
     html += `<section data-language="${escape(fixture.provenance.language)}" data-columns="${
       fixture.provenance.columns}" data-width="${fixture.provenance.width}">
-  <h3>${escape(name)} <span class="language">${escape(fixture.provenance.language)}, ${
+  <div class="title">
+    <h3>${escape(name)} <span class="language">${escape(fixture.provenance.language)}, ${
   fixture.bytes.length} bytes</span></h3>
+    <div class="print">
+      <span class="result"></span>
+      <button data-fixture="${escape(key)}" disabled>Print</button>
+    </div>
+  </div>
   <div class="fixture" style="--columns: ${cells.length + 1}">
     <figure><figcaption>render, ${paper.width} by ${paper.height}</figcaption>
       <img src="${escape(file)}" alt="${escape(name)}"></figure>
     ${cells.map((entry) => entry.html).join('\n    ')}
   </div>
-  <table class="provenance">${provenance}</table>
+  <details><summary>provenance</summary><table class="provenance">${provenance}</table></details>
   ${commands ? `<details><summary>the reference invocations</summary><table>${commands}</table></details>` : ''}
-  <div class="print">
-    <button data-fixture="${escape(key)}" disabled>Print</button>
-    <span class="result"></span>
-  </div>
 </section>\n`;
 
     const agreed = cells.filter((entry) => entry.row)
@@ -296,11 +298,13 @@ async function main() {
   img { display: block; width: 100%; height: auto; background: #fff; border: 1px solid #eee; box-sizing: border-box; }
   .unavailable { background: #f0f0f0; border-radius: 6px; color: #888; padding: 6px 8px; font-family: var(--font-stack-mono); font-size: 11px; }
   .unavailable span { color: #aaa; }
-  .provenance { margin-top: 20px; }
+  .title { display: flex; align-items: start; gap: 15px; }
+  .title h3 { margin-right: auto; }
   table { border-collapse: collapse; font-size: 0.75rem; }
   th { text-align: left; padding: 0 12px 2px 0; font-weight: 600; color: #444; vertical-align: top; white-space: nowrap; }
   td { padding: 0 0 2px; font-family: var(--font-stack-mono); color: #444; }
   details { margin-top: 12px; color: #888; font-size: 0.75rem; }
+  details table { margin-top: 8px; }
   details summary { cursor: pointer; user-select: none; }
   details td { padding-right: 12px; white-space: pre-wrap; }
   .agreement { background: #fff; border-radius: 8px; margin: 15px 0; }
