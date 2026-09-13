@@ -765,6 +765,7 @@ Settled on 2026-09-11:
 
 Still open:
 
+- Verified on paper on 2026-09-13 with an Epson printer through the contact sheet's Print buttons: the receiptline text-decoration document, mixed sizes, underline, invert and a bordered table, matches the render after the baseline correction of the same day. The maintainer's verdict: the renderer is close to the paper, the reference renderers are not.
 - Cat printer, partly settled on 2026-09-12 with an MX10 (firmware 1.0.11): it exposes the AE30 service with AE01 as write-without-response only, so the driver writes without response when the characteristic demands it; it does not advertise AE30, so the profile also accepts the known model names in the picker; it answers the state and info requests and sends the resume packet after every job, no pause was seen on a 64-row job. Verified on paper on 2026-09-12 with the MX10 through the playground: text, tables, images and barcodes print as intended, with run length encoded rows, 200 byte writes at 20 ms and a 30 second resume timeout; a shorter timeout corrupted dense barcode areas because the printer stays paused while it prints its backlog. Still open: the energy and speed values that give the best output.
 
 <br>
