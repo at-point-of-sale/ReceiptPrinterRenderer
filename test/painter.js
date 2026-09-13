@@ -34,6 +34,30 @@ function black(width, height) {
   return bitmap;
 }
 
+/**
+ * A rectangle of a bitmap, so that a cell of a line can be compared with the
+ * same cell elsewhere, and the print area of a page with the same content in
+ * another direction
+ *
+ * @param  {object}   bitmap   The bitmap to cut from
+ * @param  {number}   x        Left edge of the rectangle
+ * @param  {number}   y        Top row of the rectangle
+ * @param  {number}   width    Width of the rectangle
+ * @param  {number}   height   Height of the rectangle
+ * @return {object}            The rectangle
+ */
+function crop(bitmap, x, y, width, height) {
+  const result = Bitmap.create(width, height);
+
+  for (let row = 0; row < height; row++) {
+    for (let column = 0; column < width; column++) {
+      Bitmap.setPixel(result, column, row, Bitmap.getPixel(bitmap, x + column, y + row));
+    }
+  }
+
+  return result;
+}
+
 describe('Painter', function() {
   describe('options', function() {
     it('should report the width', function() {
@@ -194,6 +218,97 @@ describe('Painter', function() {
 
     it('should not add a line at the end of the stream when nothing is pending', function() {
       assert.deepEqual(painter().end(), []);
+    });
+  });
+
+  describe('the baseline of a line', function() {
+    /* Every cell of a line stands on the bottom edge of the tallest cell of
+       that line, which is what an Epson prints */
+
+    it('should put a single height cell on the bottom of a double height line', function() {
+      const mixed = painter();
+      const alone = painter();
+
+      mixed.text('A');
+      mixed.style({height: 2});
+      mixed.text('B');
+      mixed.lineFeed();
+
+      alone.lineSpacing(24);
+      alone.text('A');
+      alone.lineFeed();
+
+      const line = stitch(mixed.end(), {width: WIDTH});
+      const cell = stitch(alone.end(), {width: WIDTH});
+
+      assert.equal(line.height, 48);
+
+      /* The 12 by 24 cell is the bottom 24 rows of the 48 dot line, and the
+         24 rows above it are white */
+
+      assert.deepEqual(toAscii(crop(line, 0, 24, 12, 24)), toAscii(crop(cell, 0, 0, 12, 24)));
+      assert.deepEqual(toAscii(crop(line, 0, 0, 12, 24)), toAscii(Bitmap.create(12, 24)));
+    });
+
+    it('should put the underline of a single height cell on the bottom row of the line', function() {
+      const paper = painter();
+
+      paper.style({underline: 1});
+      paper.text('A');
+      paper.style({underline: 0, height: 2});
+      paper.text('B');
+      paper.lineFeed();
+
+      const line = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(line.height, 48);
+
+      for (let x = 0; x < 12; x++) {
+        assert.equal(Bitmap.getPixel(line, x, 47), 1, `dot ${x},47`);
+        assert.equal(Bitmap.getPixel(line, x, 23), 0, `dot ${x},23`);
+      }
+    });
+
+    it('should put a strip on the bottom of a double height line', function() {
+      const paper = painter();
+
+      paper.style({height: 2});
+      paper.text('A');
+      paper.style({height: 1});
+      paper.strip(black(10, 8));
+      paper.lineFeed();
+
+      const line = stitch(paper.end(), {width: WIDTH});
+
+      assert.equal(line.height, 48);
+
+      /* The strip of eight rows sits at the cursor, on rows 40 to 47 */
+
+      assert.equal(Bitmap.getPixel(line, 12, 39), 0);
+      assert.equal(Bitmap.getPixel(line, 12, 40), 1);
+      assert.equal(Bitmap.getPixel(line, 21, 47), 1);
+      assert.equal(Bitmap.getPixel(line, 22, 47), 0);
+    });
+
+    it('should leave a line whose cells are all the same height where it was', function() {
+      const spaced = painter();
+      const tight = painter();
+
+      spaced.text('Hi');
+      spaced.lineFeed();
+
+      tight.lineSpacing(24);
+      tight.text('Hi');
+      tight.lineFeed();
+
+      const line = stitch(spaced.end(), {width: WIDTH});
+      const cell = stitch(tight.end(), {width: WIDTH});
+
+      /* The gap of the line spacing is the six rows below the cells, so the
+         cells are the top 24 rows of the 30 dot line */
+
+      assert.equal(line.height, 30);
+      assert.deepEqual(toAscii(crop(line, 0, 0, WIDTH, 24)), toAscii(cell));
     });
   });
 
@@ -411,12 +526,16 @@ describe('Painter', function() {
 
       const bitmap = stitch(paper.end(), {width: WIDTH});
 
-      assert.equal(Bitmap.getPixel(bitmap, 11, 0), 0);
-      assert.equal(Bitmap.getPixel(bitmap, 12, 0), 1);
-      assert.equal(Bitmap.getPixel(bitmap, 21, 0), 1);
-      assert.equal(Bitmap.getPixel(bitmap, 22, 0), 0);
-      assert.equal(Bitmap.getPixel(bitmap, 12, 7), 1);
-      assert.equal(Bitmap.getPixel(bitmap, 12, 8), 0);
+      /* The strip stands on the baseline of the line, the bottom edge of the
+         24 dot cell before it, so its eight rows are 16 to 23 */
+
+      assert.equal(Bitmap.getPixel(bitmap, 11, 16), 0);
+      assert.equal(Bitmap.getPixel(bitmap, 12, 16), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 21, 16), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 22, 16), 0);
+      assert.equal(Bitmap.getPixel(bitmap, 12, 23), 1);
+      assert.equal(Bitmap.getPixel(bitmap, 12, 15), 0);
+      assert.equal(Bitmap.getPixel(bitmap, 12, 24), 0);
     });
 
     it('should make the line as tall as the strip when the strip is taller', function() {
@@ -1672,29 +1791,6 @@ describe('Painter', function() {
     const AREA = {x: 0, y: 0, width: WIDTH, height: 96};
 
     /**
-     * A rectangle of a bitmap, so that the print area of a page can be compared
-     * with the same content in another direction
-     *
-     * @param  {object}   bitmap   The bitmap to cut from
-     * @param  {number}   x        Left edge of the rectangle
-     * @param  {number}   y        Top row of the rectangle
-     * @param  {number}   width    Width of the rectangle
-     * @param  {number}   height   Height of the rectangle
-     * @return {object}            The rectangle
-     */
-    function crop(bitmap, x, y, width, height) {
-      const result = Bitmap.create(width, height);
-
-      for (let row = 0; row < height; row++) {
-        for (let column = 0; column < width; column++) {
-          Bitmap.setPixel(result, column, row, Bitmap.getPixel(bitmap, x + column, y + row));
-        }
-      }
-
-      return result;
-    }
-
-    /**
      * The paper of a page with two lines on it, in one print direction
      *
      * @param  {number}   direction   The print direction, 0 to 3
@@ -1757,6 +1853,38 @@ describe('Painter', function() {
           toAscii(page(0)),
           toAscii(stitch(standard.end(), {width: WIDTH})),
       );
+    });
+
+    it('should put the cells of a mixed size line on the baseline of a page', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.pageArea(AREA);
+      paper.pageDirection(0);
+      paper.text('A');
+      paper.style({height: 2});
+      paper.text('B');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      const standard = painter();
+
+      standard.text('A');
+      standard.style({height: 2});
+      standard.text('B');
+      standard.lineFeed();
+      standard.feed(AREA.height - 48);
+
+      const page = stitch(paper.end(), {width: WIDTH});
+
+      assert.deepEqual(toAscii(page), toAscii(stitch(standard.end(), {width: WIDTH})));
+
+      /* The single height cell is the bottom 24 rows of the 48 dot line, the
+         same rule the paper follows */
+
+      assert.deepEqual(toAscii(crop(page, 0, 0, 12, 24)), toAscii(Bitmap.create(12, 24)));
+      assert.notDeepEqual(toAscii(crop(page, 0, 24, 12, 24)), toAscii(Bitmap.create(12, 24)));
     });
 
     it('should turn direction 1 a quarter turn counter-clockwise', function() {

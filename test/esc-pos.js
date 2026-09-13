@@ -318,6 +318,23 @@ describe('EscPosRenderer', function() {
       assert.equal(Bitmap.getPixel(normal, 6, 10), 0);
     });
 
+    it('should put the single size cells of a mixed line on the baseline', function() {
+      const paper = stitch(render(stream(ESC, '@', GS, '!', 0x11, 'H', GS, '!', 0x00, 'i', LF)), {width: WIDTH});
+      const small = stitch(render(stream(ESC, '@', 'i', LF)), {width: WIDTH});
+
+      assert.equal(paper.height, 48);
+
+      /* The double size cell is 24 dots wide, so the single size one behind it
+         starts at 24 and is the bottom 24 rows of the 48 dot line */
+
+      for (let y = 0; y < 24; y++) {
+        for (let x = 0; x < 12; x++) {
+          assert.equal(Bitmap.getPixel(paper, 24 + x, 24 + y), Bitmap.getPixel(small, x, y), `dot ${x},${y}`);
+          assert.equal(Bitmap.getPixel(paper, 24 + x, y), 0, `dot ${x},${y} above the cell`);
+        }
+      }
+    });
+
     it('should draw an underline two dots thick with ESC - 2', function() {
       const paper = stitch(render(stream(ESC, '@', ESC, '-', 2, 'Hi', LF)), {width: WIDTH});
 

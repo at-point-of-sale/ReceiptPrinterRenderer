@@ -1818,6 +1818,13 @@ class Painter {
      * Commit the current line: draw its cells into a line of the right height,
      * aligned inside the print area, and append the rows.
      *
+     * The cells sit on a baseline, which is the bottom edge of the tallest cell
+     * of the line: a cell is drawn at `line.height - cell.height` from the top
+     * of the line box, so a single height character next to a double height one
+     * sits on the same line as the tall one instead of hanging from the top. The
+     * underline and the upperline are part of the cell and move with it. The gap
+     * of the line spacing is the rows below the tallest cell and stays there.
+     *
      * @param  {number}   minimum   Smallest height of the line in dots
      */
   #commit(minimum) {
@@ -1841,7 +1848,7 @@ class Painter {
     const offset = left + this.#offset(line.extent, area);
 
     for (const cell of line.cells) {
-      Bitmap.blit(cell.bitmap, bitmap, offset + cell.x, 0);
+      Bitmap.blit(cell.bitmap, bitmap, offset + cell.x, line.height - cell.bitmap.height);
     }
 
     this.#append(this.#turn(bitmap));

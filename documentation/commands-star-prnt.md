@@ -101,7 +101,7 @@ The encoder emits nothing for italic in this language, so there is no italic com
 
 ### Line spacing and feeds
 
-The height of a committed line is the larger of the tallest cell on it and the current line spacing, so a line of double height text is 48 dots and not 64, which is how the firmware behaves as well. The cells sit at the top of the line box and the gap falls below them: with the Star default of 32 dots and a 24 dot cell that is eight dots at every line boundary. An empty line is the line spacing alone. Blocks, which is what barcodes, QR codes, PDF417 symbols and raster images are, advance by their own height and get no line spacing added.
+The height of a committed line is the larger of the tallest cell on it and the current line spacing, so a line of double height text is 48 dots and not 64, which is how the firmware behaves as well. The cells stand on the baseline of the line, the bottom edge of its tallest cell, so a single height character next to a double height one sits on the same line as the tall one, and the gap of the line spacing falls below them: with the Star default of 32 dots and a 24 dot cell that is eight dots at every line boundary. An empty line is the line spacing alone. Blocks, which is what barcodes, QR codes, PDF417 symbols and raster images are, advance by their own height and get no line spacing added.
 
 | Command | Name | Status | Notes |
 |---|---|---|---|
