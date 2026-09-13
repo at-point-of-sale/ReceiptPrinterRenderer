@@ -372,6 +372,50 @@ It takes `commands`, `maxHeight`, `feedThreshold` and `font`, the options of a r
 
 <br>
 
+### SVG output
+
+`toSvg(layout)` turns a display list into an SVG document: the text as the outlines of the same face the bitmap fonts were rasterized from, the bars of a barcode and the modules of a QR code as paths, and every image as an embedded PNG. It is a sub-entry of the package, `@point-of-sale/receipt-printer-renderer/svg`, because it carries those outlines and a driver that renders images for a printer has no use for them.
+
+```js
+import ReceiptPrinterRenderer from '@point-of-sale/receipt-printer-renderer';
+import { toSvg } from '@point-of-sale/receipt-printer-renderer/svg';
+
+const renderer = new ReceiptPrinterRenderer({ language: 'esc-pos', width: 576, codepageMapping: 'epson' });
+
+const svg = toSvg(renderer.layout(bytes), {
+    units: 'dots',        // 'dots', 'mm', 'pt' or 'px' for the width and height attributes; the viewBox is always dots
+    cutMarker: false,     // a dashed line at every cut
+    background: '#fff',   // or null for a transparent paper
+    ink: '#000',
+});
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `units` | `'dots'` | The units of the `width` and `height` attributes of the document. `mm`, `pt` and `px` are worked out from the `dpi` of the list, so a receipt of 576 dots at 203 dpi is 72.07 mm wide. The `viewBox` is always the paper in dots, so everything inside the document is in dots whatever this says. |
+| `cutMarker` | `false` | Draw a dashed line across the paper at every cut. Without it a cut is nothing, the way it is in the list. |
+| `background` | `'#fff'` | The colour of the paper, as a rectangle behind everything. `null` leaves it out, for a transparent document. |
+| `ink` | `'#000'` | The colour everything is drawn in. |
+
+`toSvg()` is synchronous and returns a string. It is the default export of the sub-entry as well as a named one, and the UMD build of the sub-entry exposes a `ReceiptPrinterRendererSvg` global with `toSvg` on it, for a page that loads the renderer and the writer from two script tags.
+
+```html
+<script src="receipt-printer-renderer.umd.js"></script>
+<script src="receipt-printer-renderer-svg.umd.js"></script>
+<script>
+    const layout = new ReceiptPrinterRenderer({ width: 576 }).layout(bytes);
+    document.body.innerHTML = ReceiptPrinterRendererSvg.toSvg(layout);
+</script>
+```
+
+The document is one `<g>` per line of the receipt and one per page of page mode, in the order the printer prints them, over a `<defs>` that holds one path per distinct glyph the receipt uses. It scales to any size: the receipt of the fixtures is 37 kB, of which 19 kB is the definitions of the 43 distinct glyphs it uses, 8 kB gzipped, and it prints at the resolution of whatever renders it rather than at the 203 dots per inch of the paper.
+
+Two things about it are worth knowing. The text is the outlines of the face, not the dots of the bitmap font, so a glyph is smooth where the render is blocky and the two differ by a dot at the edges of a stroke; the shapes, the positions and the sizes are the same. And an image is a PNG of the dots as they land on the paper, black on white, so it does not take the `ink` colour and it paints white paper under itself on a transparent background.
+
+`toSvg()` accepts version 1 of the display list and throws on any other. The document is the paper of the list, `width` by `height` dots, with one exception: a list of no height at all, a stream that printed nothing, becomes a document of one blank row, because a document of no height is refused by a rasterizer and drawn as nothing by a browser.
+
+<br>
+
 ### Drivers and applications
 
 Normally you do not construct a renderer yourself. The driver does, because the driver knows the printer: its width, the codepage mapping and the commands it still understands. Your application passes the class:

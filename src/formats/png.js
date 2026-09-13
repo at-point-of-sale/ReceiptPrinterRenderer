@@ -9,9 +9,15 @@
     scanlines and an IEND chunk. Compression is deflate with the zlib framing the
     format asks for, which the platform's CompressionStream provides, in browsers
     and in Node, so the helper needs no zlib dependency and is asynchronous.
+
+    Everything but the compression is shared with src/svg/png.js, which writes
+    the same file with stored deflate blocks, so that the SVG writer stays
+    synchronous: the signature, the CRC, the chunks, the scanlines and the
+    assembly are exported here and the two files differ in their deflate stream
+    and in nothing else.
 */
 
-const SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+export const SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 /* The table of the CRC32 of the PNG specification, polynomial 0xedb88320 */
 
@@ -69,7 +75,7 @@ export function crc32(bytes) {
  * @param  {Uint8Array}   data   The contents of the chunk
  * @return {Uint8Array}          The bytes of the chunk
  */
-function chunk(type, data) {
+export function chunk(type, data) {
   const bytes = new Uint8Array(12 + data.length);
   const view = new DataView(bytes.buffer);
 
@@ -132,22 +138,46 @@ async function deflate(data) {
 }
 
 /**
- * Convert a bitmap to a PNG file, one bit per pixel, greyscale.
+ * The scanlines of a bitmap as PNG stores them, one bit per pixel, greyscale.
  *
  * A greyscale PNG of one bit reads a set bit as white, the renderer reads it as
  * a black dot, so the rows are inverted. The bits that pad a row to a whole
- * byte become white as well, which is what they are on paper.
+ * byte become white as well, which is what they are on paper. Every scanline
+ * carries a filter byte of its own, and none of them is filtered: the rows are
+ * already as small as one bit per dot makes them.
  *
- * @param  {Bitmap}                bitmap   The bitmap to convert
- * @return {Promise<Uint8Array>}            The contents of a .png file
+ * @param  {Bitmap}       bitmap   The bitmap to convert
+ * @return {Uint8Array}            The scanlines, ready to compress
  */
-export async function toPng(bitmap) {
+export function scanlines(bitmap) {
   if (!bitmap || bitmap.width < 1 || bitmap.height < 1) {
     throw new Error('A PNG needs an image of at least one dot, this one has none');
   }
 
   const rowBytes = (bitmap.width + 7) >> 3;
+  const raw = new Uint8Array((rowBytes + 1) * bitmap.height);
 
+  for (let row = 0; row < bitmap.height; row++) {
+    const source = row * rowBytes;
+    const target = row * (rowBytes + 1) + 1;
+
+    for (let byte = 0; byte < rowBytes; byte++) {
+      raw[target + byte] = ~bitmap.data[source + byte] & 0xff;
+    }
+  }
+
+  return raw;
+}
+
+/**
+ * The file of a bitmap and the deflate stream of its scanlines: the signature,
+ * the header, one IDAT chunk and the end marker
+ *
+ * @param  {Bitmap}       bitmap     The bitmap the scanlines came from
+ * @param  {Uint8Array}   deflated   The scanlines, compressed with the zlib framing
+ * @return {Uint8Array}              The contents of a .png file
+ */
+export function encode(bitmap, deflated) {
   const header = new Uint8Array(13);
   const view = new DataView(header.buffer);
 
@@ -160,24 +190,10 @@ export async function toPng(bitmap) {
   header[11] = 0; /* the only filter method there is */
   header[12] = 0; /* not interlaced */
 
-  /* Every scanline carries a filter byte of its own, and none of them is
-     filtered: the rows are already as small as one bit per dot makes them */
-
-  const raw = new Uint8Array((rowBytes + 1) * bitmap.height);
-
-  for (let row = 0; row < bitmap.height; row++) {
-    const source = row * rowBytes;
-    const target = row * (rowBytes + 1) + 1;
-
-    for (let byte = 0; byte < rowBytes; byte++) {
-      raw[target + byte] = ~bitmap.data[source + byte] & 0xff;
-    }
-  }
-
   const chunks = [
     Uint8Array.from(SIGNATURE),
     chunk('IHDR', header),
-    chunk('IDAT', await deflate(raw)),
+    chunk('IDAT', deflated),
     chunk('IEND', new Uint8Array(0)),
   ];
 
@@ -191,6 +207,18 @@ export async function toPng(bitmap) {
   }
 
   return result;
+}
+
+/**
+ * Convert a bitmap to a PNG file, one bit per pixel, greyscale
+ *
+ * @param  {Bitmap}                bitmap   The bitmap to convert
+ * @return {Promise<Uint8Array>}            The contents of a .png file
+ */
+export async function toPng(bitmap) {
+  const raw = scanlines(bitmap);
+
+  return encode(bitmap, await deflate(raw));
 }
 
 export default toPng;

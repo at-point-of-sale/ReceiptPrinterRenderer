@@ -6,6 +6,7 @@ import ReceiptPrinterEncoder from '@point-of-sale/receipt-printer-encoder';
 import StarGraphicsPrinterEncoder from '@point-of-sale/star-graphics-printer-encoder';
 
 import {EscPosRenderer, StarPrntRenderer} from '../../src/receipt-printer-renderer.js';
+import {toSvg} from '../../src/svg.js';
 import {toPbm} from '../../src/formats/pbm.js';
 import {stitch} from '../../src/formats/stitch.js';
 import {commands} from '../helpers/items.js';
@@ -32,7 +33,9 @@ import {toJson} from '../helpers/layout.js';
 
     A few fixtures also get their display list, <name>.layout.json, which freezes
     the format of layout() the way the PBM freezes the dots, see GOLDEN_LAYOUTS
-    below and documentation/display-list.md.
+    below and documentation/display-list.md, and a few get their SVG,
+    <name>.svg, which freezes what the writer of the sub-entry makes of that
+    list, see GOLDEN_SVG.
 */
 
 /* The fixtures whose display list is frozen next to the paper: a receipt of
@@ -46,6 +49,50 @@ const GOLDEN_LAYOUTS = [
   'star-prnt/raw/page-mode-directions',
   'star-prnt/raw/star-graphics',
 ];
+
+/* The fixtures whose SVG is frozen next to the paper: a receipt of text in both
+   languages, the styles and the sizes of the cells, both fonts, the box drawing
+   characters, a barcode with its human readable text, a QR code, a PDF417
+   symbol, a raster image, a cut, the quarter turn of ESC V, the glyphs a stream
+   downloads, a page of the four print directions and a Star raster job */
+
+const GOLDEN_SVG = [
+  'esc-pos/receipt',
+  'esc-pos/styles',
+  'esc-pos/sizes',
+  'esc-pos/fonts',
+  'esc-pos/box',
+  'esc-pos/hri',
+  'esc-pos/code128',
+  'esc-pos/qrcode',
+  'esc-pos/pdf417',
+  'esc-pos/image-raster',
+  'esc-pos/cut',
+  'star-prnt/receipt',
+  'esc-pos/raw/rotation',
+  'esc-pos/raw/user-defined',
+  'star-prnt/raw/page-mode-directions',
+  'star-prnt/raw/star-graphics',
+];
+
+/**
+ * Write the SVG of a fixture, when it is one of the frozen ones. The options
+ * are the defaults of the writer, so that a golden file is what a caller gets
+ * from three lines; the options themselves are covered by test/svg.js.
+ *
+ * @param  {string}       key         Directory and name of the fixture
+ * @param  {string}       directory   Where the fixture goes
+ * @param  {string}       name        Name of the fixture
+ * @param  {object}       renderer    The renderer of its language
+ * @param  {Uint8Array}   bytes       The commands
+ */
+function writeSvg(key, directory, name, renderer, bytes) {
+  if (!GOLDEN_SVG.includes(key)) {
+    return;
+  }
+
+  fs.writeFileSync(path.join(directory, `${name}.svg`), toSvg(renderer.layout(bytes)));
+}
 
 /**
  * Write the display list of a fixture, when it is one of the frozen ones
@@ -519,6 +566,7 @@ for (const language of languages) {
     const bitmap = stitch(items, {width: WIDTH});
 
     writeLayout(`${language.name}/${name}`, directory, name, new Renderer(RENDERER), bytes);
+    writeSvg(`${language.name}/${name}`, directory, name, new Renderer(RENDERER), bytes);
 
     fs.writeFileSync(path.join(directory, `${name}.bin`), bytes);
     fs.writeFileSync(path.join(directory, `${name}.pbm`), toPbm(bitmap));
@@ -1614,6 +1662,7 @@ for (const language of languages) {
     const bitmap = stitch(items, {width: WIDTH});
 
     writeLayout(`${language.name}/raw/${name}`, directory, name, new Renderer(RENDERER), bytes);
+    writeSvg(`${language.name}/raw/${name}`, directory, name, new Renderer(RENDERER), bytes);
 
     fs.writeFileSync(path.join(directory, `${name}.bin`), bytes);
     fs.writeFileSync(path.join(directory, `${name}.pbm`), toPbm(bitmap));
@@ -1649,6 +1698,10 @@ for (const language of languages) {
   const bitmap = stitch(items, {width: WIDTH});
 
   writeLayout(
+      'star-prnt/raw/star-graphics', directory, 'star-graphics', new StarPrntRenderer(RENDERER), bytes,
+  );
+
+  writeSvg(
       'star-prnt/raw/star-graphics', directory, 'star-graphics', new StarPrntRenderer(RENDERER), bytes,
   );
 

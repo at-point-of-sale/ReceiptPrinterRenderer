@@ -18,6 +18,10 @@ import ReceiptPrinterRenderer, {
   stitch,
 } from '@point-of-sale/receipt-printer-renderer';
 
+import toSvgDefault, {toSvg} from '@point-of-sale/receipt-printer-renderer/svg';
+
+import type {SvgOptions} from '@point-of-sale/receipt-printer-renderer/svg';
+
 import type {
   Bitmap,
   RenderItem,
@@ -299,3 +303,13 @@ void listHeight;
 void dpi;
 void drawn;
 void drawnAgain;
+
+/* And the SVG sub-entry, which takes the same list and writes a document */
+
+const svgOptions: SvgOptions = {units: 'mm', cutMarker: true, background: null, ink: '#222'};
+
+const svg: string = toSvg(list, svgOptions);
+const svgAgain: string = toSvgDefault(list);
+
+void svg;
+void svgAgain;

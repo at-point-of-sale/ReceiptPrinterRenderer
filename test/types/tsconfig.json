@@ -9,7 +9,8 @@
     "types": [],
     "baseUrl": ".",
     "paths": {
-      "@point-of-sale/receipt-printer-renderer": ["../../dist/receipt-printer-renderer.d.ts"]
+      "@point-of-sale/receipt-printer-renderer": ["../../dist/receipt-printer-renderer.d.ts"],
+      "@point-of-sale/receipt-printer-renderer/svg": ["../../dist/receipt-printer-renderer-svg.d.ts"]
     }
   },
   "files": [

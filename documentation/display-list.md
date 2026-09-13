@@ -13,6 +13,8 @@ const layout = renderer.layout(bytes);        // what is printed and where
 const items = rasterize(layout, { commands: ['cut'] });   // the same dots render() draws
 ```
 
+`toSvg(layout, options)` of the `/svg` sub-entry writes an SVG document of a list, see [SVG output](usage.md#svg-output); it accepts version 1 and throws on any other version. The document is the paper of the list, except that a list of no height becomes a document of one blank row, since a document of no height is refused by a rasterizer and drawn as nothing by a browser.
+
 `rasterize(layout, options)` draws a list again and returns the items of the output contract. It takes `commands`, `maxHeight`, `feedThreshold` and `font`, the options of a renderer that decide how the dots come out, and it is a named export as well as a static of `ReceiptPrinterRenderer`.
 
 <br>
@@ -40,7 +42,7 @@ The top level, in stream order, which is the order a printer prints them and the
 
 | Type | Fields | Meaning |
 |---|---|---|
-| `line` | `y`, `height`, `rotation`, `operations` | A line box: a text line, or a block on a line of its own. It spans the width of the surface. `rotation` is 0 or 180, the upside down printing of `ESC {` at the moment the line was committed. |
+| `line` | `y`, `height`, `rotation`, `operations` | A line box: a text line, or a block on a line of its own. It spans the width of the surface, and it is as tall as the tallest operation on it. `rotation` is 0 or 180, the upside down printing of `ESC {` at the moment the line was committed. |
 | `page` | `y`, `height`, `areas` | A page of page mode as it reaches the paper, one block of the paper width. |
 | `feed` | `y`, `height` | Rows the paper advanced without printing: an empty line, the feed of `ESC J` and `ESC d` beyond the height of the line, a Star raster move. |
 | `cut` | `y`, `value` | The paper is cut between row `y - 1` and row `y`. `full` or `partial`. |
@@ -78,6 +80,8 @@ Inside a line. `x` is from the left edge of the surface, `y` from the top of the
 | `scale` | `{x, y}`, 1 to 8. |
 | `style` | `{bold, underline, upperline, invert}`. `bold` is the glyph a second time one glyph dot to the right, which is `scale.x` paper dots, before the underline and the inversion; `underline` and `upperline` are 0, 1 or 2, the thickness in paper dots of a line along the bottom or the top of the scaled cell over its whole width, never scaled; `invert` is the cell black and the glyph white. A cell that is inverted or turned is not underlined and not upperlined. |
 | `rotation` | 0 or 90: the rotation of `ESC V`, a quarter turn clockwise of the unturned scaled cell about its top left corner, then placed so that the turned box is `x`, `y`, `width`, `height`. |
+
+No operation is taller than the line box it is on, or reaches below it: the height of a line box is the height of the tallest thing on it. A consumer may rely on that, and the two of this package do, in two different ways: the bitmap back-end composes a line into a bitmap of `height` rows and cuts what does not fit, and the SVG writer clips a line to the width of its surface and to nothing else. A list built by hand that breaks the rule is drawn differently by the two.
 
 An operation can start inside the surface and end past its right edge: the human readable text of a barcode is centred under the bars and is not shortened when it is wider than the paper, and a cell that a position command put near the edge is not moved back. A consumer clips a line to the width of its surface, the width of the paper for a line of the paper and the logical width of an area for a line of a page, which is what the line bitmap of the renderer does. Nothing is ever clipped at the left, `x` is never negative.
 
@@ -143,6 +147,6 @@ The barcode below it, the tenth entry, is one line box of 88 dots: 30 rectangles
 
 ## Versioning
 
-`version` is 1. A field or a type that is added does not change it and a consumer ignores what it does not know; a change in the meaning of an existing field does. `rasterize()` throws on a version it does not know.
+`version` is 1. A field or a type that is added does not change it and a consumer ignores what it does not know; a change in the meaning of an existing field does. `rasterize()` and `toSvg()` accept version 1 and throw on any other.
 
 The golden lists next to the fixtures, `test/fixtures/esc-pos/receipt.layout.json` and four others, freeze the format the way the PBM files freeze the dots.

@@ -106,6 +106,7 @@ bytes ──▶ parser ──▶ layout engine ──▶ sink ──▶ items
 - **Sink.** Where the boxes go, attached per stream. `src/backends/bitmap.js` draws them: the cells from the packed font with a cache, the rectangles filled, the images blitted, the line turned when it is upside down, the rows accumulated and cut into image items on the rules below. `src/backends/collector.js` keeps them instead and returns the display list of `layout()`. The sink interface is internal: `line(entry)`, `page(entry)`, `feed(entry)`, `command(entry)`, `end()` and `discard()`.
 - **Painter.** `src/painter.js` is the wiring of the two: it owns an engine with a bitmap back-end and is the interface both parsers talk to, so the split changed nothing they see.
 - **Items.** The output stream, see [Output contract](#output-contract). The other output is the [display list](#the-display-list).
+- **SVG.** `src/svg.js` is a sub-entry of the package, `@point-of-sale/receipt-printer-renderer/svg`, and a third consumer of the display list next to the two back-ends: `toSvg(layout, options)` writes one SVG document of a list, see [SVG output](#svg-output). It is an entry of its own because it carries the glyph outlines of `generated/outlines.js`, which nothing else imports.
 
 Repository layout, mirroring ReceiptPrinterEncoder:
 
@@ -130,7 +131,11 @@ src/
     code128.js ean.js upc.js code39.js itf.js codabar.js code93.js
   formats/
     image-data.js pbm.js png.js stitch.js
+  svg.js                        entry of the SVG sub-entry, toSvg()
+  svg-umd.js                    entry of its UMD build, the named exports as one object
   svg/
+    writer.js                   the display list as an SVG document: the defs, the lines, the cells, the pages
+    png.js                      a PNG of stored deflate blocks, so that the writer stays synchronous
     trace.js                    a 1-bit bitmap as the rectangles of a path, for the outlines and the SVG output
 data/
   fonts/                        the outline font the bitmap fonts are rasterized from, and its licence
@@ -159,6 +164,8 @@ import { EscPosRenderer, StarPrntRenderer, toImageData, toPbm, toPng } from '@po
 ```
 
 The UMD build exposes a `ReceiptPrinterRenderer` global that is the class itself, so `new ReceiptPrinterRenderer({ ... })` works from a script tag, exactly as it does for the encoder. A UMD bundle cannot have a default and named exports at the same time, its global would be an object with a `default` property, so the UMD build has its own entry, `src/umd.js`, which exports the class alone, and the two renderers and the four helpers are static properties of the class as well as named exports.
+
+The SVG writer is a second entry with four builds of its own, `dist/receipt-printer-renderer-svg.{mjs,cjs,esm.js,umd.js}` and a declaration bundle next to them, and `./svg` in the `exports` map with the same conditions as `.`. Its UMD global is `ReceiptPrinterRendererSvg`, an object with `toSvg` on it rather than the function itself, so that the entry has room for whatever it gains later; its entry is `src/svg-umd.js` for the same reason the main one has `src/umd.js`. `test/umd/check.js` loads both bundles in one context and asserts that the outlines are in the second one and in neither build of the first.
 
 <br>
 
@@ -228,6 +235,26 @@ const items = rasterize(layout, {commands: ['cut']});   // the same items render
 The list is the engine with a collector attached instead of the bitmap back-end, so it is the same layout the render takes, and `rasterize()` is the same back-end fed from a finished list: `rasterize(layout(bytes))` equals `render(bytes)` on every fixture, which `test/rasterize.js` proves under every option combination. It is not filtered by the `commands` option: every command is in it. The commands do reach the engine, because a cut or a pulse the printer performs takes the paper in front of it away, so the print head stands at the bottom of that paper afterwards and a reverse feed cannot move above it. The height of a list is therefore the height of the paper of a render with the same options, for every fixture.
 
 The list is public because a consumer outside this package is the reason to have one: the SVG writer of the package, a PDF writer some day, a preview or a debugging view. [display-list.md](display-list.md) is the reference page, with the entries, the operations, the page areas and a worked example, and `test/fixtures/**/*.layout.json` freezes the format the way the PBM files freeze the dots. `version` is 1; a field that is added does not change it, a change in the meaning of an existing field does.
+
+<br>
+
+## SVG output
+
+`toSvg(layout, options)` of the `/svg` sub-entry writes one SVG document of a display list, synchronously, as a string. It reads version 1 of the list and throws on any other. The options are `units`, `'dots'` by default and `'mm'`, `'pt'` or `'px'` worked out from the `dpi` of the list for the width and the height of the document, the `viewBox` staying dots; `cutMarker`, off; `background`, `'#fff'` or `null` for a transparent paper; and `ink`, `'#000'`. The document is the paper of the list, with one exception: a list of no height, a stream that printed nothing, becomes a document of one blank row, because a document of no height is refused by a rasterizer and drawn as nothing by a browser.
+
+The document is a `<defs>` that holds one `<path>` per distinct glyph of the receipt and every `clipPath` the document refers to, the paper, the cells and the print areas, then one `<g>` per line entry and one per page entry, in the order the list has them:
+
+- **A line** is `translate(0 y)`, or `translate(W y+h) rotate(180)` when it was printed upside down, clipped to the paper by one `clipPath` that every line shares, because an operation may run past the right edge of its surface and the line bitmap of the renderer clips it.
+- **A text cell** is a `<use>` of the glyph at the position of the scaled glyph box in the cell, with a second one a glyph dot to the right for bold, a `<rect>` of the cell before it when it is inverted and the glyph in the colour of the paper, and a `<rect>` for an underline or an upperline, which neither an inverted nor a turned cell gets. Every glyph is clipped to its scaled cell, the overstrike included: a path is not clipped by anything and 93 of the 704 glyphs of the face paint outside the 12 by 24 cell, so an unclipped glyph puts ink where the printer has none. The clip is written in the coordinate system of the element, where it is the same rectangle whatever size the cell is drawn at, so a handful of clip paths serve a whole document. A cell turned by `ESC V` is a group of `translate(x+h0 y) rotate(90)` around the same pieces.
+- **The glyphs** are the outlines of `generated/outlines.js`, in tenths of a dot, placed with a `scale(.1)` on the definition: font A directly, font B as the same path at two thirds unless the generator gave the glyph an entry of its own, a box drawing character from the box set of its cell in whole dots, a glyph the stream downloaded as the rectangles its bitmap traces into, written where it is used, and a box drawing character in a cell the outlines have no set for traced at write time from the bitmap font, which is the only thing the writer needs a font for.
+- **The rectangles** of a line, the bars of a barcode and the modules of a symbol, are one `<path>` with `shape-rendering="crispEdges"` per run of them.
+- **An image** is an `<image>` of a PNG with `image-rendering="pixelated"`, one dot on one dot. The PNG is written by `src/svg/png.js` with stored deflate blocks, which shares its scanlines, its chunks and its CRC with `src/formats/png.js` and needs no `CompressionStream`, so the writer is synchronous. It is black on white and takes neither the ink colour nor a transparent background.
+- **A page** is a group per print area, clipped to the intersection of the area and the page, since an area can be larger than the page it stands on, and turned by the print direction of the area: `translate(ax ay)`, `translate(ax ay+ah) rotate(-90)`, `translate(ax+aw ay+ah) rotate(180)` and `translate(ax+aw ay) rotate(90)` for the directions 0 to 3, which is the mapping of the display list.
+- **A cut** is a dashed `<line>` when `cutMarker` is on, and `feed`, `pulse` and `unknown` produce nothing at all.
+
+Two things in the document paint white where a printer only ever adds ink, and both of them need a reverse feed to reach: an inverted cell writes its glyph in the colour of the paper, and an image writes its white dots as white, so an inverted cell or a raster image that a later entry puts over a printed line erases what is under it in the document and overprints it on the paper. Nothing a stream does short of that reaches it, and a list a renderer produced has it nowhere.
+
+The text is the outlines of the same face the bitmap fonts were rasterized from, so the vector output and the paper differ at the edges of a stroke and nowhere else: `test/svg.js` renders every fixture with resvg, a dev dependency, and asserts that the rectangles and the images agree dot for dot and that the whole paper agrees to at least 0.98. The contact sheet shows the vector output of every external fixture next to the render with the same number.
 
 <br>
 
@@ -575,6 +602,7 @@ Separate named exports, so that a driver that only needs the items does not pull
 | `toPbm(bitmap)` | A PBM P4 file as a `Uint8Array`. The header is two lines, the body is the bitmap data as is. |
 | `toPng(bitmap)` | A PNG file as a `Uint8Array`, 1 bit grayscale. Compression through the platform's `CompressionStream`, so the helper is async and works in browsers and Node 18 and up without a zlib dependency. |
 | `stitch(items, options)` | Joins the image items of a stream into one bitmap for previews, expanding feed items to white rows and drawing a dashed line at each cut. |
+| `toSvg(layout, options)` | An SVG document of a display list, as a string, from the `/svg` sub-entry. See [SVG output](#svg-output). It is the one helper that takes a list rather than a bitmap, and the one that is not in the main entry. |
 
 <br>
 

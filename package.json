@@ -4,14 +4,26 @@
     "description": "Render ESC/POS commands created by ReceiptPrinterEncoder to 1-bit images, for printers that only support graphics",
     "type": "module",
     "exports": {
-        "types": "./dist/receipt-printer-renderer.d.ts",
-        "browser": {
-            "import": "./dist/receipt-printer-renderer.esm.js",
-            "require": "./dist/receipt-printer-renderer.umd.js",
-            "script": "./dist/receipt-printer-renderer.umd.js"
+        ".": {
+            "types": "./dist/receipt-printer-renderer.d.ts",
+            "browser": {
+                "import": "./dist/receipt-printer-renderer.esm.js",
+                "require": "./dist/receipt-printer-renderer.umd.js",
+                "script": "./dist/receipt-printer-renderer.umd.js"
+            },
+            "import": "./dist/receipt-printer-renderer.mjs",
+            "require": "./dist/receipt-printer-renderer.cjs"
         },
-        "import": "./dist/receipt-printer-renderer.mjs",
-        "require": "./dist/receipt-printer-renderer.cjs"
+        "./svg": {
+            "types": "./dist/receipt-printer-renderer-svg.d.ts",
+            "browser": {
+                "import": "./dist/receipt-printer-renderer-svg.esm.js",
+                "require": "./dist/receipt-printer-renderer-svg.umd.js",
+                "script": "./dist/receipt-printer-renderer-svg.umd.js"
+            },
+            "import": "./dist/receipt-printer-renderer-svg.mjs",
+            "require": "./dist/receipt-printer-renderer-svg.cjs"
+        }
     },
     "main": "dist/receipt-printer-renderer.cjs",
     "module": "dist/receipt-printer-renderer.mjs",
@@ -62,6 +74,7 @@
         "@point-of-sale/webbluetooth-receipt-printer": "^2.1.0",
         "@point-of-sale/webserial-receipt-printer": "^2.0.0",
         "@point-of-sale/webusb-receipt-printer": "^2.1.0",
+        "@resvg/resvg-wasm": "2.6.2",
         "@rollup/plugin-commonjs": "^24.1.0",
         "@rollup/plugin-node-resolve": "^15.0.2",
         "@rollup/plugin-terser": "^0.4.1",

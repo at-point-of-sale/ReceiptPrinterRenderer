@@ -240,6 +240,17 @@
  */
 
 /**
+ * How an SVG document of the sub-entry looks. The viewBox is always in dots,
+ * whatever the units of the width and the height are.
+ *
+ * @typedef {object} SvgOptions
+ * @property {'dots'|'mm'|'pt'|'px'} [units]   Units of the width and the height of the document, dots by default
+ * @property {boolean} [cutMarker]             Draw a dashed line at every cut, off by default
+ * @property {string|null} [background]        Colour of the paper, '#fff' by default, null for a transparent paper
+ * @property {string} [ink]                    Colour of the ink, '#000' by default
+ */
+
+/**
  * @typedef {object} RasterizeOptions
  * @property {RenderCommand[]} [commands]          Command types that appear in the output, the rest is dropped
  * @property {number} [maxHeight]                  Maximum height of an image item, taller segments are split

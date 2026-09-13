@@ -445,6 +445,47 @@ export function inkRows(bitmap) {
 }
 
 /**
+ * The dot for dot agreement between two renders of the same paper: the fraction
+ * of the dots of the larger of the two that are the same in both, with the dots
+ * of one that the other does not have counted as a difference.
+ *
+ * It is the measure of the SVG writer, section 4 of the SVG plan, where the two
+ * renders are the same receipt at the same size: an outline filled by a
+ * rasterizer and a bitmap made with the 0.45 coverage rule differ at the edges
+ * of a stroke and nowhere else, so the number is the drift of the two and not a
+ * comparison of two renderers. The coarse metric below is what a reference
+ * render of another renderer and another width is compared with.
+ *
+ * @param  {Bitmap}   ours    One render
+ * @param  {Bitmap}   other   The other render, at the same size
+ * @return {object}           The fraction that agrees, and the dots of each that the other misses
+ */
+export function dotAgreement(ours, other) {
+  const width = Math.max(ours.width, other.width);
+  const height = Math.max(ours.height, other.height);
+
+  let missing = 0;
+  let extra = 0;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const ink = x < ours.width && y < ours.height && Bitmap.getPixel(ours, x, y);
+      const theirs = x < other.width && y < other.height && Bitmap.getPixel(other, x, y);
+
+      if (ink && !theirs) {
+        missing++;
+      } else if (theirs && !ink) {
+        extra++;
+      }
+    }
+  }
+
+  const total = width * height;
+
+  return {agreement: total ? (total - missing - extra) / total : 1, missing, extra, total};
+}
+
+/**
  * The coarse agreement between our render and a reference render, the metric of
  * section 16b: the reference is scaled to our width, and what is compared is
  * the number of rows that carry ink in both and the relative difference of the

@@ -14,13 +14,16 @@ import {fileURLToPath, pathToFileURL} from 'node:url';
     with the renderers and the image format helpers attached to it.
 */
 
-const bundle = path.join(
-    path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'dist', 'receipt-printer-renderer.umd.js',
-);
+const dist = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'dist');
 
-if (!fs.existsSync(bundle)) {
-  console.error('No UMD build found, run npm run build first');
-  process.exit(1);
+const bundle = path.join(dist, 'receipt-printer-renderer.umd.js');
+const svgBundle = path.join(dist, 'receipt-printer-renderer-svg.umd.js');
+
+for (const file of [bundle, svgBundle]) {
+  if (!fs.existsSync(file)) {
+    console.error('No UMD build found, run npm run build first');
+    process.exit(1);
+  }
 }
 
 /* A script tag has no exports, no module and no define, so the bundle falls
@@ -33,7 +36,11 @@ if (!fs.existsSync(bundle)) {
 
 const context = vm.createContext({console, TextDecoder, TextEncoder, atob, btoa, URL, structuredClone});
 
+/* Both bundles go into the one context, the way two script tags load them on
+   one page: the renderer lays a stream out and the writer draws the list */
+
 vm.runInContext(fs.readFileSync(bundle, 'utf8'), context, {filename: 'receipt-printer-renderer.umd.js'});
+vm.runInContext(fs.readFileSync(svgBundle, 'utf8'), context, {filename: 'receipt-printer-renderer-svg.umd.js'});
 
 const ReceiptPrinterRenderer = context.ReceiptPrinterRenderer;
 
@@ -106,6 +113,39 @@ assert.throws(() => new ReceiptPrinterRenderer({language: 'meow', width: 576}), 
   assert.equal(Array.from(drawn[0].data).join(','), Array.from(items[0].data).join(','));
 }
 
+/* The SVG sub-entry, loaded from a second script tag, draws the list the main
+   global made */
+
+{
+  const ReceiptPrinterRendererSvg = context.ReceiptPrinterRendererSvg;
+
+  assert.equal(typeof ReceiptPrinterRendererSvg, 'object', 'the SVG global is an object of exports');
+  assert.equal(typeof ReceiptPrinterRendererSvg.toSvg, 'function', 'toSvg is on the SVG global');
+
+  const renderer = new ReceiptPrinterRenderer({language: 'esc-pos', width: 576, codepageMapping: 'epson'});
+  const svg = ReceiptPrinterRendererSvg.toSvg(renderer.layout(new Uint8Array([0x1b, 0x40, 0x41, 0x0a])));
+
+  assert.ok(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg" width="576" height="30" '));
+  assert.ok(svg.includes('viewBox="0 0 576 30"'), 'the viewBox is the paper in dots');
+  assert.ok(svg.includes('<path id="a41"'), 'the A of the stream is defined as a path');
+  assert.ok(svg.includes('<use href="#a41"'), 'and drawn once');
+  assert.ok(svg.trimEnd().endsWith('</svg>'));
+
+  /* And the outlines are in that bundle and in no other one: a driver that
+     renders images for a printer must not carry 344 kB of glyph paths. The
+     needle is the path of the capital A, which nothing else in the package
+     holds */
+
+  const needle = /<path id="a41" d="([^"]+)"/.exec(svg)[1].slice(0, 24);
+
+  assert.ok(fs.readFileSync(svgBundle, 'utf8').includes(needle), 'the SVG bundle holds the outlines');
+  assert.ok(!fs.readFileSync(bundle, 'utf8').includes(needle), 'the main bundle holds none of them');
+  assert.ok(
+      !fs.readFileSync(path.join(dist, 'receipt-printer-renderer.esm.js'), 'utf8').includes(needle),
+      'and neither does the module build',
+  );
+}
+
 /* And it draws the same dots as the module build of the same sources, text
    included, which is the check that a bundle that decodes nothing would fail */
 
@@ -152,5 +192,5 @@ assert.throws(() => new ReceiptPrinterRenderer({language: 'meow', width: 576}), 
 
 console.log(
     'UMD global is ReceiptPrinterRenderer, renders and lays out esc-pos, star-prnt, star-line and star-graphics, ' +
-    'and draws the dots of the module build',
+    'draws the dots of the module build, and ReceiptPrinterRendererSvg writes the SVG of a list it made',
 );

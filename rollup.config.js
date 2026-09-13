@@ -60,5 +60,59 @@ export default [
 		plugins: [
 			dts()
 		]
+	},
+
+	// The SVG sub-entry, @point-of-sale/receipt-printer-renderer/svg, which
+	// carries the glyph outlines and is built on its own so that a driver that
+	// renders images never loads them. Its UMD global is an object with toSvg,
+	// not a function, so that the entry has room for whatever it gains later
+	{
+		input: 'src/svg-umd.js',
+		output: {
+			name: 'ReceiptPrinterRendererSvg',
+			file: 'dist/receipt-printer-renderer-svg.umd.js',
+			sourcemap: true,
+			exports: 'named',
+			format: 'umd'
+		},
+		plugins: [
+			resolve({ browser: true }),
+			commonjs(),
+			terser()
+		]
+	},
+
+	{
+		input: 'src/svg.js',
+		output: {
+			file: 'dist/receipt-printer-renderer-svg.esm.js',
+			sourcemap: true,
+			exports: 'named',
+			format: 'es'
+		},
+		plugins: [
+			resolve({ browser: true }),
+			commonjs(),
+			terser()
+		]
+	},
+
+	{
+		input: 'src/svg.js',
+		output: [
+			{ file: 'dist/receipt-printer-renderer-svg.cjs', exports: 'named', format: 'cjs' },
+			{ file: 'dist/receipt-printer-renderer-svg.mjs', exports: 'named', format: 'es' }
+		]
+	},
+
+	{
+		input: 'dist/tmp/src/svg.d.ts',
+		output: {
+			file: 'dist/receipt-printer-renderer-svg.d.ts',
+			format: 'es'
+		},
+		plugins: [
+			dts()
+		]
 	}
 ];
