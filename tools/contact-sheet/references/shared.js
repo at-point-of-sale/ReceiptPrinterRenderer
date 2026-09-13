@@ -438,6 +438,36 @@ export function scaleTo(bitmap, width) {
 }
 
 /**
+ * A rectangle of a bitmap as a bitmap of its own, which is how a reference
+ * render that draws margins around its paper is cut down to the paper before
+ * it is compared with ours. The rectangle is clipped to the bitmap.
+ *
+ * @param  {Bitmap}   bitmap   The bitmap
+ * @param  {number}   x        Left edge of the rectangle
+ * @param  {number}   y        Top edge of the rectangle
+ * @param  {number}   width    Width of the rectangle
+ * @param  {number}   height   Height of the rectangle
+ * @return {Bitmap}            The rectangle
+ */
+export function crop(bitmap, x, y, width, height) {
+  const left = Math.max(0, x);
+  const top = Math.max(0, y);
+  const right = Math.min(bitmap.width, x + width);
+  const bottom = Math.min(bitmap.height, y + height);
+  const result = Bitmap.create(Math.max(0, right - left), Math.max(0, bottom - top));
+
+  for (let row = top; row < bottom; row++) {
+    for (let column = left; column < right; column++) {
+      if (Bitmap.getPixel(bitmap, column, row)) {
+        Bitmap.setPixel(result, column - left, row - top, 1);
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
  * The number of rows of a bitmap that carry any ink
  *
  * @param  {Bitmap}   bitmap   The bitmap

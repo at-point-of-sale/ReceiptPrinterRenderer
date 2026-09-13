@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import {references, root, locate, run, unavailable, outOfScope, fromPng} from './shared.js';
+import {toPng} from '../../../src/formats/png.js';
+import {references, root, locate, run, unavailable, outOfScope, fromPng, crop} from './shared.js';
 
 /*
     thermal as a reference renderer, section 16b.
@@ -34,7 +35,25 @@ import {references, root, locate, run, unavailable, outOfScope, fromPng} from '.
     thermal renders one image for the whole stream, cuts included, so its render
     needs no stacking. It writes RGB, which the PNG reader of shared.js reduces
     to ink.
+
+    Its paper is not configurable from outside: Context::default() of
+    thermal_parser fixes a 3.2 inch canvas at 203 dots per inch with a margin
+    of 0.1 inch on either side and three times that above the paper, 649 dots
+    wide with a print area of 609 that starts 60 rows down, and the renderer
+    keeps that context to itself. So the render is cropped to the print area
+    here, the 20 dots of margin cut from both sides and the 60 rows from the
+    top, before it is compared with our paper and shown on the sheet: the
+    agreement metric then scales thermal's 609 dot print area to our paper
+    width instead of scaling its margins along with it, the height it compares
+    is the paper's and not the paper plus a margin, and the columns of the
+    sheet line up. There is no margin below the paper.
 */
+
+/* thermal's margins in dots, 0.1 inch at 203 dots per inch on either side
+   and three times that above, the render_area of its default context */
+
+const MARGIN = Math.floor(203 * 0.1);
+const TOP = MARGIN * 3;
 
 export const name = 'thermal';
 
@@ -94,6 +113,16 @@ export async function reference(fixture, target) {
     );
   }
 
+  /* The print area of the canvas, without thermal's margins, is what is
+     compared and shown; the cropped image replaces thermal's own file */
+
+  const canvas = await fromPng(new Uint8Array(fs.readFileSync(path.join(target.directory, file))));
+  const bitmap = crop(canvas, MARGIN, TOP, canvas.width - 2 * MARGIN, canvas.height - TOP);
+
+  fs.writeFileSync(path.join(target.directory, file), await toPng(bitmap));
+
+  const errors = result.stderr.trim() ? `reported ${result.stderr.trim().split('\n').length} errors` : '';
+
   return {
     tool: name,
     version,
@@ -102,8 +131,8 @@ export async function reference(fixture, target) {
     kind: 'image',
     file: path.join(target.prefix, file),
     page: path.join(target.prefix, page),
-    bitmap: await fromPng(new Uint8Array(fs.readFileSync(path.join(target.directory, file)))),
-    note: result.stderr.trim() ? `reported ${result.stderr.trim().split('\n').length} errors` : '',
+    bitmap,
+    note: [`cropped to its print area from a ${canvas.width} by ${canvas.height} canvas`, errors].filter(Boolean).join(', '),
     command,
   };
 }

@@ -3789,7 +3789,11 @@ images:
 - **thermal disagrees everywhere, and the metric says less about it than about
   the measurement.** It renders a wider paper than the print head, 649 dots for
   an 80 mm receipt, with its own font and its own line height, so scaling it to
-  our width moves every row; the median of 36% is mostly that. Where it is
+  our width moves every row; the median of 36% is mostly that. (Since
+  2026-09-13 the module crops thermal's render to its print area first, the 20
+  dot margins on either side and the 60 rows above the paper that its default
+  context adds, so 609 dots are scaled to our width rather than 649 and the
+  height it compares is the paper's; the line height stays its own.) Where it is
   really different it is because it drops content: on
   `receiptline/guest-escpos-32` it prints three lines and 156 dots against 528
   here, after reporting `GS a`, `FS ( A`, `ESC SP`, `FS S` and `FS .` as unknown
