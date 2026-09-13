@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import {unavailable, fromPng} from './shared.js';
+import {unavailable, fromPng, notApplicable} from './shared.js';
 
 /*
     receiptio as a reference rendering, section 16f.
@@ -101,7 +101,7 @@ export async function reference(fixture, target) {
   const source = document(fixture);
 
   if (!source) {
-    return unavailable(name, version, 'the fixture is not a receiptline document');
+    return notApplicable(name, version, 'the fixture is not a receiptline document');
   }
 
   const key = `${source.document}-${source.columns}`;

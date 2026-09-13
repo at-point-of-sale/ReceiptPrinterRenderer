@@ -141,7 +141,13 @@ async function sheet(library, rows, bytes) {
       prefix: library,
     });
 
-    const cells = found.map((reference) => cell(reference, paper, name));
+    /* A tool that does not apply to a fixture, receiptio for a stream that did
+       not come from a receiptline document, gets no cell at all; a tool that
+       is missing on this machine gets a "not available" one */
+
+    const cells = found
+        .filter((reference) => reference.applicable !== false)
+        .map((reference) => cell(reference, paper, name));
 
     for (const entry of cells) {
       if (entry.row) {

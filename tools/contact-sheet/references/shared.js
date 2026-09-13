@@ -37,6 +37,7 @@ import Bitmap from '../../../src/bitmap.js';
  * @property {string}       tool        Name of the tool
  * @property {string}       version     Version or commit of the tool
  * @property {boolean}      available   Whether the tool ran
+ * @property {boolean}      [applicable] False when the tool has nothing to say about this fixture at all, and the sheet leaves its cell out
  * @property {string}       reason      Why it did not run or did not produce a render
  * @property {string}       [file]      Path of what it wrote, relative to the contact sheet
  * @property {string}       [kind]      'image' or 'html'
@@ -62,6 +63,21 @@ export {root};
  */
 export function unavailable(tool, version, reason) {
   return {tool, version, available: false, reason};
+}
+
+/**
+ * A reference for a fixture the tool has nothing to say about, which is not
+ * the same as a tool that is missing: the sheet shows a missing tool as a
+ * "not available" cell and leaves the cell of an inapplicable one out, so a
+ * fixture that is not a receiptline document has no receiptio column.
+ *
+ * @param  {string}   tool      Name of the tool
+ * @param  {string}   version   Version or commit of the tool
+ * @param  {string}   reason    Why the tool does not apply
+ * @return {Reference}          The reference
+ */
+export function notApplicable(tool, version, reason) {
+  return {tool, version, available: false, applicable: false, reason};
 }
 
 /**
