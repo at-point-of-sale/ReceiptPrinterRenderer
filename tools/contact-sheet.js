@@ -15,11 +15,11 @@ import {drivers, scripts, styles, header, script} from './contact-sheet/printing
 
     It renders every fixture of test/fixtures/external to a PNG and writes an
     index.html next to them that lists every fixture with its provenance and its
-    render, and for receiptline the SVG preview of the same document next to it,
-    which is what the golden images were reviewed against.
+    render.
 
-    Next to our render it shows what other renderers make of the same bytes,
-    where they are installed on this machine: thermal and ESCPost, both of which
+    Next to our render, in a grid of five equal columns, it shows our own SVG
+    output rasterized by resvg and what other renderers make of the same bytes,
+    where they are installed on this machine: ESCPost and thermal, both of which
     produce an image, and receiptio, which renders the document a receiptline
     fixture was made from rather than its bytes, see section 16f. Every tool is
     a module of tools/contact-sheet/references, and a tool that is not there is
@@ -78,34 +78,6 @@ function percentage(value) {
 }
 
 /**
- * The SVG previews of a library, keyed by the name of the fixture, for the
- * libraries that have one. Only receiptline does, and its capture script knows
- * how to make them.
- *
- * @param  {string}   library   Name of the library
- * @return {Promise<object>}    The previews, empty when the library has none
- */
-async function previews(library) {
-  if (library !== 'receiptline') {
-    return {};
-  }
-
-  try {
-    const capture = await import('./external/receiptline/capture.js');
-    const result = {};
-
-    for (const item of capture.captures()) {
-      result[item.name] = capture.preview(item);
-    }
-
-    return result;
-  } catch (error) {
-    console.log(`  no previews: ${error.message}`);
-    return {};
-  }
-}
-
-/**
  * One reference render as a figure, and its row of the agreement
  * table
  *
@@ -147,8 +119,6 @@ function cell(reference, paper, name) {
  * @return {Promise<string>}      The HTML
  */
 async function sheet(library, rows, bytes) {
-  const preview = await previews(library);
-
   let html = `<div class="library"><h2 id="${escape(library)}">${escape(library)}</h2>\n`;
 
   for (const name of fixtures(library)) {
@@ -160,10 +130,6 @@ async function sheet(library, rows, bytes) {
 
     fs.mkdirSync(path.join(target, library), {recursive: true});
     fs.writeFileSync(path.join(target, file), await toPng(paper));
-
-    if (preview[name]) {
-      fs.writeFileSync(path.join(target, library, `${name}.svg`), preview[name]);
-    }
 
     const found = await references({
       library,
@@ -201,11 +167,9 @@ async function sheet(library, rows, bytes) {
   <div class="fixture">
     <figure><figcaption>render, ${paper.width} by ${paper.height}</figcaption>
       <img src="${escape(file)}" alt="${escape(name)}"></figure>
-    ${preview[name] ? `<figure><figcaption>receiptline preview</figcaption>
-      <img src="${escape(path.join(library, `${name}.svg`))}" alt="${escape(name)} preview"></figure>` : ''}
     ${cells.map((entry) => entry.html).join('\n    ')}
-    <table>${provenance}</table>
   </div>
+  <table class="provenance">${provenance}</table>
   ${commands ? `<details><summary>the reference invocations</summary><table>${commands}</table></details>` : ''}
   <div class="print">
     <button data-fixture="${escape(key)}" disabled>Print</button>
@@ -298,16 +262,17 @@ async function main() {
   h2 { font-size: 1.1rem; margin-top: 2.5rem; border-bottom: 1px solid #ccc; }
   h3 { font-size: 1rem; margin: 0 0 .5rem; font-family: ui-monospace, monospace; }
   section { background: #fff; border: 1px solid #ddd; padding: 1rem; margin: 1rem 0; }
-  .fixture { display: flex; gap: 1.5rem; align-items: flex-start; flex-wrap: wrap; }
-  figure { margin: 0; }
+  .fixture { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1.5rem; align-items: start; }
+  figure { margin: 0; min-width: 0; }
   figcaption { color: #666; margin-bottom: .25rem; }
-  img { background: #fff; border: 1px solid #eee; image-rendering: pixelated; max-width: 600px; }
+  img { display: block; width: 100%; height: auto; background: #fff; border: 1px solid #eee; box-sizing: border-box; }
+  .provenance { margin-top: 1rem; }
   table { border-collapse: collapse; }
   th { text-align: left; padding: 0 .75rem .1rem 0; font-weight: 600; vertical-align: top; white-space: nowrap; }
   td { padding: 0 0 .1rem; font-family: ui-monospace, monospace; }
   details { margin-top: .75rem; color: #666; }
   details td { padding-right: .75rem; white-space: pre-wrap; }
-  .unavailable { border: 1px dashed #ccc; color: #888; padding: 1rem; width: 14rem; background: #fafafa; }
+  .unavailable { border: 1px dashed #ccc; color: #888; padding: 1rem; background: #fafafa; }
   .unavailable span { color: #aaa; }
   .agreement { background: #fff; border: 1px solid #ddd; margin: 1rem 0; }
   .agreement th, .agreement td { padding: .2rem .75rem; border-bottom: 1px solid #eee; }
