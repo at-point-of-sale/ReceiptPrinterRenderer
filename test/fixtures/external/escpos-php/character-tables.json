@@ -12,5 +12,5 @@
   "codepageMapping": "epson",
   "captured": "2026-09-12",
   "unknown": 0,
-  "notes": "Exercises ESC t codepage switching, every byte of the first codepages. The example prints to a FilePrintConnector on php://stdout; the default capability profile names no paper, so the fixture is rendered on the 80 mm paper of the other fixtures. Reviewed as a PNG against what the example prints."
+  "notes": "Exercises ESC t codepage switching, every byte of the first codepages. The example prints to a FilePrintConnector on php://stdout; the default capability profile names no paper, so the fixture is rendered on the 80 mm paper of the other fixtures. Reviewed as a PNG against what the example prints. Re-rendered on 2026-09-13, when the katakana codepage gained its glyphs from the second source of tools/generate.js and the glyphs that are wider than the face were fitted into their cell: the diff against the previous golden was reviewed by eye and holds only those two kinds of change, kana where the fallback box stood and a fitted glyph where a clipped left half stood."
 }

@@ -301,6 +301,31 @@ const receipts = {
         'so the encoder wraps it over several lines of text.',
       ),
 
+  /*
+      The half width katakana of the katakana codepage, the sixty three
+      characters of JIS X 0201 at 0xA1 to 0xDF, in the rows of the code table
+      and then in words.
+
+      Both printer families have a katakana page, Epson at 0x01 and Star at
+      0x02, and the two tables hold exactly these characters at exactly these
+      bytes, so the two languages print the same paper. The page is selected by
+      name, because `auto` would send the kana to whatever candidate the
+      encoder is holding.
+
+      The twelve kanji and the postal mark of Epson's table are not here:
+      Star's table has none of them, so they are in the hand assembled
+      katakana-kanji fixture below, which exists in ESC/POS alone.
+  */
+
+  'katakana': (encoder, language) => encoder
+      .codepage(language === 'esc-pos' ? 'epson/katakana' : 'star/katakana')
+      .line('｡｢｣､･ｦｧｨｩｪｫｬｭｮｯ')
+      .line('ｰｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿ')
+      .line('ﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏ')
+      .line('ﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝﾞﾟ')
+      .newline()
+      .line('ｺｰﾋｰ ﾁｰｽﾞｹｰｷ ﾋﾞｰﾙ'),
+
   /* Characters from several codepages, which the encoder switches between.
      Every candidate is in both mappings, so both languages switch at the same
      place, to the same codepage, with a different number */
@@ -1154,6 +1179,30 @@ const raw = {
         FS, '.',
         FS, '!', 0x0c, FS, '-', 1, FS, 'S', 2, 2, FS, 'W', 1,
         'The parsed commands change nothing', LF,
+    ),
+  },
+
+  /*
+      The kanji of the Epson katakana page. `ESC t 1` selects it and the
+      thirteen bytes 0xF1 to 0xFD are 円 年 月 日 時 分 秒 〒 市 区 町 村 人, the
+      only characters of either katakana table that are not half width: a
+      Japanese face draws them on a full em, and the printer draws them in the
+      same 12 by 24 cell as the rest, so the rasterizer scales them to the cell,
+      see the horizontal fit in tools/rasterize.js.
+
+      This fixture exists in ESC/POS alone, because Star's katakana table has
+      none of these thirteen and no other Star page has them either. The second
+      line prints a date and a price the way a Japanese receipt writes them,
+      which is what the kanji of this page are on the printer for.
+  */
+
+  'katakana-kanji': {
+    'esc-pos': stream(
+        ESC, '@',
+        ESC, 't', 1,
+        [0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd], LF,
+        '2026', [0xf2], '9', [0xf3], '13', [0xf4], ' 12', [0xf5], '30', [0xf6], LF,
+        [0xf8], '105-0011 ', [0xfa], [0xfb], [0xfc], ' 1200', [0xf1], LF,
     ),
   },
 

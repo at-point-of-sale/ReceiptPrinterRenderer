@@ -178,6 +178,163 @@ describe('Font', function() {
       }
     });
 
+    it('should have a glyph for every code point of the katakana codepages in both fonts', function() {
+      /*
+         The half width katakana of JIS X 0201, which the second source of
+         tools/generate.js supplies, and for Epson the twelve kanji and the
+         postal mark of the same table, which no other codepage holds.
+
+         Star's table has two bytes whose code point is U+FFFD itself, the
+         entries of the codepage encoder for a position that is not a
+         character; those are the fallback by definition and are left out.
+      */
+
+      for (const encoding of ['epson/katakana', 'star/katakana']) {
+        const table = CodepageEncoder.getCodepoints(encoding, true);
+
+        for (const name of ['12x24', '8x16']) {
+          const size = Font.get(name);
+
+          for (let byte = 0x20; byte <= 0xff; byte++) {
+            const codepoint = table[byte];
+
+            if (!codepoint || codepoint === 0xfffd) {
+              continue;
+            }
+
+            assert.isTrue(
+                size.has(codepoint),
+                `${name} has no glyph for byte ${byte} of ${encoding}, code point ${codepoint}`,
+            );
+
+            assert.notDeepEqual(
+                Array.from(size.lookup(codepoint).data),
+                Array.from(size.fallback.data),
+                `${name} draws the fallback for byte ${byte} of ${encoding}, code point ${codepoint}`,
+            );
+          }
+        }
+      }
+    });
+
+    /* The twelve kanji and the postal mark of Epson's katakana table, the only
+       characters of a codepage the face draws on a full em */
+
+    const WIDER_THAN_THE_FACE = [0x5186, 0x5e74, 0x6708, 0x65e5, 0x6642, 0x5206,
+      0x79d2, 0x3012, 0x5e02, 0x533a, 0x753a, 0x6751, 0x4eba];
+
+    /**
+     * The leftmost and the rightmost column of a glyph that carry ink
+     *
+     * @param  {object}   glyph   The glyph
+     * @return {number[]}         The two columns, or null when there is no ink
+     */
+    function inkColumns(glyph) {
+      const art = toAscii(glyph);
+
+      const first = Math.min(...art.map((line) => line.indexOf('#')).filter((column) => column >= 0));
+      const last = Math.max(...art.map((line) => line.lastIndexOf('#')));
+
+      return last < 0 ? null : [first, last];
+    }
+
+    it('should fit a glyph that is wider than the face into the cell', function() {
+      /*
+         A glyph of a full em is fitted by its own advance, so the whole of it
+         is in the cell. Unfitted it keeps the scale of the face, which puts
+         its em on two cells at the left edge of this one, so the cell holds
+         its left half and the rest is clipped away: half of these would then
+         have ink against the right edge and their own right side bearing
+         nowhere, and none of them would be symmetric.
+      */
+
+      for (const [name, width] of [['12x24', 12], ['8x16', 8]]) {
+        const size = Font.get(name);
+
+        for (const codepoint of WIDER_THAN_THE_FACE) {
+          const [first, last] = inkColumns(size.lookup(codepoint));
+
+          /* The em is the cell, so the ink of a kanji, which fills most of its
+             em, covers most of the cell and keeps a side bearing on both sides */
+
+          assert.isAtMost(first, 2, `${name} starts ${codepoint.toString(16)} too far right`);
+          assert.isAtLeast(last, width - 3, `${name} ends ${codepoint.toString(16)} too far left`);
+          assert.isAtLeast(last - first + 1, width * 2 / 3,
+              `${name} draws ${codepoint.toString(16)} too narrow`);
+        }
+      }
+    });
+
+    it('should draw a symmetric glyph of a full em symmetric in its cell', function() {
+      /* 日 and 〒 are drawn symmetric about the middle of their em. A left half
+         that was clipped at the right edge of the cell cannot be symmetric,
+         so this is the fit itself and not the shape of the face */
+
+      for (const [name, width] of [['12x24', 12], ['8x16', 8]]) {
+        const size = Font.get(name);
+
+        for (const codepoint of [0x65e5, 0x3012]) {
+          const art = toAscii(size.lookup(codepoint));
+
+          assert.deepEqual(
+              art.map((line) => [...line].reverse().join('')),
+              art,
+              `${name} does not draw ${codepoint.toString(16)} symmetric in its ${width} dot cell`,
+          );
+        }
+      }
+    });
+
+    it('should draw the kanji of the katakana table the way it was reviewed', function() {
+      /* 日 of the 12 by 24 font, as the golden fixture of the katakana kanji
+         was reviewed by eye: the frame of the character with its middle bar,
+         two dots of every stroke vertically and one horizontally, which is
+         what fitting a full em into half of one does */
+
+      assert.deepEqual(toAscii(Font.get('12x24').lookup(0x65e5)), [
+        '..########..',
+        '..########..',
+        '..#......#..',
+        '..#......#..',
+        '..#......#..',
+        '..#......#..',
+        '..#......#..',
+        '..#......#..',
+        '..########..',
+        '..########..',
+        '..#......#..',
+        '..#......#..',
+        '..#......#..',
+        '..#......#..',
+        '..#......#..',
+        '..#......#..',
+        '..########..',
+        '..########..',
+        '..#......#..',
+        '..#......#..',
+        '............',
+        '............',
+        '............',
+        '............',
+      ]);
+    });
+
+    it('should draw the half width katakana inside the cell', function() {
+      /* They are half width, so one of them is one cell wide like a letter and
+         the fit above never touches them */
+
+      for (const [name, width] of [['12x24', 12], ['8x16', 8]]) {
+        const size = Font.get(name);
+
+        for (const codepoint of [0xff71, 0xff76, 0xff9d, 0xff8a, 0xff97, 0xff9f]) {
+          const [first, last] = inkColumns(size.lookup(codepoint));
+
+          assert.isAtLeast(first, 0, `${name} draws nothing for ${codepoint.toString(16)}`);
+          assert.isBelow(last, width, `${name} draws outside the cell for ${codepoint.toString(16)}`);
+        }
+      }
+    });
+
     it('should return a glyph of the size of the cell', function() {
       const glyph = font.lookup(0x41);
 

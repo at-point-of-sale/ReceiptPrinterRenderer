@@ -166,13 +166,20 @@ function generatePdf417() {
     The fallback glyph is U+FFFD when the font has it, and a hollow box drawn
     here when it does not.
 
-    The glyphs are rasterized from the outline font in data/fonts, Iosevka
-    Medium, subset by tools/subset-font.js. The face is monospaced, so it is
-    fitted by its advance width, see tools/rasterize.js: the advance of one
-    character is exactly one cell, 12 dots for font A and 8 for font B, which
-    puts the em of Iosevka, whose advance is half an em, on 24 and 16 dots, and
-    the baseline on row 18 of font A and row 12 of font B. Nothing is squeezed
-    horizontally, so the rhythm of the face survives dot for dot.
+    The glyphs are rasterized from the outline fonts in data/fonts, Iosevka
+    Medium and behind it a subset of Sarasa Mono J SemiBold for the half width
+    katakana, both subset by tools/subset-font.js; a glyph comes from the first
+    of them that has the code point. A face is monospaced, so it is fitted by
+    its advance width, see tools/rasterize.js: the advance of one character is
+    exactly one cell, 12 dots for font A and 8 for font B, which puts the em of
+    both faces, whose advance is half an em, on 24 and 16 dots, and the
+    baseline on row 18 of font A and row 12 of font B. Nothing is squeezed
+    horizontally, so the rhythm of the face survives dot for dot, with the one
+    exception of a glyph whose own advance is wider than that of the face: the
+    twelve kanji and the postal mark of the katakana codepage, and the 34
+    glyphs Iosevka draws on a full em, the em dash, the ellipsis, the arrows
+    and the shapes of the tail of cp437. Those are fitted by their own advance,
+    so that the cell holds the whole glyph instead of the left half of it.
 */
 
 /*
@@ -215,12 +222,12 @@ function generatePdf417() {
     is squeezed vertically by itself. The curves of the face are kept as they
     are, so an outline scales where the bitmap does not.
 
-    `glyphs` holds an entry for every code point of tools/codepoints.js the face
-    has, outside the box drawing range; a code point without an entry is drawn
-    with the glyph of `fallback`, as the packed font does. Font B is fitted into
-    its own 8 by 16 cell by its own metrics, which comes out as exactly two
-    thirds of font A for every glyph whose vertical squeeze is the same in both
-    cells; `glyphsB` holds the ones where it does not, in the frame of the 8 by
+    `glyphs` holds an entry for every code point of tools/codepoints.js one of
+    the sources has, outside the box drawing range; a code point without an
+    entry is drawn with the glyph of `fallback`, as the packed font does. Font
+    B is fitted into its own 8 by 16 cell by its own metrics, which comes out
+    as exactly two thirds of font A for every glyph whose vertical squeeze is
+    the same in both cells; `glyphsB` holds the ones where it does not, in the frame of the 8 by
     16 cell and in the same units, and is empty while the two cells agree.
 
     `box` holds the box drawing and block characters, U+2500 to U+259F, which
@@ -231,9 +238,23 @@ function generatePdf417() {
     A, and 9 by 17 and 9 by 24 for font B.
 */
 
-/* The outline font the glyphs are rasterized from */
+/*
+    The outline fonts the glyphs are rasterized from, in the order a glyph is
+    looked for: a glyph, its outline and its metrics come from the first source
+    that has the code point. Iosevka is the face of the renderer and covers
+    everything the codepage tables hold but the scripts listed in the design;
+    the subset of Sarasa Mono J SemiBold behind it holds the half width
+    katakana of the katakana codepage of both printer families, the twelve
+    kanji of Epson's table and the postal mark, which Iosevka has no glyph for.
+    Every source is fitted into the cell by the same rule with its own metrics,
+    see tools/rasterize.js, and tools/subset-font.js keeps the characters that
+    rule is measured on in every subset.
+*/
 
-const SOURCE = 'data/fonts/iosevka-medium-subset.ttf';
+const SOURCES = [
+  'data/fonts/iosevka-medium-subset.ttf',
+  'data/fonts/sarasa-mono-j-semibold-subset.ttf',
+];
 
 /* The fonts that are packed, in the order they appear in the output, with the
    cell they are drawn in and the row their baseline sits on */
@@ -315,49 +336,101 @@ function packFallback(font) {
 }
 
 /**
- * Rasterize the outline font in data/fonts into the format documented above
+ * The first of the sources that has a code point, which is the one the glyph,
+ * the outline and the metrics of that code point come from
  *
- * @param  {Rasterizer}   rasterizer   The outline font
- * @param  {number[]}     codepoints   The code points to draw
- * @return {object}                    The source of generated/fonts.js and the packed fonts themselves
+ * @param  {Rasterizer[]}   rasterizers   The outline fonts, in order
+ * @param  {number}         codepoint     Unicode code point
+ * @return {number}                       Index of that source, or -1 when none has it
  */
-function generateFonts(rasterizer, codepoints) {
+function sourceOf(rasterizers, codepoint) {
+  return rasterizers.findIndex((rasterizer) => rasterizer.has(codepoint));
+}
+
+/**
+ * Rasterize the outline fonts in data/fonts into the format documented above
+ *
+ * @param  {Rasterizer[]}   rasterizers   The outline fonts, in the order a glyph is looked for
+ * @param  {number[]}       codepoints    The code points to draw
+ * @return {object}                       The source of generated/fonts.js and the packed fonts themselves
+ */
+function generateFonts(rasterizers, codepoints) {
   const packed = {};
 
   let output = 'const fonts = {\n';
 
   for (const font of FONTS) {
-    const metrics = rasterizer.metrics(font);
+    /* Every source is fitted into the cell by its own metrics */
+
+    const metrics = rasterizers.map((rasterizer) => rasterizer.metrics(font));
 
     const box = (codepoint) => codepoint >= BOX_DRAWING.first && codepoint <= BOX_DRAWING.last;
 
-    const draw = (codepoint) => (box(codepoint) ? boxGlyph(codepoint, font.width, font.height) : null) ||
-      rasterizer.glyph(codepoint, font, metrics, {
-        threshold: INK_THRESHOLD,
-        samples: SAMPLES,
-        squeeze: !box(codepoint),
-      });
+    /*
+       The cell of a code point and where it came from: the dot grid of
+       tools/box-drawing.js, which is source -1, or the first source that has
+       the code point. A box drawing character the dot grid does not draw falls
+       back to the face, at the size of the face and clipped by the cell.
+    */
 
-    /* Glyph 0 is the fallback, the rest follows in code point order */
+    const draw = (codepoint) => {
+      const grid = box(codepoint) ? boxGlyph(codepoint, font.width, font.height) : null;
 
-    const fallback = draw(REPLACEMENT_CHARACTER) || packFallback(font);
+      if (grid) {
+        return {cell: grid, source: -1};
+      }
 
-    const cells = [fallback];
+      const source = sourceOf(rasterizers, codepoint);
+
+      if (source < 0) {
+        return null;
+      }
+
+      return {
+        source,
+        cell: rasterizers[source].glyph(codepoint, font, metrics[source], {
+          threshold: INK_THRESHOLD,
+          samples: SAMPLES,
+          squeeze: !box(codepoint),
+        }),
+      };
+    };
+
+    /* Glyph 0 is the fallback, the rest follows in code point order. The
+       fallback is U+FFFD of the first source that has it, which is the first
+       source, and a hollow box drawn here when no source has it */
+
+    const replacement = draw(REPLACEMENT_CHARACTER);
+
+    const cells = [replacement ? replacement.cell : packFallback(font)];
     const index = {};
+
+    /* How many glyphs each source contributed, and how many the dot grid drew,
+       for the report */
+
+    const contributed = new Array(rasterizers.length).fill(0);
+
+    let grid = 0;
 
     for (const codepoint of codepoints) {
       if (codepoint === REPLACEMENT_CHARACTER) {
         continue;
       }
 
-      const cell = draw(codepoint);
+      const glyph = draw(codepoint);
 
-      if (!cell) {
+      if (!glyph) {
         continue;
       }
 
+      if (glyph.source < 0) {
+        grid++;
+      } else {
+        contributed[glyph.source]++;
+      }
+
       index[codepoint] = cells.length;
-      cells.push(cell);
+      cells.push(glyph.cell);
     }
 
     index[REPLACEMENT_CHARACTER] = 0;
@@ -366,7 +439,9 @@ function generateFonts(rasterizer, codepoints) {
 
     process.stdout.write(
         `${font.name}: ${cells.length} glyphs of ${codepoints.length} code points, ` +
-        `em ${metrics.size} dots, cap ${metrics.cap}, descender ${metrics.descender}\n`,
+        `${contributed.join(' and ')} of them from the sources in order, ${grid} from the dot grid\n` +
+        metrics.map((fit, source) =>
+          `  ${SOURCES[source]}: em ${fit.size} dots, cap ${fit.cap}, descender ${fit.descender}\n`).join(''),
     );
 
     output += `\t'${font.name}': {\n`;
@@ -441,16 +516,16 @@ function sameContours(contours, reference, scale, tolerance) {
  * above: the same placed contours the bitmaps were filled from, written out as
  * path data, and the box drawing characters traced out of their rendered cells
  *
- * @param  {Rasterizer}   rasterizer   The outline font
- * @param  {number[]}     codepoints   The code points to draw
- * @param  {object}       packed       The packed fonts, as generateFonts made them
- * @return {string}                    Contents of generated/outlines.js
+ * @param  {Rasterizer[]}   rasterizers   The outline fonts, in the order a glyph is looked for
+ * @param  {number[]}       codepoints    The code points to draw
+ * @param  {object}         packed        The packed fonts, as generateFonts made them
+ * @return {string}                       Contents of generated/outlines.js
  */
-function generateOutlines(rasterizer, codepoints, packed) {
+function generateOutlines(rasterizers, codepoints, packed) {
   const [cellA, cellB] = FONTS;
 
-  const metricsA = rasterizer.metrics(cellA);
-  const metricsB = rasterizer.metrics(cellB);
+  const metricsA = rasterizers.map((rasterizer) => rasterizer.metrics(cellA));
+  const metricsB = rasterizers.map((rasterizer) => rasterizer.metrics(cellB));
 
   const boxed = (codepoint) => codepoint >= BOX_DRAWING.first && codepoint <= BOX_DRAWING.last;
 
@@ -467,18 +542,23 @@ function generateOutlines(rasterizer, codepoints, packed) {
       continue;
     }
 
-    const contoursA = rasterizer.contours(codepoint, cellA, metricsA, {squeeze: true});
+    const source = sourceOf(rasterizers, codepoint);
 
-    if (!contoursA) {
-      /* The face has no glyph for this code point, and neither has the packed
+    if (source < 0) {
+      /* No source has a glyph for this code point, and neither has the packed
          font: a printer draws the fallback glyph for it */
 
       continue;
     }
 
+    /* The outline of a glyph comes from the same source as its bitmap, fitted
+       into the cell by the metrics of that source */
+
+    const contoursA = rasterizers[source].contours(codepoint, cellA, metricsA[source], {squeeze: true});
+
     glyphs[codepoint] = pathData(contoursA, OUTLINE_UNITS);
 
-    const contoursB = rasterizer.contours(codepoint, cellB, metricsB, {squeeze: true});
+    const contoursB = rasterizers[source].contours(codepoint, cellB, metricsB[source], {squeeze: true});
 
     if (!sameContours(contoursB, contoursA, FONT_B_SCALE, FONT_B_TOLERANCE)) {
       glyphsB[codepoint] = pathData(contoursB, OUTLINE_UNITS);
@@ -488,7 +568,7 @@ function generateOutlines(rasterizer, codepoints, packed) {
   /* A font without U+FFFD draws a hollow box, which is dots and not an outline,
      so it is traced like a box drawing character, in the units of the glyphs */
 
-  if (!rasterizer.has(REPLACEMENT_CHARACTER)) {
+  if (sourceOf(rasterizers, REPLACEMENT_CHARACTER) < 0) {
     glyphs[REPLACEMENT_CHARACTER] = trace(
         {width: cellA.width, height: cellA.height, data: packFallback(cellA)},
         OUTLINE_UNITS,
@@ -555,13 +635,13 @@ function generateOutlines(rasterizer, codepoints, packed) {
   return output;
 }
 
-const rasterizer = new Rasterizer(SOURCE);
+const rasterizers = SOURCES.map((source) => new Rasterizer(source));
 const codepoints = usedCodepoints();
-const fonts = generateFonts(rasterizer, codepoints);
+const fonts = generateFonts(rasterizers, codepoints);
 
 fs.mkdirSync('generated', {recursive: true});
 fs.writeFileSync('generated/mapping.js', generateMappings());
 fs.writeFileSync('generated/profiles.js', generateProfiles());
 fs.writeFileSync('generated/pdf417.js', generatePdf417());
 fs.writeFileSync('generated/fonts.js', fonts.output);
-fs.writeFileSync('generated/outlines.js', generateOutlines(rasterizer, codepoints, fonts.packed));
+fs.writeFileSync('generated/outlines.js', generateOutlines(rasterizers, codepoints, fonts.packed));

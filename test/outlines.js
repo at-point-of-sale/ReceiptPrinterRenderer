@@ -28,12 +28,41 @@ import {BOX_DRAWING} from '../tools/box-drawing.js';
 
 /*
     The number of dots a filled outline may differ from its packed glyph by.
-    The worst glyph of the two fonts is 13 dots of the 288 of a 12 by 24 cell,
-    so this is the round number above it: it catches a glyph that moved, not a
-    dot that changed its mind at the coverage threshold.
+    The worst glyph of the two fonts, the four arrows below excepted, is 13 dots
+    of the 288 of a 12 by 24 cell, so this is the round number above it: it
+    catches a glyph that moved, not a dot that changed its mind at the coverage
+    threshold.
 */
 
 const TOLERANCE = 16;
+
+/*
+    The glyphs whose filled outline is not their bitmap, with the reason.
+
+    The four vertical arrows of the face are wider than the face, so they are
+    fitted by their own advance, see the fit in tools/rasterize.js. Their stem
+    is 74 of the 1000 units of the em and sits on the middle of it, so in the
+    cell it runs from 5.556 to 6.444 dots: 0.444 of each of the two columns it
+    straddles, which is under the 0.45 the threshold asks for. It is ink all
+    the same, because coverage is measured with samples and not with geometry:
+    of the eight sample columns of a dot, four fall inside the stem, which is
+    0.5. The path, written in whole tenths of a dot, runs from 5.6 to 6.4, and
+    only three of the eight fall inside it, which is 0.375, so the stem is ink
+    in the bitmap and white in the refill: the whole stem, twenty two to thirty
+    four dots of it. It is the knife edge the file above describes, at its
+    worst, and not a glyph that moved; the arrow head, which is what the fit
+    gave these glyphs back, is in both.
+
+    An outline is drawn at any size and a dot is a dot, so the SVG output of
+    these four is a stem like any other. The bound is the round number above
+    the worst of the four, as the tolerance above is for the rest, and it is
+    here so that the four are named and counted rather than hidden under a
+    looser tolerance for all 780.
+*/
+
+const KNIFE_EDGE = [0x2191, 0x2193, 0x2195, 0x21a8];
+
+const KNIFE_EDGE_TOLERANCE = 40;
 
 /* The cells of the profiles, with the font a printer draws them with */
 
@@ -45,16 +74,18 @@ const CELLS = [
 
 /*
     What lies outside the 12 by 24 cell. A path is not clipped and the bitmap of
-    a glyph is, so a glyph whose ink leaves its cell, an em dash, an ellipsis, a
-    combining accent that a font gives no advance, paints outside the cell in
-    SVG unless the writer clips it, which is what Section 4 has it do. The
-    numbers are recorded here so that a regeneration that moves them is visible;
-    the list is in the notes of Section 3.
+    a glyph is, so a glyph whose ink leaves its cell, a combining accent that a
+    font gives no advance, paints outside the cell in SVG unless the writer
+    clips it, which is what Section 4 has it do. The numbers are recorded here
+    so that a regeneration that moves them is visible; the list is in the notes
+    of Section 3. They dropped from 93, 41 and 5 when the glyphs that are wider
+    than the face, the em dash and the ellipsis among them, were fitted into the
+    cell instead of clipped by it.
 */
 
 const OUTSIDE_THE_CELL = {
-  total: 93,
-  far: 41,
+  total: 59,
+  far: 7,
   whole: ['U+0300', 'U+0301', 'U+0303', 'U+0309', 'U+0323'],
 };
 
@@ -468,13 +499,14 @@ describe('Outlines', function() {
           moved++;
         }
 
-        if (dots > TOLERANCE) {
+        if (dots > (KNIFE_EDGE.includes(codepoint) ? KNIFE_EDGE_TOLERANCE : TOLERANCE)) {
           failed.push(`${name(codepoint)} by ${dots} dots`);
         }
       }
 
       report.push(`font A: ${total} dots over ${Object.keys(outlines.glyphs).length} glyphs, ` +
-        `worst ${worst}, ${moved} of them over two dots`);
+        `worst ${worst}, ${moved} of them over two dots, ` +
+        `${KNIFE_EDGE.length} of them on the knife edge`);
 
       assert.deepEqual(failed, []);
     });
@@ -515,6 +547,73 @@ describe('Outlines', function() {
       report.push(`font B: ${total} dots over ${Object.keys(outlines.glyphs).length} glyphs, ` +
         `worst ${worst}, ${moved} of them over two dots, ` +
         `${Object.keys(outlines.glyphsB).length} refitted`);
+
+      assert.deepEqual(failed, []);
+    });
+  });
+
+  describe('the glyphs of the katakana codepage', function() {
+    /* The sixty three half width katakana of JIS X 0201, which the second
+       source supplies, and the thirteen characters of Epson's table that a
+       Japanese face draws on a full em, which the horizontal fit scales into
+       the cell */
+
+    const kana = [];
+
+    for (let codepoint = 0xff61; codepoint <= 0xff9f; codepoint++) {
+      kana.push(codepoint);
+    }
+
+    const wide = [0x5186, 0x5e74, 0x6708, 0x65e5, 0x6642, 0x5206, 0x79d2,
+      0x3012, 0x5e02, 0x533a, 0x753a, 0x6751, 0x4eba];
+
+    it('should have an outline for every half width katakana', function() {
+      const missing = kana.filter((codepoint) => outlines.glyphs[codepoint] === undefined);
+
+      assert.deepEqual(missing.map(name), []);
+      assert.equal(kana.length, 63);
+    });
+
+    it('should have an outline for the thirteen characters of the wider face', function() {
+      const missing = wide.filter((codepoint) => outlines.glyphs[codepoint] === undefined);
+
+      assert.deepEqual(missing.map(name), []);
+    });
+
+    it('should keep a glyph that is wider than the face inside its cell', function() {
+      /* The fit is the cell over the advance of the glyph with no offset, so
+         the ink of one of these sits inside the cell where an unfitted glyph
+         of twice the advance would paint a cell to either side of it */
+
+      for (const codepoint of wide) {
+        const box = bounds(parsePath(outlines.glyphs[codepoint], outlines.units));
+
+        assert.isAtLeast(box.x1, 0, name(codepoint));
+        assert.isAtMost(box.x2, outlines.cell.width, name(codepoint));
+
+        /* And it uses the cell it was given, rather than sitting in the middle
+           of it at the size of the face */
+
+        assert.isAbove(box.x2 - box.x1, outlines.cell.width / 2, name(codepoint));
+      }
+    });
+
+    it('should fill to the packed glyphs of both fonts within the tolerance', function() {
+      const a = Font.get('12x24');
+      const b = Font.get('8x16');
+
+      const failed = [];
+
+      for (const codepoint of [...kana, ...wide]) {
+        const contours = parsePath(outlines.glyphs[codepoint], outlines.units);
+
+        const dotsA = difference(fillPath(contours, 12, 24), a.lookup(codepoint));
+        const dotsB = difference(fillPath(scaleContours(contours, FONT_B_SCALE), 8, 16), b.lookup(codepoint));
+
+        if (dotsA > TOLERANCE || dotsB > TOLERANCE) {
+          failed.push(`${name(codepoint)} by ${dotsA} and ${dotsB} dots`);
+        }
+      }
 
       assert.deepEqual(failed, []);
     });

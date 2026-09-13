@@ -19,6 +19,12 @@ import opentype from 'opentype.js';
     taller than the cell, an accented capital, is squeezed vertically by itself
     with its baseline where it is, the way a small bitmap font draws them.
 
+    There is one exception, and one only: a glyph whose own advance is wider
+    than the advance the face is fitted by, a full width Japanese glyph in a
+    face whose Latin is half an em, is fitted by its own advance instead of by
+    that of the face, so that it fills the cell instead of hanging out of it to
+    the right. See contours().
+
     A dot becomes ink when the outline covers enough of it, measured on a grid
     of samples per dot with a nonzero winding fill, the rule TrueType outlines
     are drawn with. The threshold is below a half on purpose: a stem that covers
@@ -39,6 +45,15 @@ const ASCENDERS = 'Hbdhklt';
 const DESCENDERS = 'gjpqy';
 const REFERENCE = 'M';
 const CAPITAL = 'H';
+
+/*
+    Every character metrics() measures the face on. A source font is fitted by
+    its own metrics, so a subset of a source has to keep these whether or not
+    the source contributes them to the font: a subset without them has no
+    advance width to be fitted by. tools/subset-font.js keeps them.
+*/
+
+export const METRIC_CHARACTERS = [...new Set(ASCENDERS + DESCENDERS + REFERENCE + CAPITAL)].join('');
 
 /* Number of line segments a curve is cut into before it is filled */
 
@@ -509,11 +524,11 @@ class Rasterizer {
   }
 
   /**
-   * The contours and the flattened polygons of one character, in font units,
-   * with the baseline at y = 0 and y pointing down
+   * The contours, the flattened polygons and the advance width of one
+   * character, in font units, with the baseline at y = 0 and y pointing down
    *
    * @param  {number}   codepoint   Unicode code point
-   * @return {object}               Contours and polygons, or null when the font has no glyph
+   * @return {object}               Contours, polygons and advance, or null when the font has no glyph
    */
   #outline(codepoint) {
     if (!this.#cache.has(codepoint)) {
@@ -521,7 +536,9 @@ class Rasterizer {
       const glyph = index ? this.#font.glyphs.get(index) : null;
       const contours = glyph ? contoursOf(glyph.getPath(0, 0, this.#font.unitsPerEm), SEGMENTS) : null;
 
-      this.#cache.set(codepoint, contours ? {contours, polygons: flatten(contours, SEGMENTS)} : null);
+      this.#cache.set(codepoint, contours ?
+        {contours, polygons: flatten(contours, SEGMENTS), advance: glyph.advanceWidth} :
+        null);
     }
 
     return this.#cache.get(codepoint);
@@ -654,12 +671,40 @@ class Rasterizer {
       scaleY = Math.max(scaleY, metrics.scaleY * MINIMUM_SQUEEZE);
     }
 
-    /* The glyph keeps the side bearings the designer gave it inside its
-       advance, and the advance is the cell */
+    /*
+       The glyph keeps the side bearings the designer gave it inside its
+       advance, and the advance is the cell.
 
-    const offsetX = (cell.width - metrics.advance * metrics.scaleX) / 2;
+       The one exception to "nothing is scaled horizontally" is the advance the
+       cell is divided by: a glyph whose own advance is wider than the advance
+       the face is fitted by is fitted by its own. Without it such a glyph is
+       drawn at the scale of the face, and since the advance of the face is
+       exactly the cell the offset below is zero, so it starts at the left edge
+       of the cell, runs past the right edge and is clipped there: the cell
+       holds its left half and the rest is thrown away.
 
-    return place(outline.contours, metrics.scaleX, scaleY, offsetX, cell.baseline);
+       It is made for the twelve kanji of the katakana codepage,
+       円 年 月 日 時 分 秒 市 区 町 村 人, and the postal mark, which a Japanese face
+       draws on a full em while the face is fitted by the half em of its Latin,
+       and which a printer draws in the same cell as the rest. It catches every
+       glyph a face draws on a full em, which in Iosevka is the em dash, the
+       ellipsis, the arrows, the geometric shapes and the smileys of the tail
+       of cp437, 34 of them: those held their left half before, so that an
+       arrow printed as its stem with no head and an ellipsis as a dot and a
+       half.
+
+       The comparison is on the advance widths in whole font units, so that a
+       glyph of exactly the advance of the face is never touched by it, and the
+       offset is the one formula for both: it is zero whenever a glyph is
+       fitted by its own advance, which both of these are.
+    */
+
+    const advance = Math.max(metrics.advance, outline.advance);
+
+    const scaleX = cell.width / advance;
+    const offsetX = (cell.width - advance * scaleX) / 2;
+
+    return place(outline.contours, scaleX, scaleY, offsetX, cell.baseline);
   }
 
   /**
