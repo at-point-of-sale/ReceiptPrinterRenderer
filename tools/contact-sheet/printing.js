@@ -140,15 +140,7 @@ export function styles() {
   .toolbar .libraries a { display: flex; align-items: center; height: 32px; margin: 15px 0 0; padding: 0 6px;
     border-radius: 6px; color: #000; text-decoration: none; font-size: 10pt; }
   .toolbar .libraries a:hover { background: #eaeaea; }
-  .toolbar .filters { display: flex; flex-wrap: wrap; align-content: start; justify-content: end; margin-left: auto; }
-  .toolbar nav { display: flex; align-items: stretch; height: 32px; margin: 15px 0 0 15px; border-radius: 6px;
-    background: #eaeaea; font-size: 10pt; user-select: none; }
-  .toolbar nav label { display: flex; align-items: center; padding: 0 9px; cursor: pointer; }
-  .toolbar nav label:first-child { border-radius: 6px 0 0 6px; }
-  .toolbar nav label:last-child { border-radius: 0 6px 6px 0; }
-  .toolbar nav label:has(:focus-visible) { outline: -webkit-focus-ring-color auto 1px; }
-  .toolbar nav label:has(input:checked) { background: #d5d5d5; }
-  .toolbar nav input { position: absolute; opacity: 0; }
+  header .filters { margin-left: auto; display: flex; }
   .print { margin-top: 15px; display: flex; gap: 12px; align-items: center; }
   .print button { border: none; border-radius: 6px; height: 32px; padding: 0 12px; cursor: pointer;
     font-family: system-ui; font-weight: 600; font-size: 10pt; background: #eaeaea; }
@@ -174,15 +166,12 @@ export function header(found, languages, widths, libraries) {
     `<option value="${driver.id}"${driver.available ? '' : ' disabled'}>${driver.label}${
       driver.available ? '' : ' (not installed)'}</option>`).join('\n    ');
 
-  const segment = (name, entries) => entries.map((entry, index) =>
-    `<label><input type="radio" name="${name}" value="${entry.value}"${index ? '' : ' checked'}>${entry.label}</label>`)
-      .join('\n      ');
+  const filter = ['<option value="all">All languages</option>'].concat(languages.map((language) =>
+    `<option value="${language}">${language}</option>`)).join('\n    ');
 
-  const filter = segment('language', [{value: 'all', label: 'all'}].concat(languages.map((language) =>
-    ({value: language, label: language}))));
-
-  const sizes = segment('width', [{value: 'all', label: 'all'}].concat(widths.map((size) =>
-    ({value: `${size.columns}|${size.width}`, label: `${size.columns} columns`}))));
+  const sizes = ['<option value="all">All widths</option>'].concat(widths.map((size) =>
+    `<option value="${size.columns}|${size.width}">${size.columns} columns, ${size.width} dots</option>`))
+      .join('\n    ');
 
   const links = libraries.map((library) => `<a href="#${library}">${library}</a>`).join('\n      ');
 
@@ -196,18 +185,18 @@ export function header(found, languages, widths, libraries) {
     <button id="connect">Connect</button>
     <button id="disconnect" hidden>Disconnect</button>
     <span class="status off" id="status">Not connected.</span>
+    <span class="filters">
+      <select id="language" title="Language">
+      ${filter}
+      </select>
+      <select id="width" title="Width">
+      ${sizes}
+      </select>
+    </span>
 </header>
 <div class="toolbar">
     <div class="libraries">
       ${links}
-    </div>
-    <div class="filters">
-      <nav id="language" title="Language">
-      ${filter}
-      </nav>
-      <nav id="width" title="Width">
-      ${sizes}
-      </nav>
     </div>
 </div>`;
 }
@@ -456,11 +445,8 @@ function filter() {
   for (const section of document.querySelectorAll('section[data-language]')) {
     const size = section.dataset.columns + '|' + section.dataset.width;
 
-    const wanted = language.querySelector('input:checked').value;
-    const wantedSize = width.querySelector('input:checked').value;
-
-    section.hidden = (wanted !== 'all' && section.dataset.language !== wanted) ||
-      (wantedSize !== 'all' && size !== wantedSize);
+    section.hidden = (language.value !== 'all' && section.dataset.language !== language.value) ||
+      (width.value !== 'all' && size !== width.value);
   }
 
   for (const group of document.querySelectorAll('.library')) {
