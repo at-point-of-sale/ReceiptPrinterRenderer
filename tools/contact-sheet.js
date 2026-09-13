@@ -170,7 +170,7 @@ async function sheet(library, rows, bytes) {
     html += `<section data-language="${escape(fixture.provenance.language)}">
   <h3>${escape(name)} <span class="language">${escape(fixture.provenance.language)}, ${
   fixture.bytes.length} bytes</span></h3>
-  <div class="fixture">
+  <div class="fixture" style="--columns: ${cells.length + 1}">
     <figure><figcaption>render, ${paper.width} by ${paper.height}</figcaption>
       <img src="${escape(file)}" alt="${escape(name)}"></figure>
     ${cells.map((entry) => entry.html).join('\n    ')}
@@ -268,11 +268,12 @@ async function main() {
   h2 { font-size: 1.1rem; margin-top: 2.5rem; border-bottom: 1px solid #ccc; }
   h3 { font-size: 1rem; margin: 0 0 .5rem; font-family: ui-monospace, monospace; }
   section { background: #fff; border: 1px solid #ddd; padding: 1rem; margin: 1rem 0; }
-  /* Five equal columns and two rows: the captions on the first, aligned to
-     the bottom, and the images on the second, so every image starts on the
-     same line whatever the length of its caption. A figure is display:
-     contents so that its caption and its image are placed separately */
-  .fixture { display: grid; grid-template-columns: repeat(5, 1fr); gap: .25rem 1.5rem; align-items: start; }
+  /* As many equal columns as the fixture has figures, five with receiptio and
+     four without, over the whole width, and two rows: the captions on the
+     first, aligned to the bottom, and the images on the second, so every image
+     starts on the same line whatever the length of its caption. A figure is
+     display: contents so that its caption and its image are placed separately */
+  .fixture { display: grid; grid-template-columns: repeat(var(--columns, 5), 1fr); gap: .25rem 1.5rem; align-items: start; }
   figure { display: contents; }
   figcaption { grid-row: 1; align-self: end; color: #666; min-width: 0; }
   figure > :not(figcaption) { grid-row: 2; min-width: 0; }
