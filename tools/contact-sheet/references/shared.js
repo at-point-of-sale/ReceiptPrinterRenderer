@@ -166,7 +166,7 @@ async function inflate(data) {
  * @param  {number}       depth   Bits per sample
  * @return {number}               The value, 0 to (1 << depth) - 1
  */
-function raw(row, index, depth) {
+function bits(row, index, depth) {
   if (depth === 8) {
     return row[index];
   }
@@ -192,10 +192,10 @@ function raw(row, index, depth) {
  */
 function sample(row, index, depth) {
   if (depth >= 8) {
-    return raw(row, index, depth);
+    return bits(row, index, depth);
   }
 
-  return Math.round((raw(row, index, depth) * 255) / ((1 << depth) - 1));
+  return Math.round((bits(row, index, depth) * 255) / ((1 << depth) - 1));
 }
 
 /**
@@ -232,19 +232,20 @@ function unfilter(filter, row, previous, step) {
 }
 
 /**
- * Read a PNG file as a one bit bitmap: a pixel darker than the threshold is
- * ink.
+ * Read a PNG file as pixels: the {width, height, data} object of RGBA samples
+ * that the encoder takes as an image and that fromPng() thresholds into a
+ * bitmap. A colour type without an alpha channel comes back fully opaque, so
+ * that a reader never has to know which type the file was.
  *
- * Only what the reference renderers write is read, which is enough: greyscale,
- * palette, RGB and RGBA at one, two, four, eight or sixteen bits per sample,
- * not interlaced. Anything else throws, and the module that called it reports
- * the reason.
+ * Only what the reference renderers and the sample scripts write is read, which
+ * is enough: greyscale, palette, RGB and RGBA at one, two, four, eight or
+ * sixteen bits per sample, not interlaced. Anything else throws, and the module
+ * that called it reports the reason.
  *
- * @param  {Uint8Array}            bytes       The contents of a .png file
- * @param  {number}                threshold   A sample below this is ink, 0 to 255
- * @return {Promise<Bitmap>}                   The bitmap
+ * @param  {Uint8Array}      bytes   The contents of a .png file
+ * @return {Promise<object>}         The pixels, {width, height, data}
  */
-export async function fromPng(bytes, threshold = 128) {
+export async function decodePng(bytes) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 
   const parts = [];
@@ -306,7 +307,7 @@ export async function fromPng(bytes, threshold = 128) {
 
   const rowBytes = Math.ceil((width * channels * depth) / 8);
   const step = Math.max(1, (channels * depth) >> 3);
-  const bitmap = Bitmap.create(width, height);
+  const pixels = new Uint8Array(width * height * 4);
 
   let previous = new Uint8Array(rowBytes);
 
@@ -317,19 +318,58 @@ export async function fromPng(bytes, threshold = 128) {
     unfilter(raw[start], row, previous, step);
 
     for (let x = 0; x < width; x++) {
-      let value;
+      const target = (y * width + x) * 4;
+
+      let red;
+      let green;
+      let blue;
 
       if (colour === 3) {
-        const base = raw(row, x, depth) * 3;
+        const base = bits(row, x, depth) * 3;
 
-        value = palette ? (palette[base] + palette[base + 1] + palette[base + 2]) / 3 : 255;
+        red = palette ? palette[base] : 255;
+        green = palette ? palette[base + 1] : 255;
+        blue = palette ? palette[base + 2] : 255;
       } else if (colour === 0 || colour === 4) {
-        value = sample(row, x * channels, depth);
+        red = green = blue = sample(row, x * channels, depth);
       } else {
         const base = x * channels;
 
-        value = (sample(row, base, depth) + sample(row, base + 1, depth) + sample(row, base + 2, depth)) / 3;
+        red = sample(row, base, depth);
+        green = sample(row, base + 1, depth);
+        blue = sample(row, base + 2, depth);
       }
+
+      pixels[target] = red;
+      pixels[target + 1] = green;
+      pixels[target + 2] = blue;
+      pixels[target + 3] = colour === 4 || colour === 6 ?
+        sample(row, x * channels + channels - 1, depth) :
+        255;
+    }
+
+    previous = row;
+  }
+
+  return {width, height, data: pixels};
+}
+
+/**
+ * Read a PNG file as a one bit bitmap: a pixel darker than the threshold is
+ * ink. It is decodePng() with the samples of a pixel averaged, which is what
+ * every reference render is compared as.
+ *
+ * @param  {Uint8Array}            bytes       The contents of a .png file
+ * @param  {number}                threshold   A sample below this is ink, 0 to 255
+ * @return {Promise<Bitmap>}                   The bitmap
+ */
+export async function fromPng(bytes, threshold = 128) {
+  const image = await decodePng(bytes);
+  const bitmap = Bitmap.create(image.width, image.height);
+
+  for (let y = 0; y < image.height; y++) {
+    for (let x = 0; x < image.width; x++) {
+      const offset = (y * image.width + x) * 4;
 
       /* A pixel of a colour type with alpha is composited over the white of the
          paper, which is the only reading that makes sense of a render on a
@@ -337,18 +377,13 @@ export async function fromPng(bytes, threshold = 128) {
          `omitBackground`, so its whole page is black at an alpha of zero and
          every row would carry ink without this. Section 16f. */
 
-      if (colour === 4 || colour === 6) {
-        const alpha = sample(row, x * channels + channels - 1, depth) / 255;
+      const alpha = image.data[offset + 3] / 255;
+      const grey = (image.data[offset] + image.data[offset + 1] + image.data[offset + 2]) / 3;
 
-        value = value * alpha + 255 * (1 - alpha);
-      }
-
-      if (value < threshold) {
+      if (grey * alpha + 255 * (1 - alpha) < threshold) {
         Bitmap.setPixel(bitmap, x, y, 1);
       }
     }
-
-    previous = row;
   }
 
   return bitmap;

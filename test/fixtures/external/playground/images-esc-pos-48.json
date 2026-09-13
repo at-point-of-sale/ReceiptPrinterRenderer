@@ -1,0 +1,16 @@
+{
+  "source": "https://github.com/NielsLeenheer/ReceiptPrinterPlayground",
+  "file": "src/assets/templates/images.js",
+  "commit": "a0345933eaacd19fc75fee7ac022d8f34a58e474",
+  "licence": "MIT",
+  "setup": "npm install, and a checkout of ReceiptPrinterPlayground next to this repository, RENDERER_PLAYGROUND overrides the path, see tools/external/playground/capture.js",
+  "command": "node tools/external/playground/capture.js images-esc-pos-48",
+  "version": "4.0.0",
+  "language": "esc-pos",
+  "columns": 48,
+  "width": 576,
+  "codepageMapping": "epson",
+  "captured": "2026-09-13",
+  "unknown": 0,
+  "notes": "The images sample of the playground's \"New...\" menu, section 16g. The 128 by 128 logo of the playground, dithered with Atkinson and centred. Evaluated the way src/utils/encoder.js of the playground does, in an async function with an `encoder` of 48 columns and a `model` of 'Generic', which is what the playground puts there when no printer model is selected, and with an `Image` that reads the data URI of the sample with the PNG reader of the contact sheet instead of a canvas, see tools/external/playground/capture.js. Reviewed as ASCII art against the render of the other language of the same width."
+}

@@ -19,6 +19,7 @@
     "scripts": {
         "build": "npm run generate && tsc && rollup -c && rm -rf dist/tmp",
         "contact-sheet": "node tools/contact-sheet.js",
+        "contact-sheet:serve": "node tools/contact-sheet/serve.js",
         "generate": "node tools/generate.js",
         "lint": "eslint --fix src test tools",
         "mocha": "mocha test/",
@@ -58,6 +59,9 @@
     "devDependencies": {
         "@point-of-sale/receipt-printer-encoder": "^3.0.0",
         "@point-of-sale/star-graphics-printer-encoder": "^1.0.0",
+        "@point-of-sale/webbluetooth-receipt-printer": "^2.1.0",
+        "@point-of-sale/webserial-receipt-printer": "^2.0.0",
+        "@point-of-sale/webusb-receipt-printer": "^2.1.0",
         "@rollup/plugin-commonjs": "^24.1.0",
         "@rollup/plugin-node-resolve": "^15.0.2",
         "@rollup/plugin-terser": "^0.4.1",

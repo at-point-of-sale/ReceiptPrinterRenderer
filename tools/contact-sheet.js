@@ -8,6 +8,7 @@ import {stitch} from '../src/formats/stitch.js';
 import {libraries, fixtures, external, options, directory as source} from '../test/helpers/external.js';
 import {modules, references} from './contact-sheet/references/index.js';
 import {agreement} from './contact-sheet/references/shared.js';
+import {drivers, scripts, styles, header, script} from './contact-sheet/printing.js';
 
 /*
     The contact sheet of the external fixtures, sections 16 and 16b.
@@ -30,7 +31,14 @@ import {agreement} from './contact-sheet/references/shared.js';
     and the relative height difference. It is information for a maintainer, not
     a check; no test looks at it.
 
+    Since section 16g the sheet also prints. The header connects to a printer
+    over USB, serial or Bluetooth with the drivers of the ecosystem, and every
+    card has a button that sends that fixture's bytes to it as they are stored,
+    see tools/contact-sheet/printing.js. Web USB and Web Serial need a secure
+    context, so there is a server for the build directory next to it:
+
         npm run contact-sheet
+        npm run contact-sheet:serve
 
     Everything it writes lands in build/contact-sheet and nothing of it is
     committed; build/ is in .gitignore. Run it to review a capture or to see
@@ -135,12 +143,13 @@ function cell(reference, paper, name) {
  *
  * @param  {string}     library   Name of the library
  * @param  {object[]}   rows      The agreement rows of every library, appended to
+ * @param  {object}     bytes     The base64 of every fixture, for the print buttons, added to
  * @return {Promise<string>}      The HTML
  */
-async function sheet(library, rows) {
+async function sheet(library, rows, bytes) {
   const preview = await previews(library);
 
-  let html = `<h2 id="${escape(library)}">${escape(library)}</h2>\n`;
+  let html = `<div class="library"><h2 id="${escape(library)}">${escape(library)}</h2>\n`;
 
   for (const name of fixtures(library)) {
     const fixture = external(library, name);
@@ -182,8 +191,13 @@ async function sheet(library, rows) {
         .map((reference) => `<tr><th>${escape(reference.tool)}</th><td>${escape(reference.command)}</td></tr>`)
         .join('\n');
 
-    html += `<section>
-  <h3>${escape(name)}</h3>
+    const key = `${library}/${name}`;
+
+    bytes[key] = Buffer.from(fixture.bytes).toString('base64');
+
+    html += `<section data-language="${escape(fixture.provenance.language)}">
+  <h3>${escape(name)} <span class="language">${escape(fixture.provenance.language)}, ${
+  fixture.bytes.length} bytes</span></h3>
   <div class="fixture">
     <figure><figcaption>render, ${paper.width} by ${paper.height}</figcaption>
       <img src="${escape(file)}" alt="${escape(name)}"></figure>
@@ -193,6 +207,10 @@ async function sheet(library, rows) {
     <table>${provenance}</table>
   </div>
   ${commands ? `<details><summary>the reference invocations</summary><table>${commands}</table></details>` : ''}
+  <div class="print">
+    <button data-fixture="${escape(key)}" disabled>Print</button>
+    <span class="result"></span>
+  </div>
 </section>\n`;
 
     const agreed = cells.filter((entry) => entry.row)
@@ -202,7 +220,7 @@ async function sheet(library, rows) {
     console.log(`  ${name.padEnd(38)} ${String(paper.height).padStart(5)} rows  ${agreed}`);
   }
 
-  return html;
+  return html + '</div>\n';
 }
 
 /**
@@ -242,6 +260,7 @@ async function main() {
   fs.mkdirSync(target, {recursive: true});
 
   const rows = [];
+  const bytes = {};
 
   let body = '';
 
@@ -249,8 +268,17 @@ async function main() {
 
   for (const library of list) {
     console.log(library);
-    body += await sheet(library, rows);
+    body += await sheet(library, rows, bytes);
   }
+
+  /* The drivers of the header, copied into the sheet, and the languages the
+     fixtures are in, which is what the filter offers */
+
+  const found = drivers(target);
+
+  const languages = [...new Set(
+      list.flatMap((library) => fixtures(library).map((name) => external(library, name).provenance.language)),
+  )].sort();
 
   const tools = modules.map((module) => {
     const ran = rows.some((row) => row.tool === module.name);
@@ -285,9 +313,11 @@ async function main() {
   .agreement th, .agreement td { padding: .2rem .75rem; border-bottom: 1px solid #eee; }
   .agreement thead th { background: #f0f0f0; }
   .number { text-align: right; }
+${styles()}
 </style>
 </head>
 <body>
+${header(found, languages)}
 <h1>External fixtures</h1>
 <p>Every byte stream in <code>test/fixtures/external</code>, rendered by this package,
 with the provenance of the capture and, where the tool is installed on this machine,
@@ -303,6 +333,8 @@ looking at, nothing more, and no test fails on it.</p>
 ${table(rows)}
 <nav><p>${list.map((library) => `<a href="#${escape(library)}">${escape(library)}</a>`).join(' &middot; ')}</p></nav>
 ${body}
+${scripts(found)}
+${script(bytes, found)}
 </body>
 </html>
 `;
@@ -314,7 +346,12 @@ ${body}
       JSON.stringify(rows, null, 2) + '\n',
   );
 
+  const printing = found.filter((driver) => driver.available)
+      .map((driver) => `${driver.label} ${driver.version}`).join(', ');
+
   console.log(`\n${path.join(target, 'index.html')}`);
+  console.log(`  ${Object.keys(bytes).length} fixtures to print with ${printing || 'no driver at all'}`);
+  console.log('  npm run contact-sheet:serve, then http://localhost:8080');
 }
 
 main().catch((error) => {

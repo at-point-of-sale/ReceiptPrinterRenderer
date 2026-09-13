@@ -627,60 +627,13 @@ Open decisions:
 
 ## Section 18: SVG
 
-A separate package in the ecosystem that turns a display list into an SVG document: paths for text from the generated outlines, rectangles for bars and modules, an embedded PNG for every image, one document per receipt at dot size with a `viewBox`, cut markers optional. It consumes the display list of section 17 and nothing else of the renderer, so it has no runtime dependency apart from the outlines.
-
-Contract:
-
-```js
-import { toSvg } from '@point-of-sale/receipt-printer-svg';
-
-const svg = toSvg(layout, {
-  units: 'dots',        // 'dots', 'mm', 'pt' or 'px' for the width and height attributes; the viewBox is always dots
-  cutMarker: false,     // a dashed line at every cut
-  background: '#fff',   // or null for a transparent paper
-  ink: '#000',
-});
-```
-
-`toSvg()` is synchronous and returns a string. The document is `<svg xmlns="http://www.w3.org/2000/svg" width height viewBox="0 0 W H">` with `W` and `H` from the layout, a background rectangle unless `background` is null, a `<defs>` with one `<path id="g-A-41">` per distinct glyph the receipt uses, and one `<g>` per `line` operation holding its operations in order:
-
-- A text cell is a `<use href="#g-A-41" transform="translate(x y) scale(sx sy)">`, with a second `<use>` one glyph dot to the right for bold, a `<rect>` of the underline or upperline thickness across the scaled cell, and for an inverted cell a black `<rect>` of the cell first and the glyph in the background colour. Font B uses the same path under a scale of two thirds, translated to the centre of its cell. A rotated cell gets `rotate(180 cx cy)` about the centre of its box. A box drawing code point uses the path of its cell size from the `box` set.
-- A `rect` is a `<rect>` with `shape-rendering="crispEdges"`, so that a bar on integer coordinates stays a bar at every zoom.
-- An `image` is an `<image x y width height href="data:image/png;base64,...">` with `image-rendering: pixelated`, the PNG written by the package itself with stored deflate blocks, so that the helper needs no `CompressionStream` and stays synchronous. A logo is a few kilobytes larger than compressed, which does not matter in a document that is text.
-- A `cut` is a dashed `<line>` across the paper when `cutMarker` is on, nothing otherwise. `pulse`, `feed` and `unknown` produce nothing.
-
-Deliverables:
-
-- The package, `ReceiptPrinterSvg` on GitHub, `@point-of-sale/receipt-printer-svg` on npm, version 1.0.0, scaffolded per the rules of this block, with `toSvg()` as the default and a named export and the options typedef in `src/types.js`.
-- The PNG writer with stored blocks and its CRC, and a check in the tests that `node:zlib` inflates its output to the rows of the bitmap.
-- `test/tools/make-fixtures.js` of the package: the receipts of this repository are not published, so the script encodes receipts of its own with ReceiptPrinterEncoder and lays them out with ReceiptPrinterRenderer, both dev dependencies, and freezes `test/fixtures/<name>.svg`. The receipts cover text in both fonts and every style, sizes, alignment, a table, a box, a rule, a barcode with its text, a QR code, a PDF417 symbol, an image, an upside down line, a cut and a pulse.
-- A README that documents the options, the structure of the document, the glyph reuse and the version of the display list it accepts, and shows the encoder, renderer and this package together in ten lines.
-
-Fixtures and tests:
-
-- The golden SVG files, reviewed by eye in a browser before they are frozen, with a screenshot next to the bitmap preview of the same receipt, as section 5 checked its example.
-- `test/svg.js`: every fixture equals its golden file; the document is well formed, checked with a small XML parser that is a dev dependency; a layout with a version the package does not know throws; the counts of `<use>`, `<rect>` and `<image>` elements of a hand built layout match its operations; the bold, underline, invert and rotation cases are checked element by element.
-- The rasterized check, if the open decision takes it: every fixture rendered at one dot per unit with a rasterizer and compared with the bitmap of the renderer, the rectangles and images dot for dot and the text within a tolerance, since an outline filled by a rasterizer and a bitmap made with the 0.45 coverage rule differ at the edges of a stroke.
-
-Acceptance:
-
-- Every fixture opens in a browser and reads as the receipt the bitmap preview shows, checked by the implementer with a headless browser screenshot and by the reviewer.
-- The SVG of the full receipt is under 60 kB with its glyph definitions, and a receipt of text only is under 20 kB.
-- `npm test`, `npm run build` and `npm run test:types` pass, and the UMD build exposes the function as its global.
-
-Effort: 2 to 3 days.
-
-Open decisions:
-
-- **The package name.** `receipt-printer-svg` keeps the `receipt-printer` prefix of the encoder and the renderer; `receipt-svg-renderer` says what it does. The same choice applies to section 19.
-- **Where the outlines come from**, the decision of section 17: a peer dependency on the renderer's sub-entry, or a copy inside this package.
-- **The rasterized check.** `@resvg/resvg-wasm` renders SVG in Node without a native module and would compare the vector output with the bitmap fixtures; it is a wasm dev dependency of a few megabytes and its tolerance for text has to be settled by trying. Without it the tests are structural only.
-- **Physical units.** Whether `units` defaults to `dots`, which gives a document of `576` by `1412` user units, or to `mm`, which gives a paper of the size it is.
-- **Per-line groups.** Whether every line becomes a `<g>`, which doubles as documentation of the layout, or the operations are written flat, which is smaller.
+Spun out of the implementation plan into [svg-plan.md](svg-plan.md), which plans the SVG output separately; the entry that stood here is the appendix of that document.
 
 <br>
 
 ## Section 19: PDF
+
+**Status: dropped by the maintainer on 2026-09-13. The entry stays for what it worked out, nothing below it is scheduled, and the display list of [svg-plan.md](svg-plan.md) keeps the line box and the page block a PDF writer would need if it is ever picked up again.**
 
 A separate package with a minimal PDF writer: objects, a cross reference table, one content stream per page with path operators, image XObjects for bitmaps, deflate through `CompressionStream`, and a page the size of the receipt by default with an option for a standard page. Text is drawn as paths from the outlines in this version; embedding the subset font as TrueType, so that the text of a receipt can be selected and searched, is a later refinement and not part of this section. It consumes the display list and nothing else of the renderer.
 
@@ -1357,6 +1310,127 @@ Acceptance:
 - `npm test` passes with the ten replaced fixtures making the three checks of
   section 16 and the structural check of this one.
 - The contact sheet builds with receiptio installed and without it.
+- Version stays 0.3.0, nothing committed.
+
+Effort: half a day.
+
+<br>
+
+## Section 16g: hardware confirmation from the contact sheet and the playground examples
+
+Everything sections 16 to 16f built is a picture. The renderer is checked
+against its own goldens, against four other renderers and against the documents
+of the wild, and every one of those checks compares a bitmap with a bitmap. What
+no test can say is whether a printer prints the paper the picture shows. This
+section adds the two things that answer that question by hand: the streams a
+person actually sends a printer, as fixtures, and a button on the contact sheet
+that sends any fixture to a printer that is attached to the machine the sheet is
+open on.
+
+Everything sections 16 and 16b rule stays in force: the four files per fixture,
+the provenance fields of section 16 plus `setup`, the licence text kept once per
+directory, the three checks of `test/external.js`, the eye review of every
+golden image before it is frozen, no runtime dependency and nothing generated
+committed.
+
+**1. The playground samples as fixtures.** ReceiptPrinterPlayground is the page
+this ecosystem is tried out on, and the samples behind its "New..." menu, Text,
+Tables, Images, Barcodes, QR Code and PDF417, are the first thing a person
+prints. They are not another library's idea of a receipt: they are the encoder's
+own features written down by the author of the encoder, so they exercise the
+commands this renderer exists for, and a printer holding the paper of one of
+them next to the sheet's picture is the end to end check both libraries were
+written for. `tools/external/playground/capture.js` captures them into
+`test/fixtures/external/playground/` as `<sample>-<language>-<columns>`, in both
+languages, ESC/POS with the epson mapping and StarPRNT with the star mapping, at
+48 and at 32 columns, the 80 mm and the 58 mm paper.
+
+**2. How a sample is evaluated.** A sample is a piece of JavaScript, not a
+document. The playground evaluates it against an `encoder` it constructed and a
+`model` string, see `src/utils/encoder.js` there, and the capture does the same:
+an async function with those two names in scope, and the bytes are what the
+encoder holds when it returns. The scripts are read from a checkout of the
+playground next to this repository, `RENDERER_PLAYGROUND` overriding the path,
+and nothing of them is copied into this repository. The Images sample needs one
+thing a browser has and Node does not: `new Image()` with a `src` that it
+decodes. The capture hands the script an `Image` that reads the PNG with the
+reader the contact sheet references already carry and returns the
+`{width, height, data}` object the encoder takes as an image, so no canvas and
+no image library is needed and the encoder sees the same pixels.
+
+**3. The provenance.** `source` is the playground's repository, `file` the
+sample inside it and `commit` the commit of the checkout it was read from.
+`version` is the version of ReceiptPrinterEncoder that produced the bytes, since
+the playground is not versioned and the stream is the encoder's; the encoder is
+the linked 4.0.0 for as long as `node_modules` resolves it, and the provenance
+records which version it was. The playground carries no licence file and its
+package is private, so the `LICENSE` of the fixture directory says that in as
+many words and records the samples under the MIT licence of this ecosystem,
+which is the licence of the repository they come from and of this one; a licence
+file that appears in the playground later wins over it and is copied instead.
+
+**4. Parity.** The same sample at the same width in the two languages has to be
+the same paper, which is the parity test of `test/external.js` over the
+receiptline fixtures applied to these: both renders with the same profile, so
+that only the languages differ, and an exception list that names every sample
+that differs with the reason it does. A reason is always a property of the
+encoder or of what the two printer families can be asked for, never of the
+renderers, and a sample whose reason cannot be written down is a bug in the
+renderer and not an entry in the list.
+
+**5. Printing from the contact sheet.** The sheet gets a sticky header with the
+three drivers of the ecosystem, WebUSB, WebSerial and WebBluetooth, a baud rate
+for the serial one, Connect and Disconnect, and a status line that shows the
+fields of the driver's `connected` event: the type, the product name where there
+is one, the language, the codepage mapping and the columns where the driver
+knows them. Every fixture card gets a Print button that sends that fixture's
+bytes to the connected printer as they are stored, disabled until a printer is
+connected, with a result line of its own that says how many bytes went out or
+what went wrong.
+
+The drivers are constructed **without** a renderer option. A driver that is
+given one renders the job itself and wraps it in the raster format of the
+printer, which is the thing this sheet is checking, so it would be checking
+itself; without one every driver reports the raw protocol of the printer and
+passes the bytes through untouched. That puts the language of a fixture on the
+person at the keyboard, so the header says so in a note and the header's filter
+groups the cards by language, `esc-pos`, `star-prnt`, `star-line` and
+`star-graphics` with "all" as the default, so that a printer's language can be
+picked and only the cards it can print are shown.
+
+**6. What the page needs.** The three UMD builds are copied out of
+`node_modules` into `build/contact-sheet/lib` and loaded with script tags; the
+two linked drivers are added as devDependencies at their current versions and
+resolve through `npm link` the way the encoder packages do, the serial one comes
+from the registry. The bytes of every fixture are embedded in the page as
+base64, about a megabyte for the whole set, because a sheet is opened from a
+`file://` URL as often as from a server and `fetch()` is blocked there. Web USB
+and Web Serial need a secure context, which a `file://` URL is not and localhost
+is, so `npm run contact-sheet:serve` serves the build directory from a Node
+server of fifty lines and the header says how to use either.
+
+Deliverables:
+
+- `tools/external/playground/capture.js` and the fixtures it writes, reviewed as
+  ASCII art and frozen, with the `LICENSE` of the directory.
+- The parity check of the playground fixtures in `test/external.js`, with the
+  exception list and its reasons.
+- The header, the Print buttons and the language filter in the contact sheet,
+  `tools/contact-sheet/printing.js`, and `tools/contact-sheet/serve.js` behind
+  `npm run contact-sheet:serve`.
+- The three drivers as devDependencies, the two unpublished ones noted as such.
+- Notes: the samples captured, the parity exceptions with their reasons, the
+  driver versions and their UMD globals, and what the eye review found.
+
+Acceptance:
+
+- `npm test` passes with the playground fixtures making the three checks of
+  section 16 and the parity check of this one.
+- The contact sheet builds, serves, and loads the three drivers in a headless
+  browser, where a Print button without a connection is disabled.
+- A person with a printer can print a fixture of the printer's language from the
+  sheet and hold the paper against the render. That is the acceptance no test
+  makes.
 - Version stays 0.3.0, nothing committed.
 
 Effort: half a day.
@@ -4652,4 +4726,147 @@ Acceptance:
 - `npm test` 2380 passing, lint clean, with the ten replaced fixtures making the
   three checks of section 16 and the thirty checks of this one.
 - `npm run contact-sheet` builds with receiptio and without it.
+- Version stays 0.3.0, nothing committed.
+
+### Section 16g
+
+Implemented on 2026-09-13. Files: `tools/external/playground/capture.js`,
+`tools/contact-sheet/printing.js`, `tools/contact-sheet/serve.js`,
+`tools/contact-sheet.js`, `tools/contact-sheet/references/shared.js`,
+`test/external.js`, the 24 playground fixtures and the licence of
+`test/fixtures/external/playground/`, `package.json`, `README.md`.
+
+The playground samples:
+
+- **24 fixtures**, six samples, `text`, `tables`, `images`, `barcodes`,
+  `qrcode` and `pdf417`, in `esc-pos` with the epson mapping and `star-prnt`
+  with the star mapping, at 48 and at 32 columns. `new`, the empty starting
+  point of the "New..." menu, prints one line and is not a fixture. The papers
+  run from 294 rows for the images sample to 5728 for the barcodes one, and not
+  one of them carries an unknown item: the samples are the encoder's output and
+  the renderer parses all of it.
+- **The scripts are evaluated, not parsed.** The playground's
+  `src/utils/encoder.js` evaluates a sample against an `encoder` it constructed
+  and a `model` string; the capture builds an async function of the script with
+  the same two names in scope and encodes what the script left in the encoder.
+  `model` is `'Generic'`, which is what the playground puts there when no
+  printer model is selected, and it is the first line every sample prints. The
+  checkout is a sibling of this repository or wherever `RENDERER_PLAYGROUND`
+  says, read from the working tree; the capture prints the commit and says so
+  when the samples have uncommitted changes.
+- **The Images sample needed an `Image`.** It writes `new Image()`, assigns a
+  data URI and awaits `decode()`, then hands the element to `encoder.image()`.
+  The shim the capture puts in scope is a function that returns a plain object
+  with `src`, `decode()` and the `{width, height, data}` the encoder takes, and
+  it has to be a plain object: the encoder decides what an input is by the name
+  of its constructor, and something called `Image` is the element it wants a
+  canvas for. The pixels come from the PNG reader of
+  `tools/contact-sheet/references/shared.js`, which grew a `decodePng()` that
+  returns RGBA for it; `fromPng()` is now that function with the samples
+  averaged and thresholded, which is byte for byte what it did before. The
+  palette branch of that reader was dead code with a bug, `raw` the function
+  shadowed by `raw` the inflated bytes, so the helper is called `bits()` now and
+  a palette PNG would read rather than throw.
+- **The encoder is 4.0.0**, the linked checkout, which is what `node_modules`
+  resolves, and the provenance `version` of every fixture records it. The
+  devDependency range stays `^3.0.0` for the reason the note above it gives.
+- **The licence.** The playground carries no licence file and its package.json
+  is private without a licence field, so there was nothing to copy.
+  `test/fixtures/external/playground/LICENSE` says that in as many words and
+  records the streams under the MIT licence of this ecosystem: the playground is
+  the repository of the author of this package and the samples are the encoder's
+  features written down. `licence()` copies a licence file that appears in the
+  checkout later over it, and the provenance says `MIT`.
+
+Parity, the same sample and width in the two languages, both rendered with the
+epson profile so that only the languages differ:
+
+- **Eight of the twelve pairs are the same paper dot for dot**: both table
+  fixtures, both image fixtures, both QR code fixtures and both PDF417 fixtures.
+- **`text` differs by two characters**, both of them on the Arabic line: the
+  Star Arabic page has no ي, so the encoder writes `?` for it, where the cp864
+  of ESC/POS carries the letter. The other seven scripts of that sample, Greek,
+  Ukrainian, Japanese, Arabic aside, Hebrew, Thai, Polish and Hungarian, and the
+  euro sign, are identical in both languages.
+- **`barcodes` differs in five symbols**, all of them because the encoder asks
+  the two printer families for the symbology in their own way: a Code 128 of
+  digits only carries the `{B` code set selection on ESC/POS and none on
+  StarPRNT, where the printer picks the paired code set C itself and the symbol
+  is a third narrower; an ITF is drawn with a wider module by the ESC/POS
+  printer than by the Star one at the same `width`; a GS1-128 is the native
+  symbology on ESC/POS and a Code 128 of the same data on StarPRNT, which is
+  wider, and wider again when the application writes the AI in parentheses; and
+  the GS1 DataBar omni, truncated and limited symbols have a larger module and a
+  taller symbol on StarPRNT. The DataBar expanded symbol is identical.
+- Every entry of the exception list is a property of the encoder or of the two
+  printer families, none of them of the renderers, which is the rule the entry
+  of this section sets for the list.
+
+The review: every golden was read as ASCII art, downsampled, the ESC/POS ones of
+all six samples in full and the differences with their StarPRNT counterparts row
+by row. The 48 column ruler line of the text sample ends exactly at dot 576 and
+wraps at 32 columns, the inverted line, the boxes and the double height cell are
+where the sample puts them, the table falls back to font B below 42 columns, the
+logo is centred and dithered, every barcode and both symbols carry their quiet
+zones, and the text sample cuts at the end.
+
+Printing from the contact sheet:
+
+- **The header** is sticky and carries the driver selector, the baud rate field
+  for the serial driver, Connect, Disconnect, a status line and the language
+  filter. The status line is the `connected` event of the driver written out:
+  the type, the product name or the device name where there is one, the vendor
+  and product ids of a serial device that has no name, the language, the
+  codepage mapping and the columns where the driver knows them. WebUSB reports a
+  language and a codepage mapping for every printer it knows and columns only
+  for one it renders for; WebSerial reports the ids and nothing else. A
+  `connect()` that resolves without an event, which is what a cancelled picker
+  and an unknown device both look like, is reported as such: the drivers catch
+  those inside and log them.
+- **The drivers carry no renderer option.** A driver with one renders the job
+  and wraps it in the raster format of the printer, which is what this sheet
+  checks, so the header says "bytes are sent as stored, choose fixtures whose
+  language your printer speaks" and the filter groups the 147 cards by the
+  language of their provenance, `esc-pos`, `star-prnt`, `star-line` and
+  `star-graphics`, with "all" as the default. A library whose cards are all
+  filtered away disappears with its heading.
+- **The bytes are in the page**, base64 in one `application/json` block, decoded
+  on click, because a sheet opened from `file://` cannot fetch. The 147 fixtures
+  are 884 kB of streams and make the page 1.1 MB, which loads in a blink from
+  the file system and from localhost.
+- **`npm run contact-sheet:serve`**, `tools/contact-sheet/serve.js`, serves
+  `build/contact-sheet` on `127.0.0.1:8080` with no listing, no caching and no
+  path that climbs out of the directory, because Web USB and Web Serial need a
+  secure context and localhost is one.
+- **The drivers**: `@point-of-sale/webusb-receipt-printer` 2.1.0 as
+  `WebUSBReceiptPrinter`, `@point-of-sale/webserial-receipt-printer` 2.0.0 as
+  `WebSerialReceiptPrinter` and `@point-of-sale/webbluetooth-receipt-printer`
+  2.1.0 as `WebBluetoothReceiptPrinter`, their UMD builds copied from
+  `node_modules` into `build/contact-sheet/lib`. All three are devDependencies
+  now. The USB and the Bluetooth driver are at versions that are not published,
+  the registry has 2.0.0 of both, so they resolve through `npm link` from the
+  local checkouts the way `@point-of-sale/star-graphics-printer-encoder` and the
+  encoder do, and a fresh `npm install` without those links fails on them. That
+  is also why `package-lock.json` was not regenerated: `npm install` cannot
+  resolve this repository's tree at all while those three packages are
+  unpublished, and the lock has been out of step with them since section 12. A
+  driver whose build is not in `node_modules` is a disabled entry in the
+  selector, never a failure of the build.
+
+The page in a headless browser, the `chrome-headless-shell` of Playwright's
+cache driven by the `puppeteer-core` of section 16f: the header renders and is
+`position: sticky`, the three driver options are enabled, the filter offers the
+four languages and "all", the three UMD globals are functions, the fixtures
+block holds 147 streams, all 147 Print buttons are disabled and a click on one
+does nothing, the handler reached with the button forced on answers "not
+connected" in red, the filter leaves the ten `star-line` cards and one heading,
+and Connect without a printer attached ends in the status line saying nothing
+was picked. A real connection cannot be tested there and is the acceptance a
+person makes with a printer.
+
+Acceptance:
+
+- `npm test` 2493 passing, lint clean, with the 24 playground fixtures making
+  the three checks of section 16 and the twelve parity checks of this one.
+- `npm run contact-sheet` builds and `npm run contact-sheet:serve` serves it.
 - Version stays 0.3.0, nothing committed.
