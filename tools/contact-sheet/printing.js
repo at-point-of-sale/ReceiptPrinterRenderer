@@ -225,6 +225,12 @@ const language = document.getElementById('language');
 let printer = null;
 let device = null;
 
+/* Resolved by the connected event while a connect() is in progress. The
+   drivers dispatch their events through a timer, so the event arrives after
+   connect() has resolved and cannot be checked right after the call */
+
+let awaiting = null;
+
 /* The bytes of one fixture, decoded when it is printed and not before */
 
 function bytes(key) {
@@ -285,6 +291,11 @@ function report(text, kind) {
 function connected(event) {
   device = event;
 
+  if (awaiting) {
+    awaiting();
+    awaiting = null;
+  }
+
   report('Connected: ' + describe(event), 'on');
 
   connect.disabled = true;
@@ -344,7 +355,17 @@ async function open() {
 
     /* The drivers catch what goes wrong inside connect() and log it, so a
        picker that was cancelled and a printer the driver does not know both
-       come back here as a connect() that resolved without an event */
+       come back here as a connect() that resolved without an event. The event
+       of a successful connection arrives a tick later, so wait for it briefly */
+
+    if (!device) {
+      await new Promise((resolve) => {
+        awaiting = resolve;
+        setTimeout(resolve, 2000);
+      });
+
+      awaiting = null;
+    }
 
     if (!device) {
       printer = null;
