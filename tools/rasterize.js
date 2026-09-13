@@ -24,6 +24,12 @@ import opentype from 'opentype.js';
     are drawn with. The threshold is below a half on purpose: a stem that covers
     less than half of a dot still burns it, the way the heat of a thermal head
     bleeds into the dots around it.
+
+    The placement of a glyph in its cell happens once, in contours(), and both
+    things that are made of a glyph come out of that one set of placed contours:
+    the bitmap, by flattening the curves and filling them, and the outline of
+    generated/outlines.js, by writing the same contours out as path data with
+    their curves intact. The fill is the only thing the two do differently.
 */
 
 /* Glyphs that define the ascender and the descender of the face, and the glyph
@@ -36,80 +42,89 @@ const CAPITAL = 'H';
 
 /* Number of line segments a curve is cut into before it is filled */
 
-const SEGMENTS = 10;
+export const SEGMENTS = 10;
+
+/*
+    The fraction of a dot the outline has to cover for the dot to be ink. This
+    is the value for Iosevka Medium at these sizes: well under a half, which is
+    dot gain, the way the heat of a thermal head bleeds into the dots around a
+    stem. A higher value thins the face until the light strokes of a `%` break,
+    a lower one closes the counters of `a` and `e`. It lives here, with the fill
+    it belongs to, so that tools/generate.js and the test that fills the
+    outlines again cannot drift apart on it.
+*/
+
+export const INK_THRESHOLD = 0.45;
+
+/* Samples per dot on each axis when the coverage of a dot is measured */
+
+export const SAMPLES = 8;
 
 /* A glyph is never squeezed to less than this fraction of the size of the font */
 
 const MINIMUM_SQUEEZE = 0.7;
 
 /**
- * Flatten the commands of an opentype path into closed polygons
+ * Split the commands of an opentype path into contours, keeping the curves.
  *
- * @param  {object}   path       Path of a glyph, in font units
+ * A contour is an array of commands, `{type: 'M', x, y}`, `{type: 'L', x, y}`,
+ * `{type: 'Q', x1, y1, x, y}`, `{type: 'C', x1, y1, x2, y2, x, y}` and
+ * `{type: 'Z'}`, in the coordinates of the path. A contour that flattens to
+ * fewer than three points carries no ink and is dropped here, so that every
+ * consumer of the contours sees the same set.
+ *
+ * @param  {object}   path       Path of a glyph
  * @param  {number}   segments   Number of line segments a curve is cut into
- * @return {Array}               One array of [x, y] points per contour
+ * @return {Array}               One array of commands per contour
  */
-function flatten(path, segments) {
+function contoursOf(path, segments) {
   const contours = [];
 
   let contour = null;
-  let startX = 0;
-  let startY = 0;
-  let x = 0;
-  let y = 0;
+  let points = 0;
 
   const close = () => {
-    if (contour && contour.length > 2) {
+    if (contour && points > 2) {
       contours.push(contour);
     }
 
     contour = null;
+    points = 0;
   };
 
   for (const command of path.commands) {
     if (command.type === 'M') {
       close();
-      contour = [[command.x, command.y]];
-      startX = x = command.x;
-      startY = y = command.y;
-    } else if (command.type === 'L') {
-      contour.push([command.x, command.y]);
-      x = command.x;
-      y = command.y;
+
+      contour = [{type: 'M', x: command.x, y: command.y}];
+      points = 1;
+
+      continue;
+    }
+
+    if (!contour) {
+      continue;
+    }
+
+    if (command.type === 'L') {
+      contour.push({type: 'L', x: command.x, y: command.y});
+      points += 1;
     } else if (command.type === 'Q') {
-      for (let step = 1; step <= segments; step++) {
-        const t = step / segments;
-        const u = 1 - t;
-
-        contour.push([
-          u * u * x + 2 * u * t * command.x1 + t * t * command.x,
-          u * u * y + 2 * u * t * command.y1 + t * t * command.y,
-        ]);
-      }
-
-      x = command.x;
-      y = command.y;
+      contour.push({type: 'Q', x1: command.x1, y1: command.y1, x: command.x, y: command.y});
+      points += segments;
     } else if (command.type === 'C') {
-      for (let step = 1; step <= segments; step++) {
-        const t = step / segments;
-        const u = 1 - t;
-
-        contour.push([
-          u * u * u * x + 3 * u * u * t * command.x1 + 3 * u * t * t * command.x2 + t * t * t * command.x,
-          u * u * u * y + 3 * u * u * t * command.y1 + 3 * u * t * t * command.y2 + t * t * t * command.y,
-        ]);
-      }
-
-      x = command.x;
-      y = command.y;
+      contour.push({
+        type: 'C',
+        x1: command.x1, y1: command.y1,
+        x2: command.x2, y2: command.y2,
+        x: command.x, y: command.y,
+      });
+      points += segments;
     } else if (command.type === 'Z') {
-      if (contour) {
-        contour.push([startX, startY]);
-      }
+      contour.push({type: 'Z'});
+      points += 1;
 
       close();
-      x = startX;
-      y = startY;
     }
   }
 
@@ -119,19 +134,123 @@ function flatten(path, segments) {
 }
 
 /**
- * The bounding box of a set of contours
+ * Move contours into a cell: every coordinate is scaled and translated, the
+ * control points of the curves with the rest, so that the shape of a curve is
+ * the shape it had in the font
  *
- * @param  {Array}    contours   Contours as flatten returned them
+ * @param  {Array}    contours   Contours as contoursOf returned them
+ * @param  {number}   scaleX     Horizontal scale
+ * @param  {number}   scaleY     Vertical scale
+ * @param  {number}   offsetX    Horizontal offset, applied after the scale
+ * @param  {number}   offsetY    Vertical offset, applied after the scale
+ * @return {Array}               The placed contours
+ */
+function place(contours, scaleX, scaleY, offsetX, offsetY) {
+  const x = (value) => value * scaleX + offsetX;
+  const y = (value) => value * scaleY + offsetY;
+
+  return contours.map((contour) => contour.map((command) => {
+    if (command.type === 'Z') {
+      return command;
+    }
+
+    if (command.type === 'Q') {
+      return {type: 'Q', x1: x(command.x1), y1: y(command.y1), x: x(command.x), y: y(command.y)};
+    }
+
+    if (command.type === 'C') {
+      return {
+        type: 'C',
+        x1: x(command.x1), y1: y(command.y1),
+        x2: x(command.x2), y2: y(command.y2),
+        x: x(command.x), y: y(command.y),
+      };
+    }
+
+    return {type: command.type, x: x(command.x), y: y(command.y)};
+  }));
+}
+
+/**
+ * Flatten contours into closed polygons, cutting every curve into line segments
+ *
+ * @param  {Array}    contours   Contours as contoursOf or place returned them
+ * @param  {number}   segments   Number of line segments a curve is cut into
+ * @return {Array}               One array of [x, y] points per contour
+ */
+export function flatten(contours, segments) {
+  const polygons = [];
+
+  for (const contour of contours) {
+    const polygon = [];
+
+    let startX = 0;
+    let startY = 0;
+    let x = 0;
+    let y = 0;
+
+    for (const command of contour) {
+      if (command.type === 'M') {
+        polygon.push([command.x, command.y]);
+        startX = x = command.x;
+        startY = y = command.y;
+      } else if (command.type === 'L') {
+        polygon.push([command.x, command.y]);
+        x = command.x;
+        y = command.y;
+      } else if (command.type === 'Q') {
+        for (let step = 1; step <= segments; step++) {
+          const t = step / segments;
+          const u = 1 - t;
+
+          polygon.push([
+            u * u * x + 2 * u * t * command.x1 + t * t * command.x,
+            u * u * y + 2 * u * t * command.y1 + t * t * command.y,
+          ]);
+        }
+
+        x = command.x;
+        y = command.y;
+      } else if (command.type === 'C') {
+        for (let step = 1; step <= segments; step++) {
+          const t = step / segments;
+          const u = 1 - t;
+
+          polygon.push([
+            u * u * u * x + 3 * u * u * t * command.x1 + 3 * u * t * t * command.x2 + t * t * t * command.x,
+            u * u * u * y + 3 * u * u * t * command.y1 + 3 * u * t * t * command.y2 + t * t * t * command.y,
+          ]);
+        }
+
+        x = command.x;
+        y = command.y;
+      } else if (command.type === 'Z') {
+        polygon.push([startX, startY]);
+        x = startX;
+        y = startY;
+      }
+    }
+
+    polygons.push(polygon);
+  }
+
+  return polygons;
+}
+
+/**
+ * The bounding box of a set of polygons
+ *
+ * @param  {Array}    polygons   Polygons as flatten returned them
  * @return {object}              The box, or null when there is no ink
  */
-function bounds(contours) {
+function bounds(polygons) {
   let x1 = Infinity;
   let y1 = Infinity;
   let x2 = -Infinity;
   let y2 = -Infinity;
 
-  for (const contour of contours) {
-    for (const [x, y] of contour) {
+  for (const polygon of polygons) {
+    for (const [x, y] of polygon) {
       x1 = Math.min(x1, x);
       y1 = Math.min(y1, y);
       x2 = Math.max(x2, x);
@@ -143,29 +262,29 @@ function bounds(contours) {
 }
 
 /**
- * Fill contours into a cell, with supersampling and a coverage threshold. The
+ * Fill polygons into a cell, with supersampling and a coverage threshold. The
  * fill rule is nonzero winding, the rule TrueType outlines are drawn with.
  *
- * @param  {Array}    contours    Contours in dot coordinates, y down
+ * @param  {Array}    polygons    Polygons in dot coordinates, y down
  * @param  {number}   width       Cell width in dots
  * @param  {number}   height      Cell height in dots
  * @param  {number}   samples     Number of samples per dot on each axis
  * @param  {number}   threshold   Fraction of a dot that has to be covered for it to be ink
  * @return {Uint8Array}           Packed rows of the cell
  */
-function fill(contours, width, height, samples, threshold) {
+export function fill(polygons, width, height, samples, threshold) {
   const rowBytes = Math.ceil(width / 8);
   const cell = new Uint8Array(rowBytes * height);
   const coverage = new Uint16Array(width * height);
 
-  /* Every segment of every contour, closed */
+  /* Every segment of every polygon, closed */
 
   const edges = [];
 
-  for (const contour of contours) {
-    for (let index = 0; index < contour.length; index++) {
-      const [x0, y0] = contour[index];
-      const [x1, y1] = contour[(index + 1) % contour.length];
+  for (const polygon of polygons) {
+    for (let index = 0; index < polygon.length; index++) {
+      const [x0, y0] = polygon[index];
+      const [x1, y1] = polygon[(index + 1) % polygon.length];
 
       if (y0 !== y1) {
         edges.push([x0, y0, x1, y1]);
@@ -238,6 +357,140 @@ function fill(contours, width, height, samples, threshold) {
   return cell;
 }
 
+/*
+    A cubic curve whose control points sit two thirds of the way to one point is
+    a quadratic curve written out as a cubic, which is what a face of quadratic
+    curves comes back as when it has been through a CFF table, the format
+    opentype.js writes. The path writer below turns those back into quadratic
+    curves, which are two numbers shorter each. The two thirds are rounded to
+    whole font units on the way in, so the two ends of a curve disagree about
+    where the control point was; they have to agree to within this, in dots, and
+    the curve then takes the point between them, which is off by at most half of
+    it and bends the curve by less than that again. A curve whose ends disagree
+    by more than this is a curve that is really cubic, and it is written out as
+    one.
+*/
+
+const QUADRATIC_TOLERANCE = 0.1;
+
+/**
+ * Write contours out as SVG path data, with the curves of the face intact.
+ *
+ * Coordinates are rounded to whole units, so a value of 10 units per dot keeps
+ * a tenth of a dot. Every contour is closed with a Z, which is what the fill
+ * does with it anyway, the command letter is left out when it repeats, and a
+ * separator only stands where two numbers would otherwise run together. A
+ * segment that ends where it started once the coordinates are rounded, which a
+ * face has a few of per glyph, is left out: it is nothing to a fill and it is
+ * the same nothing to this path.
+ *
+ * @param  {Array}    contours   Contours as place returned them, in dots
+ * @param  {number}   units      Path units per dot
+ * @return {string}              SVG path data
+ */
+export function pathData(contours, units) {
+  const round = (value) => Math.round(value * units);
+
+  let output = '';
+  let previous = '';
+  let current = null;
+
+  const number = (value) => {
+    const text = String(value);
+
+    if (text.charCodeAt(0) !== 0x2d && /\d$/.test(output)) {
+      output += ' ';
+    }
+
+    output += text;
+  };
+
+  const letter = (type) => {
+    if (type !== previous) {
+      output += type;
+      previous = type;
+    }
+  };
+
+  const write = (type, coordinates) => {
+    const x = coordinates[coordinates.length - 2];
+    const y = coordinates[coordinates.length - 1];
+
+    if (type !== 'M' && current && coordinates.every((value, index) => value === current[index % 2])) {
+      return;
+    }
+
+    letter(type);
+    coordinates.forEach(number);
+
+    current = [x, y];
+  };
+
+  for (const contour of contours) {
+    const commands = contour.filter((command) => command.type !== 'Z');
+
+    const start = commands[0];
+    const last = commands[commands.length - 1];
+
+    /* The last command of a contour that lands on its first point is the
+       closing line, and the Z draws that line itself */
+
+    const closing = last !== start && last.type === 'L' &&
+      round(last.x) === round(start.x) && round(last.y) === round(start.y);
+
+    /* Where the pen is, in dots, which is what a curve is measured against */
+
+    let from = [start.x, start.y];
+
+    for (const command of commands) {
+      if (closing && command === last) {
+        continue;
+      }
+
+      if (command.type === 'Q') {
+        write('Q', [round(command.x1), round(command.y1), round(command.x), round(command.y)]);
+      } else if (command.type === 'C') {
+        /* The control point the quadratic curve would have, seen from each of
+           the two ends of this curve */
+
+        const first = [
+          from[0] + 1.5 * (command.x1 - from[0]),
+          from[1] + 1.5 * (command.y1 - from[1]),
+        ];
+
+        const second = [
+          command.x + 1.5 * (command.x2 - command.x),
+          command.y + 1.5 * (command.y2 - command.y),
+        ];
+
+        if (Math.abs(first[0] - second[0]) <= QUADRATIC_TOLERANCE &&
+            Math.abs(first[1] - second[1]) <= QUADRATIC_TOLERANCE) {
+          write('Q', [
+            round((first[0] + second[0]) / 2), round((first[1] + second[1]) / 2),
+            round(command.x), round(command.y),
+          ]);
+        } else {
+          write('C', [
+            round(command.x1), round(command.y1),
+            round(command.x2), round(command.y2),
+            round(command.x), round(command.y),
+          ]);
+        }
+      } else {
+        write(command.type, [round(command.x), round(command.y)]);
+      }
+
+      from = [command.x, command.y];
+    }
+
+    output += 'Z';
+    previous = '';
+    current = null;
+  }
+
+  return output;
+}
+
 /**
  * An outline font, opened once and measured once, that draws its glyphs into
  * the cells of a bitmap font
@@ -256,21 +509,19 @@ class Rasterizer {
   }
 
   /**
-   * The contours of one character, in font units, with the baseline at y = 0
-   * and y pointing down
+   * The contours and the flattened polygons of one character, in font units,
+   * with the baseline at y = 0 and y pointing down
    *
    * @param  {number}   codepoint   Unicode code point
-   * @return {Array}                Contours, or null when the font has no glyph
+   * @return {object}               Contours and polygons, or null when the font has no glyph
    */
-  #contours(codepoint) {
+  #outline(codepoint) {
     if (!this.#cache.has(codepoint)) {
       const index = this.#font.charToGlyphIndex(String.fromCodePoint(codepoint));
       const glyph = index ? this.#font.glyphs.get(index) : null;
+      const contours = glyph ? contoursOf(glyph.getPath(0, 0, this.#font.unitsPerEm), SEGMENTS) : null;
 
-      this.#cache.set(
-          codepoint,
-          glyph ? flatten(glyph.getPath(0, 0, this.#font.unitsPerEm), SEGMENTS) : null,
-      );
+      this.#cache.set(codepoint, contours ? {contours, polygons: flatten(contours, SEGMENTS)} : null);
     }
 
     return this.#cache.get(codepoint);
@@ -287,7 +538,8 @@ class Rasterizer {
     let value = 0;
 
     for (const character of characters) {
-      const box = bounds(this.#contours(character.codePointAt(0)) || []);
+      const outline = this.#outline(character.codePointAt(0));
+      const box = bounds(outline ? outline.polygons : []);
 
       if (box) {
         value = Math.max(value, pick(box));
@@ -304,7 +556,7 @@ class Rasterizer {
    * @return {boolean}               True when it has one
    */
   has(codepoint) {
-    return this.#contours(codepoint) !== null;
+    return this.#outline(codepoint) !== null;
   }
 
   /**
@@ -351,30 +603,32 @@ class Rasterizer {
   }
 
   /**
-   * Draw one code point into a cell
+   * The contours of one code point as they sit in a cell: the fitting rule of
+   * the font, the per glyph vertical squeeze and the baseline of the cell are
+   * all in them, so they are the glyph, in dots, y down, and whatever is made
+   * of the glyph is made of these
    *
    * @param  {number}   codepoint   Unicode code point
    * @param  {object}   cell        Width, height and baseline row of the cell
    * @param  {object}   metrics     The fit of the font in that cell, from metrics()
-   * @param  {object}   options     Threshold, samples, and whether a glyph that is taller
-   *                                than the cell is squeezed or clipped
-   * @return {Uint8Array}           Packed rows of the cell, or null when the font has no glyph
+   * @param  {object}   options     Whether a glyph that is taller than the cell is squeezed or clipped
+   * @return {Array}                The placed contours, empty for a glyph without ink,
+   *                                or null when the font has no glyph
    */
-  glyph(codepoint, cell, metrics, options) {
-    const {threshold, samples, squeeze = true} = options;
-    const contours = this.#contours(codepoint);
+  contours(codepoint, cell, metrics, options) {
+    const {squeeze = true} = options || {};
+    const outline = this.#outline(codepoint);
 
-    if (!contours) {
+    if (!outline) {
       return null;
     }
 
-    const rowBytes = Math.ceil(cell.width / 8);
-    const box = bounds(contours);
+    const box = bounds(outline.polygons);
 
     /* A glyph without ink, a space */
 
     if (!box) {
-      return new Uint8Array(rowBytes * cell.height);
+      return [];
     }
 
     /*
@@ -405,12 +659,28 @@ class Rasterizer {
 
     const offsetX = (cell.width - metrics.advance * metrics.scaleX) / 2;
 
-    const placed = contours.map((contour) => contour.map(([x, y]) => [
-      x * metrics.scaleX + offsetX,
-      y * scaleY + cell.baseline,
-    ]));
+    return place(outline.contours, metrics.scaleX, scaleY, offsetX, cell.baseline);
+  }
 
-    return fill(placed, cell.width, cell.height, samples, threshold);
+  /**
+   * Draw one code point into a cell
+   *
+   * @param  {number}   codepoint   Unicode code point
+   * @param  {object}   cell        Width, height and baseline row of the cell
+   * @param  {object}   metrics     The fit of the font in that cell, from metrics()
+   * @param  {object}   options     Threshold, samples, and whether a glyph that is taller
+   *                                than the cell is squeezed or clipped
+   * @return {Uint8Array}           Packed rows of the cell, or null when the font has no glyph
+   */
+  glyph(codepoint, cell, metrics, options) {
+    const {threshold, samples} = options;
+    const contours = this.contours(codepoint, cell, metrics, options);
+
+    if (!contours) {
+      return null;
+    }
+
+    return fill(flatten(contours, SEGMENTS), cell.width, cell.height, samples, threshold);
   }
 }
 
