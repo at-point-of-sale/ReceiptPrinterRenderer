@@ -101,6 +101,21 @@ const DOCUMENTS_EN = [
 
 const SUBSET = ['receipt', 'receipt2', 'guest', 'column_border1', 'text_decoration'];
 
+/*
+    The command sets this script no longer captures.
+
+    `stargraphic` prints the images and the paper feeds of a document and
+    nothing else, so the ten fixtures it wrote were blank paper of the right
+    height. Section 16f replaced them with the job receiptio, the console
+    application of the same authors, sends a TSP100: the same wire format
+    carrying the rasterized receipt. tools/external/receiptio/capture.js writes
+    those ten files now, under their old names, and this script refuses to write
+    over them. The set stays in the table above because the contact sheet asks
+    this script for the SVG preview of every fixture, those ten included.
+*/
+
+const CAPTURED_ELSEWHERE = ['stargraphic'];
+
 /* The encoding the documents are captured in. The English documents are ASCII,
    so cp437 is what a printer prints them with; the one capture in
    `multilingual` exercises the other path through receiptline's text(), which
@@ -129,7 +144,8 @@ const NOTES = {
   starlinesbcs: 'Star Line mode of receiptline\'s starlinesbcs command set, which prints its images with the ' +
     'twenty four dot bands of ESC k. Unknown: ESC RS a and ESC GS ETX, the status commands, ESC SP, the right ' +
     'side character spacing, and ESC s, a printer setting.',
-  stargraphic: 'The TSP100 raster mode of receiptline\'s stargraphic command set. That set prints images and ' +
+  stargraphic: 'Not captured here since section 16f, see CAPTURED_ELSEWHERE. The TSP100 raster mode of ' +
+    'receiptline\'s stargraphic command set. That set prints images and ' +
     'paper feeds and nothing else: its text, rules and alignment are empty, so the paper holds only the images ' +
     'of the document and the fixture exercises the raster mode wire format, not the layout. Unknown: ESC RS a ' +
     'and ESC ACK SOH, the status commands.',
@@ -188,6 +204,7 @@ export function captures() {
 
   return result.map((capture) => Object.assign(capture, {
     name: named(capture.document, capture.set, capture.columns, capture.encoding),
+    captured: !CAPTURED_ELSEWHERE.includes(capture.set),
   }));
 }
 
@@ -284,10 +301,20 @@ function capture(item) {
  * @param  {string[]}   only   Names of the fixtures, empty for all of them
  */
 function main(only) {
-  const list = captures().filter((item) => only.length === 0 || only.includes(item.name));
+  const all = captures().filter((item) => item.captured);
+  const elsewhere = captures().filter((item) => !item.captured && only.includes(item.name));
+
+  if (elsewhere.length) {
+    throw new Error(
+        `${elsewhere.map((item) => item.name).join(', ')} is captured by ` +
+        'tools/external/receiptio/capture.js, see section 16f',
+    );
+  }
+
+  const list = all.filter((item) => only.length === 0 || only.includes(item.name));
 
   if (!list.length) {
-    throw new Error(`No such fixture, one of ${captures().map((item) => item.name).join(', ')}`);
+    throw new Error(`No such fixture, one of ${all.map((item) => item.name).join(', ')}`);
   }
 
   console.log(`${LIBRARY} ${version}`);

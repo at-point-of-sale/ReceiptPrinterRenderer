@@ -1,5 +1,8 @@
 The byte streams in this directory were produced by receiptline,
-https://github.com/receiptline/receiptline, which is licensed as follows.
+https://github.com/receiptline/receiptline, and the ten stargraphic ones by
+receiptio, https://github.com/receiptline/receiptio, its console application,
+see section 16f of the implementation plan. Both are of the same authors and
+under the same licence, which is as follows.
 
 Copyright 2019 Open Foodservice System Consortium
 Copyright 2026 OpenReceipt Project

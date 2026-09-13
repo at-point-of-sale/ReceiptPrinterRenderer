@@ -1,9 +1,5 @@
 [
   {
-    "type": "feed",
-    "height": 48
-  },
-  {
     "type": "cut",
     "value": "partial"
   }

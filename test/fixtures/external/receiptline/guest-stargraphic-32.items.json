@@ -1,11 +1,7 @@
 [
   {
     "type": "feed",
-    "height": 40
-  },
-  {
-    "type": "feed",
-    "height": 305
+    "height": 25
   },
   {
     "type": "cut",

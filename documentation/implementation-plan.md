@@ -1250,6 +1250,119 @@ Effort: one day.
 
 <br>
 
+## Section 16f: receiptio
+
+The ten `stargraphic` fixtures of section 16 carry feeds and nothing else.
+receiptline's library emits the images and the paper feeds of a document in that
+command set and leaves its `text`, `align`, `hr` and `vr` empty, so the five
+English documents that have no image come out as blank paper of the right
+height, which is a test of the raster mode wire format and of nothing else.
+That is not what a TSP100 receives from this ecosystem. receiptio, the console
+application of the same authors, rasterizes the whole receipt into one image
+first and sends that image through the same `stargraphic` command set, so its
+job is the receipt, dots and all. This addendum replaces the ten fixtures with
+what receiptio produces, keeps their names so that the parity grouping and the
+contact sheet do not move, and puts receiptio on the sheet as a reference
+rendering of the document next to every receiptline fixture.
+
+Everything sections 16 and 16b rule stays in force: the four files per fixture,
+the provenance fields of section 16 plus `setup`, the licence text kept once per
+directory, the three checks of `test/external.js`, the eye review of every
+golden image before it is frozen, no runtime dependency and nothing generated
+committed.
+
+**1. The capture.** `tools/external/receiptio/capture.js`, the shape of the
+capture scripts of section 16, writes the same ten fixtures into
+`test/fixtures/external/receiptline/`: the five documents the `stargraphic` set
+of section 16 used, `column_border1`, `guest`, `receipt`, `receipt2` and
+`text_decoration`, at 48 and at 32 columns. receiptio is a dev dependency,
+pinned to the version that was installed, Apache 2.0 like receiptline and by the
+same authors, and it depends on receiptline, `iconv-lite` and `pngjs` and on
+nothing else at run time. The invocation is `-p stargraphic -c <columns> -i -l
+en`: `-p stargraphic` selects the Star Graphic Mode command set, `-c` the
+columns, `-l en` the encoding, and `-i`, print as image, is the option that makes
+receiptio rasterize the receipt instead of handing the command set a document it
+cannot print. The width the job carries is receiptio's, not the library's, and
+the provenance records what came out.
+
+**2. What `-i` needs.** receiptio rasterizes by rendering receiptline's own SVG
+of the document in a browser and screenshotting it, and it looks for
+`puppeteer`, or for `sharp`, by name, with `require`. Neither is a dependency of
+this repository and neither may become one: puppeteer downloads a browser of its
+own on install, which a repository with no runtime dependencies has no business
+doing. So the capture script hands receiptio a `puppeteer` of ten lines that
+calls `puppeteer-core`, a dev dependency that downloads nothing, with the
+`executablePath` of a Chromium that is already on the machine. The path comes
+from `RENDERER_CHROMIUM`, or from the browser cache of Playwright or of
+puppeteer where one of them has a `chrome-headless-shell`, the same "look here,
+then there" a reference module of section 16b uses for its tool. The provenance
+`setup` names the browser the capture actually ran with, and the notes say it
+again, so that a later capture can be compared with this one knowing what drew
+the glyphs.
+
+**3. The provenance.** `source` is receiptio's repository, `version` is
+receiptio's version and `file` and `commit` stay the receiptline document and
+the commit of the v4.0.4 tag the other receiptline fixtures name, because the
+input of the capture is that document. `language` is `star-graphics`, the name
+section 16e added, and not the `star-prnt` the ten fixtures carried; `columns` is
+48 or 32 and `width` is what receiptio's job is wide. `notes` says what the
+stream carries, which browser rasterized it and what the eye review found.
+
+**4. Parity.** The rasterized fixtures are not dot for dot the ESC/POS and the
+StarPRNT renders of the same document any more, and they never can be: receiptio
+draws the receipt with the font of a browser and this renderer draws it with
+Iosevka, so every glyph differs. They stay out of the dot for dot comparison,
+where the `stargraphic` set has been since section 16, and they get a structural
+check instead: the render of the rasterized job has the same number of cut items
+as the render of the `escpos` fixture of the same document and the same width,
+and its paper is within a stated tolerance of that fixture's height. A test that
+compares two rasterizations of the same receipt can ask for no more than that
+the receipt is there, is cut where the document cuts it and is about as long as
+the same receipt set in a 12 by 24 cell. The tolerance is one number for all ten,
+generous enough that a browser's font metrics do not fail the suite and tight
+enough that an empty or a doubled receipt does, and the notes record the ratio
+every fixture actually has.
+
+**5. The contact sheet.** `tools/contact-sheet/references/receiptio.js` is a
+reference module of section 16b with one difference, which its header and its
+column title say: the other references render the bytes of the fixture, and this
+one renders the document those bytes came from. receiptio writes a PNG of the
+same document at the same columns, `-p png -c <columns> -l en`, which is the
+same rasterization `-i` embeds in the stargraphic job, and the agreement metric
+of section 16b is computed over it like any other reference. It answers a
+question the others cannot: whether our render of a receiptline stream is the
+receipt the document describes, independent of the command set it was written
+in. It runs for the receiptline fixtures of every language, it renders one PNG
+per document and width rather than one per fixture, because the fixtures of a
+document share it, and it is "not available" with a reason when receiptio, the
+browser or the document is missing.
+
+Deliverables:
+
+- `tools/external/receiptio/capture.js` and the ten replaced fixtures, reviewed
+  and frozen.
+- The structural check of the rasterized fixtures in `test/external.js`, with
+  the reason the dot for dot comparison cannot hold them written next to it.
+- `tools/contact-sheet/references/receiptio.js` and its place in the reference
+  list, the column title that says it renders the document.
+- receiptio in the "Seen in the wild" table of `commands-star-prnt.md` on the
+  raster mode rows it exercises, next to receiptline.
+- `receiptio` and `puppeteer-core` as dev dependencies, both pinned, and no
+  runtime dependency added.
+- Notes: what receiptio emits, the sizes before and after, the structural
+  numbers, the agreement numbers and what the eye review found.
+
+Acceptance:
+
+- `npm test` passes with the ten replaced fixtures making the three checks of
+  section 16 and the structural check of this one.
+- The contact sheet builds with receiptio installed and without it.
+- Version stays 0.3.0, nothing committed.
+
+Effort: half a day.
+
+<br>
+
 ## Notes per section
 
 Filled in during implementation.
@@ -3294,7 +3407,9 @@ receiptline, the decisions of the open items and what the review found:
   `stargraphic` fixtures are therefore a test of the raster mode wire format,
   `ESC * r A`, `ESC * r P`, `ESC * r Y`, the `b` rows and `ESC * r B` with the
   cut of its default mode, and not of the layout. They are kept for that, and
-  they are the only fixtures whose golden image is nearly empty.
+  they are the only fixtures whose golden image is nearly empty. **Section 16f
+  replaced all ten of them with the job receiptio sends**, which is the same
+  wire format carrying the rasterized receipt instead of blank paper.
 - **The review** compared every golden image with receiptline's own SVG preview
   of the same document. 74 of the 84 renders are exactly the size of the
   preview, width and height; the previews are not committed, as the plan
@@ -4356,4 +4471,185 @@ Acceptance:
 - Every fixture of sections 2 to 16d is byte identical, the 123 external ones
   included: the fixtures of the new commands are new files and nothing that was
   frozen moved a dot.
+- Version stays 0.3.0, nothing committed.
+
+<br>
+
+### Section 16f
+
+Implemented on 2026-09-13. Files: `tools/external/receiptio/capture.js`,
+`tools/contact-sheet/references/receiptio.js`,
+`tools/contact-sheet/references/index.js`,
+`tools/contact-sheet/references/shared.js`, `tools/contact-sheet.js`,
+`tools/external/receiptline/capture.js`, `test/external.js`, the ten replaced
+fixtures and the licence header of `test/fixtures/external/receiptline/`,
+`package.json`, `README.md`, `documentation/usage.md`,
+`documentation/commands-star-prnt.md`.
+
+What receiptio needed to run:
+
+- **`-p stargraphic -c <columns> -i -l en`.** `-i`, print as image, is the whole
+  point: without it receiptio hands the document to receiptline's `stargraphic`
+  command set exactly as the library does and the job is the feeds of section
+  16. With it receiptio rasterizes the receipt first, into
+  `|{i:<base64 PNG>}`, and that one image goes through the command set.
+- **A browser, through a ten line shim.** receiptio rasterizes by rendering
+  receiptline's own SVG of the document and screenshotting it, and it looks for
+  `puppeteer`, then for `sharp`, with `require` and by name. Neither may be a
+  dependency of this repository: puppeteer downloads a browser of its own on
+  install and sharp is a native module. So the capture script puts a module
+  named `puppeteer` in the CJS module cache, resolves that name to it and lets
+  it be `puppeteer-core` with an `executablePath`, and receiptio itself is
+  untouched. `puppeteer-core` 25.10.0 is the dev dependency, it downloads
+  nothing, and the browser this capture used is the `chrome-headless-shell` of
+  Playwright's cache,
+  `~/Library/Caches/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-mac-arm64/chrome-headless-shell`.
+  `chromium()` looks at `RENDERER_CHROMIUM` first and then at the browser caches
+  of Playwright and of puppeteer, newest first, the same "look here, then there"
+  the reference modules of section 16b use; the provenance `setup` of the ten
+  fixtures says all of it.
+- **`receiptio` 5.0.1, Apache 2.0**, pinned, which depends on receiptline,
+  `iconv-lite` and `pngjs` and pulls in the same receiptline 4.0.4 the other
+  fixtures were captured with. No runtime dependency was added.
+- **There is no printer profile for the paper width.** receiptio has none: the
+  width of a Star Graphic Mode job is the columns of `-c`, 24 to 96, times the
+  twelve dot cell, and the rasterized image is what receiptline pads to whole
+  bytes. So 48 columns is 576 dots and 32 is 384, the same 80 and 58 mm papers
+  the library gives, and nothing like the 512 the question allowed for. The
+  capture measures the width off the first raster row of the job rather than
+  assuming it, and reports when the two disagree; over the ten captures they
+  never did.
+- **The capture is reproducible.** A second run of the same browser writes a
+  byte identical `.bin`: the screenshot of a static SVG carries no timestamp and
+  no randomness. A different browser would move dots, which is why the
+  provenance `setup` names the one that drew these.
+
+What receiptio emits, per job, and it is the same five things for all ten:
+`ESC RS a 0`, the print start control; `ESC * r A`, enter raster mode;
+`ESC * r P 0`, the page mode with a length of zero, the continuous paper;
+**one `b nL nH d..` row per dot row of the receipt**, 72 bytes at 48 columns and
+48 at 32; `ESC * r B`, which leaves the mode, prints the buffer and cuts in the
+default mode; and `ESC ACK SOH`, the status request. **No `ESC * r Y` at all**:
+the library emits a feed command per blank line and receiptio's job has no blank
+lines, every white row of the receipt is a `b` row of zero dots. Nothing of it
+is unknown to this renderer, the `unknown` count of all ten fixtures is zero as
+it was, and the two commands that are not rendered, the print start control and
+the status request, have been parsed since section 16c.
+
+The fixtures, before and after:
+
+| | before, the library | after, receiptio |
+|---|---|---|
+| The ten `.bin` together | 14.9 kB | 266.4 kB |
+| The ten `.pbm` together | 172.3 kB | 253.4 kB |
+| The smallest job | 35 bytes, `text-decoration-48` | 11.3 kB |
+| The largest job | 3.7 kB, `receipt2-48` | 44.1 kB |
+| What the paper holds | blank paper of the right height | the receipt |
+
+A rasterized receipt is an order of magnitude more bytes than the same receipt
+as text, which is the real cost of the Star Graphic Mode and worth having in the
+suite as bytes.
+
+The structural check, `test/external.js`: the rasterized job is not dot for dot
+the `escpos` render of the same document and never can be, receiptio draws the
+receipt with the font of a browser and this renderer with Iosevka in a 12 by 24
+cell, so the ten fixtures stay out of the dot for dot parity, where the
+`stargraphic` set has been since section 16, and they get the same number of cut
+items as the `escpos` fixture of the same document and the same width and a
+paper height within 30 per cent of it. Every one of the ten has exactly one cut,
+as its `escpos` counterpart does, and the heights are:
+
+| Fixture | receiptio | escpos | ratio |
+|---|---|---|---|
+| `column-border1-48` | 270 | 216 | 1.250 |
+| `column-border1-32` | 420 | 336 | 1.250 |
+| `guest-48` | 528 | 504 | 1.048 |
+| `guest-32` | 558 | 528 | 1.057 |
+| `receipt-48` | 426 | 360 | 1.183 |
+| `receipt-32` | 426 | 360 | 1.183 |
+| `receipt2-48` | 588 | 504 | 1.167 |
+| `receipt2-32` | 708 | 600 | 1.180 |
+| `text-decoration-48` | 150 | 144 | 1.042 |
+| `text-decoration-32` | 222 | 216 | 1.028 |
+
+**The 1.25 is not an accident and it is the surprise of this section.**
+receiptio prints with receiptline's wider line spacing by default, 30 dots a
+line, `charWidth * 2.5`, and `-s`, paper saving, is what reduces it to the 24
+dots of the cell; `receiptline.transform()` has that switch off by default, so
+the streams of section 16 are 24 dot lines. A document that is nothing but text
+lines is therefore exactly a quarter taller in receiptio's rasterization than in
+its own ESC/POS stream, which is `column_border1`, and a document that spends
+part of its height on images and barcodes is less, which is `guest` and
+`text_decoration`. `-p png -c 48 -l en -s` of `column_border1` gives 216 rows,
+the escpos render to the dot, which is how it was settled. The capture keeps
+receiptio's default, because the job a TSP100 receives is the job receiptio
+sends and not the one that would agree best with the other fixtures. The
+tolerance of 30 per cent is that quarter plus a little: a receipt that came out
+empty, or twice, fails it.
+
+The eye review, every golden as ASCII art and as a PNG next to receiptio's own
+PNG of the same document, which the capture writes to `build/receiptio/` with
+`--png`:
+
+- **Our render of receiptio's job is receiptio's image.** Same width, same
+  height, ink rows within two, and between 0.34 and 0.73 per cent of the dots
+  differ. The difference is receiptline's dithering: it converts the greyscale
+  screenshot to one bit with error diffusion, so the antialiased edge of a glyph
+  becomes a dotted edge, which the ASCII art shows as a `#.#.#.#.` row along the
+  bottom of a heavy character. Everything else is dot for dot.
+- The papers themselves are the receipts of the documents, boxes, tables,
+  inverted headings, the Code 128 of `guest` and the four sizes of
+  `text_decoration` included, and they read as receipts at both widths.
+  `receipt2` at 32 columns wraps a table cell to a second line with a single
+  `e` on it, which is receiptline's own column wrapping of that document and is
+  in the SVG preview as well.
+- **A PNG on a transparent background is not a black page.** receiptio
+  screenshots with `omitBackground`, so the paper is alpha zero over black, and
+  `fromPng()` of `tools/contact-sheet/references/shared.js` averaged the three
+  colour channels and called every pixel ink: the first agreement numbers said
+  the reference had ink in all 426 rows of the receipt. It composites a pixel of
+  a colour type with alpha over the white of the paper now, which is the only
+  reading a render of a receipt allows, and the thermal and ESCPost renders are
+  unaffected, they write RGB.
+
+The contact sheet, `receiptio, from the document`:
+
+- It runs for all **84 receiptline fixtures**, of every command set, next to
+  thermal's 76 and ESCPost's 24, and it renders **26 PNGs** for them, one per
+  document and width, because the fixtures of a document share the rendering.
+  The whole sheet takes about 20 seconds with it.
+- The agreement over the 84: receiptio's rasterization is **0 to 25 per cent
+  taller** than our render, 13.1 per cent on average, and carries **9.9 per cent
+  fewer ink rows** on average, between 27.8 per cent fewer and 8.2 per cent
+  more. The height spread is the line spacing above, the widest being every
+  `column_border1` fixture at 25.0 per cent and the narrowest the
+  `text_decoration` ones at 2.5; the ink rows are lower because the extra six
+  dots a line are blank.
+- **The ten stargraphic fixtures agree to 0.0 per cent**, in height and in ink
+  rows both, which is the sheet saying what the review said: the bytes carry
+  that image.
+- Without receiptio installed every cell of the column says "not available,
+  receiptio is not installed, see the dev dependencies" and the sheet builds; the
+  same holds when `puppeteer-core` or a browser is missing, with the reason
+  naming which.
+
+Two things that had to be kept from drifting:
+
+- **`tools/external/receiptline/capture.js` no longer writes the ten files.**
+  Running it would have put the feeds back under the same names. It refuses a
+  `stargraphic` fixture by name now, with a message pointing at the receiptio
+  script, and it leaves the set in its table because the contact sheet asks it
+  for the SVG preview of every fixture, those ten included.
+- **The provenance names both projects.** `source` is receiptio and `version` is
+  its version, `file` and `commit` stay the ReceiptLine document and the commit
+  of the receiptline v4.0.4 tag, because that document is what was rasterized,
+  and the licence header of `test/fixtures/external/receiptline/LICENSE` says
+  the ten streams are receiptio's. Both are Apache 2.0 and of the same authors,
+  so the directory keeps one licence text.
+
+Acceptance:
+
+- `npm test` 2380 passing, lint clean, with the ten replaced fixtures making the
+  three checks of section 16 and the thirty checks of this one.
+- `npm run contact-sheet` builds with receiptio and without it.
 - Version stays 0.3.0, nothing committed.

@@ -201,13 +201,19 @@ const EXCEPTIONS = {
  * makes them differ
  *
  * @param  {string}   name   Name of the fixture
- * @return {object}          The document and the set
+ * @return {object}          The document, the set, the columns and the key of the document
  */
 function parse(name) {
   const match = name.match(/^(.+)-(escpos|generic|starsbcs|starlinesbcs|stargraphic)-(\d+)(-\w+)?$/);
 
   return match ?
-    {document: match[1], set: match[2], key: `${match[1]}-${match[3]}${match[4] || ''}`} :
+    {
+      document: match[1],
+      set: match[2],
+      columns: match[3],
+      encoding: match[4] || '',
+      key: `${match[1]}-${match[3]}${match[4] || ''}`,
+    } :
     null;
 }
 
@@ -245,8 +251,11 @@ describe('parity over the receiptline fixtures', function() {
 
   for (const [key, list] of documents) {
     describe(key, function() {
-      /* The Star raster mode of the stargraphic command set carries no text at
-         all, see the notes of section 16, so it is not part of the comparison */
+      /* The stargraphic fixtures are the rasterized job receiptio sends, see
+         section 16f: the receipt is one image drawn with the font of a browser,
+         so it can never be dot for dot the paper the text command sets make of
+         the same document. They are out of this comparison, where they have
+         been since section 16, and they are checked structurally below */
 
       const groups = new Map();
 
@@ -320,6 +329,84 @@ describe('parity over the receiptline fixtures', function() {
           }
         });
       }
+    });
+  }
+});
+
+/*
+    The rasterized stargraphic fixtures, section 16f.
+
+    The ten stargraphic fixtures are not receiptline's library any more, they
+    are the job receiptio sends a TSP100: receiptio rasterizes the whole receipt
+    into one image and hands that image to the same command set, so the paper
+    carries the receipt and not the blank paper the library alone emits.
+
+    That paper cannot be compared dot for dot with the escpos and the starsbcs
+    renders of the same document. receiptio draws the receipt with receiptline's
+    SVG in a browser and this renderer draws it with Iosevka in a 12 by 24 cell,
+    so every glyph differs and no exception list could hold that. What can be
+    checked is that the receipt is there, that it is cut where the document cuts
+    it and that it is about as long as the same document set in cells:
+
+      - the same number of cut items as the escpos fixture of the same document
+        and the same width,
+      - a paper height within TOLERANCE of that fixture's height.
+
+    The height of receiptio's image is receiptline's own SVG height, which comes
+    out of the line count and not out of the font, so the tolerance carries the
+    difference between a rasterized receipt and a typeset one and not the
+    difference between two browsers. The ratios the ten fixtures have are in the
+    notes of section 16f; the widest is a quarter.
+
+    Both fixtures are rendered the way their provenance says, without the
+    profile normalisation of the parity test above: the rasterized job is images
+    and feeds, where a profile changes nothing at all.
+*/
+
+const TOLERANCE = 0.3;
+
+describe('the rasterized receiptio fixtures', function() {
+  const rasterized = fixtures('receiptline')
+      .map((name) => Object.assign({name}, parse(name)))
+      .filter((entry) => entry.set === 'stargraphic');
+
+  it('should have the rasterized fixtures', function() {
+    assert.isAbove(rasterized.length, 0);
+  });
+
+  for (const entry of rasterized) {
+    describe(entry.name, function() {
+      const counterpart = `${entry.document}-escpos-${entry.columns}${entry.encoding}`;
+
+      it('should be the job of receiptio', function() {
+        const provenance = external('receiptline', entry.name).provenance;
+
+        assert.equal(provenance.source, 'https://github.com/receiptline/receiptio');
+        assert.equal(provenance.language, 'star-graphics');
+      });
+
+      it(`should cut where ${counterpart} cuts`, function() {
+        const ours = external('receiptline', entry.name);
+        const theirs = external('receiptline', counterpart);
+
+        assert.equal(
+            ours.commands.filter((item) => item.type === 'cut').length,
+            theirs.commands.filter((item) => item.type === 'cut').length,
+        );
+      });
+
+      it(`should be as long as ${counterpart}, within ${TOLERANCE * 100} per cent`, function() {
+        const ours = external('receiptline', entry.name);
+        const theirs = external('receiptline', counterpart);
+
+        const ratio = ours.paper.height / theirs.paper.height;
+
+        assert.isTrue(
+            Math.abs(ratio - 1) <= TOLERANCE,
+            `${entry.name} is ${ours.paper.height} rows and ${counterpart} is ${theirs.paper.height}, ` +
+            `a ratio of ${ratio.toFixed(3)}`,
+        );
+      });
     });
   }
 });

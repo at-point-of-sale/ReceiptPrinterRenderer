@@ -1,16 +1,16 @@
 {
-  "source": "https://github.com/receiptline/receiptline",
+  "source": "https://github.com/receiptline/receiptio",
   "file": "example/data/en/guest.receipt",
   "commit": "f93b6747d031e03f75ed49d8079d24edbabf63f6",
   "licence": "Apache-2.0",
-  "setup": "npm install",
-  "command": "node tools/external/receiptline/capture.js guest-stargraphic-48",
-  "version": "4.0.4",
-  "language": "star-prnt",
+  "setup": "npm install, and a Chromium for receiptio to rasterize with: this capture used the chrome-headless-shell of Playwright's browser cache through puppeteer-core, RENDERER_CHROMIUM overrides the path, see tools/external/receiptio/capture.js",
+  "command": "node tools/external/receiptio/capture.js guest-stargraphic-48",
+  "version": "5.0.1",
+  "language": "star-graphics",
   "columns": 48,
   "width": 576,
   "codepageMapping": "star",
-  "captured": "2026-09-12",
+  "captured": "2026-09-13",
   "unknown": 0,
-  "notes": "The TSP100 raster mode of receiptline's stargraphic command set. That set prints images and paper feeds and nothing else: its text, rules and alignment are empty, so the paper holds only the images of the document and the fixture exercises the raster mode wire format, not the layout. No unknown items: ESC RS a and ESC ACK SOH, the print start control and the status request, are parsed since section 16c. Reviewed against receiptline's SVG preview of the same document."
+  "notes": "The Star Graphic Mode job receiptio sends a TSP100 for this document, section 16f: the receipt rasterized into one image by receiptline's SVG in a headless Chromium and sent through the raster mode as ESC * r A, ESC * r P, the b rows of the image and ESC * r B, which prints the buffer and cuts. The paper is the receipt, not the blank paper the library alone emits, and its dots are the browser's font and not this renderer's, so it is out of the dot for dot parity and in the structural check of test/external.js instead. No unknown items: ESC RS a and ESC ACK SOH, the print start control and the status request, are parsed since section 16c. Reviewed against receiptio's own PNG of the same document."
 }

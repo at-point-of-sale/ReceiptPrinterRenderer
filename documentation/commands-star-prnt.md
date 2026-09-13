@@ -309,7 +309,7 @@ These commands change nothing about the paper of the receipt that is being rende
 | Command | Name | Status | Notes |
 |---|---|---|---|
 | `ESC GS ETX s n1 n2` | automatic status | Parsed | The renderer never answers a status request, it has no channel back to the host, and a request cannot reach the paper. |
-| `ESC ACK SOH` | real time status | Parsed | The three bytes of the Star Graphic Mode status request. receiptline ends every raster mode job with it, see [Seen in the wild](#seen-in-the-wild). |
+| `ESC ACK SOH` | real time status | Parsed | The three bytes of the Star Graphic Mode status request. receiptline and receiptio end every raster mode job with it, see [Seen in the wild](#seen-in-the-wild). |
 | `ESC GS # n` | print density | Parsed | The darkness of the dots, which a one bit image has no room for. |
 | `ESC RS d n` | print density | Parsed | The same. |
 | `ESC RS r n` | print speed | Parsed | How fast the paper moves, not where it stops. |
@@ -342,6 +342,8 @@ The tables above say what the renderer does with a command. This one says which 
 
 receiptline is the only library of that set with a Star back end, and it has three: `starsbcs` is StarPRNT, `starlinesbcs` is Star Line Mode, and `stargraphic` is the raster mode of a TSP100. The same twenty one documents also go through its ESC/POS command sets, which is what the parity test of `test/external.js` compares.
 
+The ten raster mode fixtures are not receiptline's library but [receiptio](https://github.com/receiptline/receiptio), its console application, [section 16f of the implementation plan](implementation-plan.md). The library emits the images and the paper feeds of a document in the `stargraphic` command set and nothing else, so a document without an image came out as blank paper; receiptio rasterizes the whole receipt into one image first and sends that through the same command set, which is what a TSP100 really receives. So the rows below that say receiptio are the raster mode as a printer meets it: one `b` row per dot row of the receipt, blank rows included, and no feed command at all.
+
 The sources of section 16b, the sample streams and the reference renderers, are ESC/POS only: ESCPost, escpos-tools and thermal neither write nor read a Star language, so this table is unchanged by them, and the reference renderings on the contact sheet leave the Star fixtures out for the same reason.
 
 | Command | Name | Status | Seen in |
@@ -363,11 +365,11 @@ The sources of section 16b, the sample streams and the reference renderers, are 
 | `ESC b n1 n2 n3 n4 d.. RS` | barcode | Rendered | receiptline, with the symbology and the module width as ASCII digits, Code 39 and Code 128 |
 | `ESC k nL nH d..` | bit image, twenty four dot band | Rendered | receiptline, for every image in Star Line Mode |
 | `ESC GS S m n1..n5 d..` | raster image | Rendered | receiptline, for every image in StarPRNT |
-| `ESC * r ..` | raster mode group | Rendered | receiptline, the `stargraphic` command set: `ESC * r A` to enter, `ESC * r P` for the page mode, `ESC * r Y` for every line feed, `b` for every row of dots and `ESC * r B` to leave, which prints the buffer and cuts in the default mode |
+| `ESC * r ..` | raster mode group | Rendered | receiptline, the `stargraphic` command set: `ESC * r A` to enter, `ESC * r P` for the page mode, `ESC * r Y` for every line feed, `b` for every row of dots and `ESC * r B` to leave, which prints the buffer and cuts in the default mode. receiptio, the same four commands and no `ESC * r Y` at all: its job is one rasterized receipt, so every blank row is a `b` row of zero dots rather than a feed |
 | `ESC d n` | cut | Rendered | receiptline |
 | `ESC s n1 n2` | printer setting | Parsed | receiptline, in its printer setup |
 | `ESC GS ETX s n1 n2` | automatic status | Parsed | receiptline, at the end of every job |
-| `ESC RS a n` | print start control | Parsed | receiptline, in its printer setup |
-| `ESC ACK SOH` | real time status | Parsed | receiptline, at the end of every raster mode job |
+| `ESC RS a n` | print start control | Parsed | receiptline, in its printer setup; receiptio, as the first command of a raster mode job |
+| `ESC ACK SOH` | real time status | Parsed | receiptline and receiptio, at the end of every raster mode job |
 
 **Not one of these produces an `unknown` item any more.** Five of them did until section 16c: `ESC SP`, `ESC s`, `ESC RS a` and `ESC GS ETX` of the printer setup and the status channel of the text command sets, and `ESC RS a` and `ESC ACK SOH` of the raster one, 168 items over the 47 Star fixtures. `ESC SP` is rendered now, as the character spacing it is, and the other four are parsed because none of them can touch the paper.

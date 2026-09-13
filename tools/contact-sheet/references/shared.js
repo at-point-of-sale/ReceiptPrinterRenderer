@@ -331,6 +331,18 @@ export async function fromPng(bytes, threshold = 128) {
         value = (sample(row, base, depth) + sample(row, base + 1, depth) + sample(row, base + 2, depth)) / 3;
       }
 
+      /* A pixel of a colour type with alpha is composited over the white of the
+         paper, which is the only reading that makes sense of a render on a
+         transparent background: receiptio screenshots its receipt with
+         `omitBackground`, so its whole page is black at an alpha of zero and
+         every row would carry ink without this. Section 16f. */
+
+      if (colour === 4 || colour === 6) {
+        const alpha = sample(row, x * channels + channels - 1, depth) / 255;
+
+        value = value * alpha + 255 * (1 - alpha);
+      }
+
       if (value < threshold) {
         Bitmap.setPixel(bitmap, x, y, 1);
       }

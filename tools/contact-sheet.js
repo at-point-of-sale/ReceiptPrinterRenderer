@@ -19,9 +19,11 @@ import {agreement} from './contact-sheet/references/shared.js';
 
     Next to our render it shows what other renderers make of the same bytes,
     where they are installed on this machine: thermal and ESCPost, both of which
-    produce an image. Every tool is a module of tools/contact-sheet/references,
-    and a tool that is not there is a "not available" cell, never a failure, so
-    the sheet builds on a machine with none of them.
+    produce an image, and receiptio, which renders the document a receiptline
+    fixture was made from rather than its bytes, see section 16f. Every tool is
+    a module of tools/contact-sheet/references, and a tool that is not there is
+    a "not available" cell, never a failure, so the sheet builds on a machine
+    with none of them.
 
     The page also carries a coarse agreement metric per reference: the reference
     is scaled to our width, and the table gives the rows that carry ink in both
@@ -105,7 +107,10 @@ async function previews(library) {
  * @return {object}               The HTML of the cell and the row of the table
  */
 function cell(reference, paper, name) {
-  const title = `${escape(reference.tool)} ${escape(reference.version)}`;
+  /* A module that renders something else than our bytes says so in a title of
+     its own, which is receiptio of section 16f and nothing else so far */
+
+  const title = `${escape(reference.title || reference.tool)} ${escape(reference.version)}`;
 
   if (!reference.available) {
     return {
@@ -250,7 +255,7 @@ async function main() {
   const tools = modules.map((module) => {
     const ran = rows.some((row) => row.tool === module.name);
 
-    return `<li><strong>${escape(module.name)}</strong> ${escape(module.version)}, ` +
+    return `<li><strong>${escape(module.title || module.name)}</strong> ${escape(module.version)}, ` +
       `${escape(module.kind)}${ran ? '' : ', see its module for what it needs'}</li>`;
   }).join('\n');
 
