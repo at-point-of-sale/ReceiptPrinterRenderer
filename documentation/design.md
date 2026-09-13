@@ -122,13 +122,15 @@ src/
     code128.js ean.js upc.js code39.js itf.js codabar.js code93.js
   formats/
     image-data.js pbm.js png.js stitch.js
+  svg/
+    trace.js                    a 1-bit bitmap as the rectangles of a path, for the outlines and the SVG output
 data/
   fonts/                        the outline font the bitmap fonts are rasterized from, and its licence
   mappings/                     codepage mappings per language, copied from ReceiptPrinterEncoder
   profiles/                     defaults per printer family
-generated/                      packed fonts, mappings and profiles, built by tools/generate.js
-tools/generate.js               writes generated/, rasterizes the bitmap fonts
-tools/rasterize.js              outline font to the cells of a bitmap font
+generated/                      packed fonts, glyph outlines, mappings and profiles, built by tools/generate.js
+tools/generate.js               writes generated/, rasterizes the bitmap fonts and writes their outlines
+tools/rasterize.js              outline font to the cells of a bitmap font, and to path data
 tools/box-drawing.js            the synthetic box drawing and block glyphs
 tools/subset-font.js            cuts the outline font down to the code points that can be printed
 test/
@@ -515,6 +517,8 @@ A fixed-cell bitmap font, stored as packed glyph arrays by `tools/generate.js`, 
 The fitting rule is the advance width of the face, see `tools/rasterize.js`. The advance of one character is exactly one cell, 12 dots for font A and 8 for font B; Iosevka's advance is half an em, so the em lands on 24 and 16 dots with no rounding and no vertical squeeze. The baseline is row 18 of the 24 row cell and row 12 of the 16 row one, the cap height comes out at 17.6 and 11.8 dots, and nothing is scaled horizontally, so every glyph keeps the side bearings the designer gave it and the rhythm of a line is even. A dot becomes ink when the outline covers 0.45 of it, measured on an 8 by 8 grid of samples with a nonzero winding fill: below a half on purpose, which is the dot gain of a thermal head.
 
 The box drawing and block characters, U+2500 to U+259F, are drawn on the dot grid by `tools/box-drawing.js` instead of taken from the face, because they have to leave a cell at exactly the dot the next cell expects. A light line is two dots, a heavy line four, a double line two single dot lines three dots apart, and junctions are drawn from their four arms.
+
+The same pass writes the outlines of the glyphs to `generated/outlines.js`, for the SVG output. A glyph is placed in its cell once, by `contours()` of `tools/rasterize.js`, and both the bitmap and the outline come out of that one set of placed contours, so an outline sits on the bitmap it was rasterized from. A glyph path is absolute M, L, Q, C and Z, in tenths of a dot in the frame of the 12 by 24 cell with y down, the curves of the face kept as curves; a C stands only where a curve is not a quadratic one within a tenth of a dot, of which the face has none, and a box path is M, Z and the relative h and v of its rectangles in whole dots. A path is not clipped by its cell while the bitmap of a glyph is, so a consumer clips every glyph to its cell: 93 glyphs of the face paint outside it, five of them wholly, the combining accents a monospaced face gives no advance. A tenth of a dot is finer than a printer can show but not fine enough to reproduce a coverage threshold, so filling a path again with the same 8 by 8 samples and the same 0.45 rule gives the packed glyph back to within a few dots rather than exactly: 599 dots over the 704 glyphs of font A and 209 over font B, the worst glyph 13 of the 288 dots of its cell, mostly diagonals whose edge dots sit on the threshold. `test/outlines.js` measures it per glyph and reports the totals. Equality is not the goal: the bitmap font is going to be tweaked by hand on the dot grid and drift from the face on purpose, and the vector output is judged on the agreement of a whole receipt. Font B is the same path at two thirds, because its own fit in the 8 by 16 cell comes out as exactly that; the format carries a `glyphsB` set for the glyphs where it would not, which is empty as long as the two cells squeeze a glyph the same way. The box drawing characters are not outlines at all: they are traced out of the cell the painter renders, with the stretch to the edges applied, by `src/svg/trace.js`, which merges the runs of black dots of a bitmap into rectangles, and they are stored per cell size, 12x24, 9x17 and 9x24, in whole dots. Nothing in `src/` imports the file yet; the SVG entry will. The format is documented in the generate tool next to the packed font format.
 
 Coverage is 779 code points, everything the codepage tables of the encoder hold except Thai, Hebrew, Arabic, Khmer and the Japanese half width forms: Latin, Greek, Cyrillic and the symbol tail of cp437 are complete in both sizes. Characters without a glyph are drawn as the fallback glyph, U+FFFD of the face, a question mark in a diamond. A glyph in the 12x24 font is 48 bytes, so the two fonts together are 83 kB of source. The packed format is documented in the generate tool so that other fonts can be converted.
 

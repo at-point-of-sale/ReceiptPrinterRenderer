@@ -1,9 +1,11 @@
 import fs from 'node:fs';
 import {stringify} from 'javascript-stringify';
 
-import Rasterizer from './rasterize.js';
+import Rasterizer, {pathData, INK_THRESHOLD, SAMPLES} from './rasterize.js';
 import {boxGlyph, BOX_DRAWING} from './box-drawing.js';
 import {usedCodepoints, REPLACEMENT_CHARACTER} from './codepoints.js';
+import Font from '../src/font.js';
+import trace from '../src/svg/trace.js';
 
 /*
     Generates the packed resources in generated/ from the sources in data/:
@@ -13,6 +15,8 @@ import {usedCodepoints, REPLACEMENT_CHARACTER} from './codepoints.js';
     - generated/profiles.js   printer profiles from data/profiles
     - generated/fonts.js      packed glyph bitmaps, rasterized from the outline
                               font in data/fonts, added together with the painter
+    - generated/outlines.js   the outlines of the same glyphs as path data, for
+                              the SVG output
     - generated/pdf417.js     the symbol characters of PDF417 from data/pdf417,
                               one array of module patterns per cluster
 
@@ -171,23 +175,65 @@ function generatePdf417() {
     horizontally, so the rhythm of the face survives dot for dot.
 */
 
+/*
+    Outline format, generated/outlines.js:
+
+        {
+          version: 1,
+          cell: {width: 12, height: 24},   the cell the glyph paths are drawn in
+          baseline: 18,                    row of that cell the glyphs stand on
+          units: 10,                       path units per dot in glyphs and glyphsB
+          glyphs: {65: 'M...Z', ...},      font A, by code point
+          glyphsB: {...},                  font B, only where it is not two thirds of font A
+          box: {'12x24': {9472: 'M...Z'},  the box drawing glyphs per cell, in whole dots
+                '9x17': {...}, '9x24': {...}},
+          fallback: 65533,                 the code point of the glyph drawn for the rest
+        }
+
+    A glyph path of `glyphs` and `glyphsB` is absolute M, L, Q, C and Z, in the
+    frame of the cell with y pointing down, in units of a tenth of a dot, so it
+    is placed under `scale(.1)`. A C stands only where a curve of the face is
+    not a quadratic one to within a tenth of a dot, see tools/rasterize.js;
+    there is none in the face of today, so these paths are M, L, Q and Z.
+    A box path is M, Z and the relative h and v of the rectangles the tracer
+    emits, in whole dots, and nothing else. The command letter is left out
+    where it repeats, in both. The fill rule is nonzero, the rule TrueType is
+    drawn with.
+
+    A path may be the empty string, which the carriage return, the space and the
+    no break space are: test a code point with `codepoint in glyphs`, not with
+    the truth of what comes out.
+
+    A path is not clipped by its cell and the bitmap of a glyph is. 93 of the
+    glyphs of the face paint outside the 12 by 24 cell, five of them wholly,
+    the combining accents a monospaced face gives no advance; a consumer clips
+    every glyph to its cell, which is what the bitmap does for the printer.
+
+    A glyph path is the same set of placed contours the bitmap of the glyph was
+    filled from, see tools/rasterize.js: the advance of the face is one cell
+    wide, the baseline sits on row 18, and a glyph that is taller than the cell
+    is squeezed vertically by itself. The curves of the face are kept as they
+    are, so an outline scales where the bitmap does not.
+
+    `glyphs` holds an entry for every code point of tools/codepoints.js the face
+    has, outside the box drawing range; a code point without an entry is drawn
+    with the glyph of `fallback`, as the packed font does. Font B is fitted into
+    its own 8 by 16 cell by its own metrics, which comes out as exactly two
+    thirds of font A for every glyph whose vertical squeeze is the same in both
+    cells; `glyphsB` holds the ones where it does not, in the frame of the 8 by
+    16 cell and in the same units, and is empty while the two cells agree.
+
+    `box` holds the box drawing and block characters, U+2500 to U+259F, which
+    are not outlines at all: they are drawn on the dot grid, stretched to the
+    edges of the cell by the painter, and differ per cell size, so they are
+    traced out of the rendered cell of the packed font by src/svg/trace.js, in
+    whole dots. The three cells are the ones the profiles use: 12 by 24 for font
+    A, and 9 by 17 and 9 by 24 for font B.
+*/
+
 /* The outline font the glyphs are rasterized from */
 
 const SOURCE = 'data/fonts/iosevka-medium-subset.ttf';
-
-/*
-    The fraction of a dot the outline has to cover for the dot to be ink. This
-    is the value for Iosevka Medium at these sizes: well under a half, which is
-    dot gain, the way the heat of a thermal head bleeds into the dots around a
-    stem. A higher value thins the face until the light strokes of a `%` break,
-    a lower one closes the counters of `a` and `e`.
-*/
-
-const INK_THRESHOLD = 0.45;
-
-/* Samples per dot on each axis when the coverage of a dot is measured */
-
-const SAMPLES = 8;
 
 /* The fonts that are packed, in the order they appear in the output, with the
    cell they are drawn in and the row their baseline sits on */
@@ -196,6 +242,38 @@ const FONTS = [
   {name: '12x24', width: 12, height: 24, baseline: 18},
   {name: '8x16', width: 8, height: 16, baseline: 12},
 ];
+
+/*
+    Path units per dot in the glyph outlines. A tenth of a dot is finer than a
+    printer can show and finer than the eighth of a dot the rasterizer samples
+    at, and it keeps the file small.
+
+    It is not fine enough to give the packed glyph back exactly when a path is
+    filled again with the coverage rule below: that rule is a threshold, so a
+    dot at the edge of a stroke sits on a knife edge and a stem that moves by
+    half a unit takes a handful of dots with it. That is on purpose. The bitmap
+    font is going to be tweaked by hand on the dot grid and drift from the face
+    anyway, so the outlines are drawn to sit on the bitmaps, not to reproduce
+    them; test/outlines.js fills every path again and reports what it costs.
+*/
+
+const OUTLINE_UNITS = 10;
+
+/* The cells the outlines of the box drawing characters are traced for, with the
+   font a printer draws them with: font A in its 12 by 24 cell, font B in the 9
+   by 17 cell of an Epson and the 9 by 24 cell of a Star */
+
+const OUTLINE_CELLS = [
+  {name: '12x24', font: '12x24', width: 12, height: 24},
+  {name: '9x17', font: '8x16', width: 9, height: 17},
+  {name: '9x24', font: '8x16', width: 9, height: 24},
+];
+
+/* Font B is font A at two thirds, and keeps an outline of its own only when its
+   contours are further than this from that, in dots */
+
+const FONT_B_SCALE = 2 / 3;
+const FONT_B_TOLERANCE = 0.01;
 
 /*
     The box drawing and block characters, U+2500 to U+259F, are not taken from
@@ -239,11 +317,12 @@ function packFallback(font) {
 /**
  * Rasterize the outline font in data/fonts into the format documented above
  *
- * @return {string}   Contents of generated/fonts.js
+ * @param  {Rasterizer}   rasterizer   The outline font
+ * @param  {number[]}     codepoints   The code points to draw
+ * @return {object}                    The source of generated/fonts.js and the packed fonts themselves
  */
-function generateFonts() {
-  const codepoints = usedCodepoints();
-  const rasterizer = new Rasterizer(SOURCE);
+function generateFonts(rasterizer, codepoints) {
+  const packed = {};
 
   let output = 'const fonts = {\n';
 
@@ -298,16 +377,191 @@ function generateFonts() {
     output += `\t\tindex: ${JSON.stringify(index)},\n`;
     output += `\t\tdata: '${data}',\n`;
     output += '\t},\n';
+
+    packed[font.name] = {
+      width: font.width,
+      height: font.height,
+      baseline: font.baseline,
+      fallback: 0,
+      index,
+      data,
+    };
   }
 
   output += '};\n\n';
   output += 'export default fonts;\n';
 
+  return {output, packed};
+}
+
+/**
+ * Whether two sets of placed contours are the same shape, one of them scaled
+ *
+ * @param  {Array}     contours    Contours as the rasterizer placed them
+ * @param  {Array}     reference   Contours to compare them with
+ * @param  {number}    scale       Factor the reference is scaled by first
+ * @param  {number}    tolerance   How far a coordinate may be off, in dots
+ * @return {boolean}               True when every coordinate agrees
+ */
+function sameContours(contours, reference, scale, tolerance) {
+  if (contours.length !== reference.length) {
+    return false;
+  }
+
+  for (let contour = 0; contour < contours.length; contour++) {
+    if (contours[contour].length !== reference[contour].length) {
+      return false;
+    }
+
+    for (let index = 0; index < contours[contour].length; index++) {
+      const command = contours[contour][index];
+      const other = reference[contour][index];
+
+      if (command.type !== other.type) {
+        return false;
+      }
+
+      for (const key of ['x', 'y', 'x1', 'y1', 'x2', 'y2']) {
+        if (command.type === 'Z') {
+          continue;
+        }
+
+        if (Math.abs(command[key] - other[key] * scale) > tolerance) {
+          return false;
+        }
+      }
+    }
+  }
+
+  return true;
+}
+
+/**
+ * The outlines of the glyphs of the packed fonts, in the format documented
+ * above: the same placed contours the bitmaps were filled from, written out as
+ * path data, and the box drawing characters traced out of their rendered cells
+ *
+ * @param  {Rasterizer}   rasterizer   The outline font
+ * @param  {number[]}     codepoints   The code points to draw
+ * @param  {object}       packed       The packed fonts, as generateFonts made them
+ * @return {string}                    Contents of generated/outlines.js
+ */
+function generateOutlines(rasterizer, codepoints, packed) {
+  const [cellA, cellB] = FONTS;
+
+  const metricsA = rasterizer.metrics(cellA);
+  const metricsB = rasterizer.metrics(cellB);
+
+  const boxed = (codepoint) => codepoint >= BOX_DRAWING.first && codepoint <= BOX_DRAWING.last;
+
+  const glyphs = {};
+  const glyphsB = {};
+
+  /* The fallback glyph as well, which is not always one of the code points a
+     codepage can reach */
+
+  const list = [...new Set([...codepoints, REPLACEMENT_CHARACTER])].sort((a, b) => a - b);
+
+  for (const codepoint of list) {
+    if (boxed(codepoint)) {
+      continue;
+    }
+
+    const contoursA = rasterizer.contours(codepoint, cellA, metricsA, {squeeze: true});
+
+    if (!contoursA) {
+      /* The face has no glyph for this code point, and neither has the packed
+         font: a printer draws the fallback glyph for it */
+
+      continue;
+    }
+
+    glyphs[codepoint] = pathData(contoursA, OUTLINE_UNITS);
+
+    const contoursB = rasterizer.contours(codepoint, cellB, metricsB, {squeeze: true});
+
+    if (!sameContours(contoursB, contoursA, FONT_B_SCALE, FONT_B_TOLERANCE)) {
+      glyphsB[codepoint] = pathData(contoursB, OUTLINE_UNITS);
+    }
+  }
+
+  /* A font without U+FFFD draws a hollow box, which is dots and not an outline,
+     so it is traced like a box drawing character, in the units of the glyphs */
+
+  if (!rasterizer.has(REPLACEMENT_CHARACTER)) {
+    glyphs[REPLACEMENT_CHARACTER] = trace(
+        {width: cellA.width, height: cellA.height, data: packFallback(cellA)},
+        OUTLINE_UNITS,
+    );
+
+    glyphsB[REPLACEMENT_CHARACTER] = trace(
+        {width: cellB.width, height: cellB.height, data: packFallback(cellB)},
+        OUTLINE_UNITS,
+    );
+  }
+
+  /* The box drawing characters are drawn on the dot grid and stretched to the
+     edges of the cell by the painter, so they are traced out of the cell the
+     painter renders, per cell size */
+
+  const box = {};
+
+  for (const cell of OUTLINE_CELLS) {
+    const font = new Font(packed[cell.font]);
+    const paths = {};
+
+    for (const codepoint of codepoints) {
+      if (!boxed(codepoint)) {
+        continue;
+      }
+
+      const bitmap = font.renderGlyph(font.lookup(codepoint), {
+        cellWidth: cell.width,
+        cellHeight: cell.height,
+        stretch: true,
+      });
+
+      paths[codepoint] = trace(bitmap);
+    }
+
+    box[cell.name] = paths;
+  }
+
+  let output = 'const outlines = {\n';
+
+  output += '\tversion: 1,\n';
+  output += `\tcell: {width: ${cellA.width}, height: ${cellA.height}},\n`;
+  output += `\tbaseline: ${cellA.baseline},\n`;
+  output += `\tunits: ${OUTLINE_UNITS},\n`;
+  output += `\tglyphs: ${JSON.stringify(glyphs)},\n`;
+  output += `\tglyphsB: ${JSON.stringify(glyphsB)},\n`;
+  output += '\tbox: {\n';
+
+  for (const cell of OUTLINE_CELLS) {
+    output += `\t\t'${cell.name}': ${JSON.stringify(box[cell.name])},\n`;
+  }
+
+  output += '\t},\n';
+  output += `\tfallback: ${REPLACEMENT_CHARACTER},\n`;
+  output += '};\n\n';
+  output += 'export default outlines;\n';
+
+  process.stdout.write(
+      `outlines: ${Object.keys(glyphs).length} glyphs, ${Object.keys(glyphsB).length} of them refitted for font B, ` +
+      `${Object.keys(box[OUTLINE_CELLS[0].name]).length} box drawing characters in ` +
+      `${OUTLINE_CELLS.length} cells, ${Math.round(output.length / 1000)} kB\n`,
+  );
+
   return output;
 }
+
+const rasterizer = new Rasterizer(SOURCE);
+const codepoints = usedCodepoints();
+const fonts = generateFonts(rasterizer, codepoints);
 
 fs.mkdirSync('generated', {recursive: true});
 fs.writeFileSync('generated/mapping.js', generateMappings());
 fs.writeFileSync('generated/profiles.js', generateProfiles());
 fs.writeFileSync('generated/pdf417.js', generatePdf417());
-fs.writeFileSync('generated/fonts.js', generateFonts());
+fs.writeFileSync('generated/fonts.js', fonts.output);
+fs.writeFileSync('generated/outlines.js', generateOutlines(rasterizer, codepoints, fonts.packed));
