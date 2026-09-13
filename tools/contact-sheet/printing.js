@@ -139,13 +139,15 @@ export function styles() {
 }
 
 /**
- * The sticky header: the driver, the connection and the language filter
+ * The sticky header: the driver, the connection, and the language and width
+ * filters, which narrow the sheet to the fixtures a printer can take
  *
  * @param  {object[]}   found       What drivers() returned
  * @param  {string[]}   languages   The languages the fixtures of the sheet are in
+ * @param  {object[]}   widths      The widths they come in, as {columns, width} pairs
  * @return {string}                 The HTML
  */
-export function header(found, languages) {
+export function header(found, languages, widths) {
   const options = found.map((driver) =>
     `<option value="${driver.id}"${driver.available ? '' : ' disabled'}>${driver.label}${
       driver.available ? '' : ' (not installed)'}</option>`).join('\n    ');
@@ -153,8 +155,9 @@ export function header(found, languages) {
   const filter = ['all'].concat(languages).map((language) =>
     `<option value="${language}">${language}</option>`).join('\n    ');
 
-  const versions = found.map((driver) =>
-    `${driver.label} ${driver.available ? driver.version : 'not installed'}`).join(', ');
+  const sizes = ['<option value="all">all</option>'].concat(widths.map((size) =>
+    `<option value="${size.columns}|${size.width}">${size.columns} columns, ${size.width} dots</option>`))
+      .join('\n    ');
 
   return `<header>
   <div class="row">
@@ -169,18 +172,16 @@ export function header(found, languages) {
     <button id="connect">Connect</button>
     <button id="disconnect" disabled>Disconnect</button>
     <span style="margin-left:auto"></span>
-    <label for="language">Show</label>
+    <label for="language">Language</label>
     <select id="language">
     ${filter}
     </select>
+    <label for="width">Width</label>
+    <select id="width">
+    ${sizes}
+    </select>
   </div>
   <p class="status off" id="status">Not connected.</p>
-  <p class="note">The drivers are constructed without a renderer, so they report the raw protocol of the
-  printer and pass the bytes of a fixture through as they are stored: bytes are sent as stored, choose
-  fixtures whose language your printer speaks. The filter above is there for that. Web USB and Web Serial
-  need a secure context, so open this page over <code>npm run contact-sheet:serve</code> at
-  <code>http://localhost:8080</code>; opening <code>index.html</code> from the file system shows everything
-  but cannot connect. Drivers in this page: ${versions}.</p>
 </header>`;
 }
 
@@ -221,6 +222,7 @@ const connect = document.getElementById('connect');
 const disconnect = document.getElementById('disconnect');
 const status = document.getElementById('status');
 const language = document.getElementById('language');
+const width = document.getElementById('width');
 
 let printer = null;
 let device = null;
@@ -419,13 +421,16 @@ async function print(button) {
   }
 }
 
-/* The filter. A fixture is sent as it is stored, so the sheet can be narrowed
-   to the language of the printer that is attached, and a library that has
-   nothing in that language disappears with its heading. */
+/* The filters. A fixture is sent as it is stored, so the sheet can be
+   narrowed to the language and the width of the printer that is attached, and
+   a library that has nothing left disappears with its heading. */
 
 function filter() {
   for (const section of document.querySelectorAll('section[data-language]')) {
-    section.hidden = language.value !== 'all' && section.dataset.language !== language.value;
+    const size = section.dataset.columns + '|' + section.dataset.width;
+
+    section.hidden = (language.value !== 'all' && section.dataset.language !== language.value) ||
+      (width.value !== 'all' && size !== width.value);
   }
 
   for (const group of document.querySelectorAll('.library')) {
@@ -438,6 +443,7 @@ driver.addEventListener('change', () => {
 });
 
 language.addEventListener('change', filter);
+width.addEventListener('change', filter);
 connect.addEventListener('click', open);
 disconnect.addEventListener('click', close);
 

@@ -167,7 +167,8 @@ async function sheet(library, rows, bytes) {
 
     bytes[key] = Buffer.from(fixture.bytes).toString('base64');
 
-    html += `<section data-language="${escape(fixture.provenance.language)}">
+    html += `<section data-language="${escape(fixture.provenance.language)}" data-columns="${
+      fixture.provenance.columns}" data-width="${fixture.provenance.width}">
   <h3>${escape(name)} <span class="language">${escape(fixture.provenance.language)}, ${
   fixture.bytes.length} bytes</span></h3>
   <div class="fixture" style="--columns: ${cells.length + 1}">
@@ -241,14 +242,19 @@ async function main() {
     body += await sheet(library, rows, bytes);
   }
 
-  /* The drivers of the header, copied into the sheet, and the languages the
-     fixtures are in, which is what the filter offers */
+  /* The drivers of the header, copied into the sheet, and the languages and
+     the widths the fixtures come in, which is what the two filters offer: a
+     width is a pair of columns and dots, since a fixture carries both */
 
   const found = drivers(target);
 
-  const languages = [...new Set(
-      list.flatMap((library) => fixtures(library).map((name) => external(library, name).provenance.language)),
-  )].sort();
+  const provenances = list.flatMap((library) => fixtures(library).map((name) => external(library, name).provenance));
+
+  const languages = [...new Set(provenances.map((provenance) => provenance.language))].sort();
+
+  const widths = [...new Map(provenances.map((provenance) =>
+    [`${provenance.columns}|${provenance.width}`, {columns: provenance.columns, width: provenance.width}],
+  )).values()].sort((a, b) => a.width - b.width || a.columns - b.columns);
 
   const tools = modules.map((module) => {
     const ran = rows.some((row) => row.tool === module.name);
@@ -294,7 +300,7 @@ ${styles()}
 </style>
 </head>
 <body>
-${header(found, languages)}
+${header(found, languages, widths)}
 <h1>External fixtures</h1>
 <p>Every byte stream in <code>test/fixtures/external</code>, rendered by this package,
 with the provenance of the capture and, where the tool is installed on this machine,
