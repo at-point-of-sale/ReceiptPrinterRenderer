@@ -40,20 +40,33 @@ import {references, root, locate, run, unavailable, outOfScope, fromPng, crop} f
     thermal_parser fixes a 3.2 inch canvas at 203 dots per inch with a margin
     of 0.1 inch on either side and three times that above the paper, 649 dots
     wide with a print area of 609 that starts 60 rows down, and the renderer
-    keeps that context to itself. So the render is cropped to the print area
-    here, the 20 dots of margin cut from both sides and the 60 rows from the
-    top, before it is compared with our paper and shown on the sheet: the
-    agreement metric then scales thermal's 609 dot print area to our paper
-    width instead of scaling its margins along with it, the height it compares
-    is the paper's and not the paper plus a margin, and the columns of the
-    sheet line up. There is no margin below the paper.
+    keeps that context to itself, and its parser has no GS W or GS L to set
+    the print area from the stream. Its font advances 12 dots per character,
+    measured on lines of known length, so the print area is 50 columns and a
+    fraction, whatever the fixture's paper is: a 32 column receipt sits on the
+    left of it, and anything centred or right aligned is centred or right
+    aligned on 50 columns.
+
+    So the render is cropped here, before it is compared with our paper and
+    shown on the sheet: the 20 dots of margin cut from both sides and the 60
+    rows from the top, and the print area cut to the fixture's columns at 12
+    dots each, which is exactly our paper width for 32 and 48 columns. The
+    agreement metric then compares the same width instead of scaling thermal's
+    609 dots to ours, the height it compares is the paper's and not the paper
+    plus a margin, and the columns of the sheet line up. The price is what
+    thermal aligned on its 50 columns: a right aligned price of a 48 column
+    receipt ends two and a half characters past the crop and loses them, which
+    the caption of the cell says when it happens. There is no margin below the
+    paper.
 */
 
 /* thermal's margins in dots, 0.1 inch at 203 dots per inch on either side
-   and three times that above, the render_area of its default context */
+   and three times that above, the render_area of its default context, and
+   the advance of its font, 12 dots per character */
 
 const MARGIN = Math.floor(203 * 0.1);
 const TOP = MARGIN * 3;
+const PITCH = 12;
 
 export const name = 'thermal';
 
@@ -76,6 +89,29 @@ export function binary() {
     path.join(references, 'thermal-bin'),
     path.join(references, 'thermal-cli', 'release', 'thermal-cli'),
   ]);
+}
+
+/**
+ * The width of a bitmap up to its rightmost dot of ink
+ *
+ * @param  {Bitmap}   bitmap   The bitmap
+ * @return {number}            Columns up to and including the last one with ink
+ */
+function inkColumns(bitmap) {
+  const rowBytes = Math.ceil(bitmap.width / 8);
+
+  for (let x = bitmap.width - 1; x >= 0; x--) {
+    const mask = 0x80 >> (x & 7);
+    const byte = x >> 3;
+
+    for (let y = 0; y < bitmap.height; y++) {
+      if (bitmap.data[y * rowBytes + byte] & mask) {
+        return x + 1;
+      }
+    }
+  }
+
+  return 0;
 }
 
 /**
@@ -117,10 +153,18 @@ export async function reference(fixture, target) {
      compared and shown; the cropped image replaces thermal's own file */
 
   const canvas = await fromPng(new Uint8Array(fs.readFileSync(path.join(target.directory, file))));
-  const bitmap = crop(canvas, MARGIN, TOP, canvas.width - 2 * MARGIN, canvas.height - TOP);
+  const area = crop(canvas, MARGIN, TOP, canvas.width - 2 * MARGIN, canvas.height - TOP);
+  const columns = fixture.provenance.columns;
+  const width = Math.min(area.width, columns * PITCH);
+  const bitmap = width < area.width ? crop(area, 0, 0, width, area.height) : area;
 
   fs.writeFileSync(path.join(target.directory, file), await toPng(bitmap));
 
+  /* Ink past the crop is what thermal aligned on its own 50 columns; the
+     caption says so, in dots, so that a cut off price is not read as a bug */
+
+  const lost = inkColumns(area) - width;
+  const cut = lost > 0 ? `${lost} dots of ink past that cut off` : '';
   const errors = result.stderr.trim() ? `reported ${result.stderr.trim().split('\n').length} errors` : '';
 
   return {
@@ -132,7 +176,11 @@ export async function reference(fixture, target) {
     file: path.join(target.prefix, file),
     page: path.join(target.prefix, page),
     bitmap,
-    note: [`cropped to its print area from a ${canvas.width} by ${canvas.height} canvas`, errors].filter(Boolean).join(', '),
+    note: [
+      `cropped to ${columns} of its 50 columns from a ${canvas.width} by ${canvas.height} canvas`,
+      cut,
+      errors,
+    ].filter(Boolean).join(', '),
     command,
   };
 }

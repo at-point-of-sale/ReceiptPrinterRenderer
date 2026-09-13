@@ -3790,10 +3790,15 @@ images:
   the measurement.** It renders a wider paper than the print head, 649 dots for
   an 80 mm receipt, with its own font and its own line height, so scaling it to
   our width moves every row; the median of 36% is mostly that. (Since
-  2026-09-13 the module crops thermal's render to its print area first, the 20
-  dot margins on either side and the 60 rows above the paper that its default
-  context adds, so 609 dots are scaled to our width rather than 649 and the
-  height it compares is the paper's; the line height stays its own.) Where it is
+  2026-09-13 the module crops thermal's render first: the 20 dot margins on
+  either side and the 60 rows above the paper that its default context adds,
+  and then the print area to the fixture's columns at thermal's 12 dot pitch,
+  which is our paper width for 32 and 48 columns, so nothing is scaled for
+  those and the height it compares is the paper's; the line height stays its
+  own. thermal lays out on its 50 columns whatever the fixture's paper, it has
+  no GS W or GS L, so what it centred or right aligned can end past the crop:
+  26 of the 88 renders lose ink there, mostly one to four characters of a
+  right aligned price, and the caption of the cell says how many dots.) Where it is
   really different it is because it drops content: on
   `receiptline/guest-escpos-32` it prints three lines and 156 dots against 528
   here, after reporting `GS a`, `FS ( A`, `ESC SP`, `FS S` and `FS .` as unknown
