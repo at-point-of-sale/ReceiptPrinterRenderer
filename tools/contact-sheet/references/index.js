@@ -5,9 +5,11 @@ import * as svg from './svg.js';
 
 /*
     The reference renderers of section 16b, in the order the contact sheet shows
-    them. Every one of them produces an image, which is what the agreement
-    metric needs: a renderer that produces markup says nothing about whether the
-    paper agrees, see the notes of the section.
+    them, after our own bitmap: our SVG first, then ESCPost, the closest of the
+    other projects, then thermal, and receiptio last. Every one of them produces
+    an image, which is what the agreement metric needs: a renderer that produces
+    markup says nothing about whether the paper agrees, see the notes of the
+    section.
 
     receiptio, of section 16f, is the odd one out and its header says so: it
     renders the document a receiptline fixture was made from and not the bytes
@@ -25,7 +27,7 @@ import * as svg from './svg.js';
     with "not available" in their place.
 */
 
-export const modules = [thermal, escpost, receiptio, svg];
+export const modules = [svg, escpost, thermal, receiptio];
 
 /**
  * What every reference module made of one fixture, in the order of the list
