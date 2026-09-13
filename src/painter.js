@@ -811,6 +811,9 @@ class Painter {
         area: area || {x: 0, y: 0, width: this.#width, height: this.#pageHeight},
         direction: this.#pageSetup.direction,
         bottom: area ? area.y + area.height : 0,
+        extent: 0,
+        reach: 0,
+        top: Infinity,
         y: 0,
       };
 
@@ -956,6 +959,9 @@ class Painter {
 
     this.#page.bitmap = null;
     this.#page.canvas = null;
+    this.#page.extent = 0;
+    this.#page.reach = 0;
+    this.#page.top = Infinity;
     this.#page.y = 0;
 
     this.#line = this.#empty();
@@ -967,8 +973,10 @@ class Painter {
      *
      * The page is as tall as the print areas the stream set on it, so that the
      * paper advances over the whole area the way a printer feeds it, and as
-     * tall as its dots when the stream set no area at all: a page that was
-     * given neither an area nor a dot is not printed, which is what makes
+     * tall as the boxes of what was laid out in it when the stream set no area
+     * at all: the line boxes and the feeds of every area, mapped into the page
+     * by the print direction, the bottom of the lowest one. A page that was
+     * given neither an area nor a box is not printed, which is what makes
      * entering and leaving page mode without anything in between cost nothing.
      *
      * `{keep: true}` keeps the dots, the area, the direction and the position,
@@ -988,7 +996,7 @@ class Painter {
     this.#compose();
 
     const page = this.#page;
-    const height = Math.max(page.bottom, this.#inked(page.bitmap));
+    const height = Math.max(page.bottom, page.extent);
 
     if (height > 0) {
       /* The page is as tall as the areas it was given, dots or no dots, so it
@@ -1021,8 +1029,14 @@ class Painter {
       page.y = position;
       this.#line.x = cursor;
     } else {
+      const area = this.#pageSetup.area;
+
       page.bitmap = null;
       page.canvas = null;
+      page.bottom = area ? area.y + area.height : 0;
+      page.extent = 0;
+      page.reach = 0;
+      page.top = Infinity;
       page.y = 0;
     }
 
@@ -1729,6 +1743,15 @@ class Painter {
   /**
      * Put what was laid out in the current print area into the page, turned by
      * the print direction, and start the area over. The page grows to hold it.
+     *
+     * The boxes of the area are mapped into the rows of the page the same way.
+     * A box spans the whole width of the logical surface, so what reaches the
+     * bottom of the area depends on what the direction does with that surface:
+     * direction 0 draws it as it is, so the bottom of the lowest box is the
+     * bottom of the area's layout, clipped where the area ends; the directions
+     * 1 and 3 swap the axes, so the width of the surface is the height of the
+     * area and one box spans the whole of it; direction 2 mirrors, so the top
+     * of the highest box becomes the distance from the bottom of the area.
      */
   #compose() {
     const page = this.#page;
@@ -1738,6 +1761,22 @@ class Painter {
     this.#line = this.#empty();
 
     page.y = 0;
+
+    if (page.reach > 0) {
+      const {y, height} = page.area;
+
+      let bottom = y + height;
+
+      if (page.direction === 0) {
+        bottom = y + Math.min(page.reach, height);
+      } else if (page.direction === 2) {
+        bottom = y + height - Math.min(page.top, height);
+      }
+
+      page.extent = Math.max(page.extent, bottom);
+      page.reach = 0;
+      page.top = Infinity;
+    }
 
     if (!page.canvas) {
       return;
@@ -1761,31 +1800,6 @@ class Painter {
     }
 
     Bitmap.blit(dots, page.bitmap, page.area.x, page.area.y);
-  }
-
-  /**
-     * The row below the last row of a bitmap that carries a dot, which is how
-     * tall a page without a print area of its own is
-     *
-     * @param  {Bitmap|null}   bitmap   The page, or nothing at all
-     * @return {number}                 Number of rows
-     */
-  #inked(bitmap) {
-    if (!bitmap) {
-      return 0;
-    }
-
-    const rowBytes = Bitmap.rowBytes(bitmap.width);
-
-    for (let row = bitmap.height - 1; row >= 0; row--) {
-      for (let byte = 0; byte < rowBytes; byte++) {
-        if (bitmap.data[row * rowBytes + byte] !== 0) {
-          return row + 1;
-        }
-      }
-    }
-
-    return 0;
   }
 
   /**
@@ -1962,7 +1976,9 @@ class Painter {
 
     if (this.#page) {
       Bitmap.blit(bitmap, this.#canvas(), 0, this.#page.y);
+      this.#page.top = Math.min(this.#page.top, this.#page.y);
       this.#page.y += bitmap.height;
+      this.#page.reach = Math.max(this.#page.reach, this.#page.y);
       return;
     }
 
@@ -2017,7 +2033,9 @@ class Painter {
     }
 
     if (this.#page) {
+      this.#page.top = Math.min(this.#page.top, this.#page.y);
       this.#page.y += count;
+      this.#page.reach = Math.max(this.#page.reach, this.#page.y);
       return;
     }
 

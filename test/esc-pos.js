@@ -2670,18 +2670,62 @@ describe('EscPosRenderer', function() {
       ));
 
       /* The line is against the right edge of the paper, so the area is the
-         whole printable area, and the page is as tall as its dots because the
-         stream set no area of its own */
+         whole printable area, and the page is as tall as the line box it holds
+         because the stream set no area of its own: the same line in standard
+         mode is the same paper, the gap of the line spacing included */
 
       const paper = stitch(items, {width: WIDTH});
+      const standard = stitch(render(stream(ESC, '@', ESC, 'a', 2, 'Right', LF)), {width: WIDTH});
 
-      assert.equal(
-          dots(Bitmap.extractRows(paper, 0, paper.height)),
-          dots(Bitmap.extractRows(
-              stitch(render(stream(ESC, '@', ESC, 'a', 2, 'Right', LF)), {width: WIDTH}),
-              0, paper.height,
-          )),
-      );
+      assert.equal(paper.height, standard.height);
+      assert.equal(dots(paper), dots(standard));
+    });
+
+    it('should mirror a page of direction 2 without a print area', function() {
+      const paper = stitch(render(stream(
+          ESC, '@',
+          ESC, 'L',
+          ESC, 'T', 2,
+          GS, '$', 300 & 0xff, 300 >> 8,
+          'Hi', LF,
+          FF,
+      )), {width: WIDTH});
+
+      /* Three hundred vertical motion units are 150 dots, so the line box is
+         at 150 to 180 of the layout; direction 2 turns it half a turn, which
+         puts it on the rows 1482 to 1512 of the default area, the whole page,
+         and the page ends there */
+
+      assert.equal(paper.height, 1512);
+    });
+
+    it('should feed a trailing blank line of a page without a print area', function() {
+      const paper = stitch(render(stream(
+          ESC, '@',
+          ESC, 'L',
+          'Hi', LF, LF,
+          FF,
+      )), {width: WIDTH});
+
+      /* The blank line is a box of the page like any other, so it feeds its
+         thirty dots the way it does in standard mode */
+
+      assert.equal(paper.height, 60);
+    });
+
+    it('should be taller by a feed at the end of a page without a print area', function() {
+      const paper = stitch(render(stream(
+          ESC, '@',
+          ESC, 'L',
+          'Hi', LF,
+          ESC, 'J', 40,
+          FF,
+      )), {width: WIDTH});
+
+      /* Forty vertical motion units of the Epson profile are twenty dots,
+         which the page feeds behind its line */
+
+      assert.equal(paper.height, 50);
     });
 
     it('should feed the paper for a print area that stayed empty', function() {

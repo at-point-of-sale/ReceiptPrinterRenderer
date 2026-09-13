@@ -4147,6 +4147,24 @@ this renderer's own:
   centimetres of white on a receipt. This is also what keeps the Star flush
   free: the encoder writes `ESC GS P 0 ESC GS P 1` around every job, which is a
   page without an area and without a dot.
+
+  **Superseded on 2026-09-13 by section 1 of [svg-plan.md](svg-plan.md), which
+  keeps every other rule of this list.** A page that was given no area is as
+  tall as the *boxes* of what was laid out in it, not as tall as its dots: the
+  line boxes and the feeds of every area, a line box being the full height of
+  the line with the gap of the line spacing below it, mapped into the page by
+  the print direction of their area and clipped where the area ends, the bottom
+  of the lowest one. A page with neither an area nor a box prints nothing at
+  all, so the Star flush stays free. Measuring the ink was a layout decision
+  taken on dots, which the layout engine of section 2 of that plan cannot take
+  and which the consumers of the display list would each have to take again;
+  and the rule as it now stands feeds a trailing blank line of a page the way
+  standard mode feeds it. A line box spans the whole width of the layout of its
+  area, and the direction decides what that reaches: 1 and 3 swap the axes, so
+  the width of the layout is the height of the area and one line spans the
+  whole of it; 2 mirrors, so the bottom is the height of the area minus the top
+  of the highest box; 0 leaves both axes alone. No fixture of the repository
+  moved, because every page mode fixture sets a print area.
 - **`pageHeight` is a profile value**, 1662 dots in both profiles, the page mode
   maximum of an Epson TM-T88 at 576 dots wide that the brief names. **No Star
   specification text available here gives a page height, so the Star profile

@@ -144,7 +144,7 @@ In page mode the printer composes a page in memory, in a print area on that page
 | Command | Name | Status | Notes |
 |---|---|---|---|
 | `ESC GS P 0` | page mode | Rendered | Enters page mode, and only at the beginning of a line: a line that already holds characters, or whose cursor was moved, drops the command. |
-| `ESC GS P 1` | line mode | Rendered | Leaves page mode and prints the page. A page without a print area and without a dot prints nothing at all, which is why the encoder's flush, `ESC GS P 0 ESC GS P 1` around a job, leaves every receipt exactly as it was. |
+| `ESC GS P 1` | line mode | Rendered | Leaves page mode and prints the page. A page without a print area and without a box prints nothing at all, which is why the encoder's flush, `ESC GS P 0 ESC GS P 1` around a job, leaves every receipt exactly as it was. |
 | `ESC GS P 2 n1..n8` | print area | Rendered | The origin and the size of the print area, each of them two bytes, low byte first, **in dots**, which is the unit of `ESC GS A` and `ESC GS R`. A width or a height of `0`, and an origin outside the page, make the command do nothing. Like `ESC W` of ESC/POS the area is a setting of the printer: it may be set in line mode, the next page starts in it, and `ESC @` puts it back. |
 | `ESC GS P 3 n` | print direction | Rendered | `0` to `3`, and the ASCII digits for the same: left to right, bottom to top, right to left and top to bottom, the four directions of `ESC T` of ESC/POS, and a setting of the printer in the same way. |
 | `ESC GS P 4 n1 n2` | absolute vertical position | Rendered | Two bytes, low byte first, in dots along the vertical axis of the print direction, from the start of the print area. A position outside the area is ignored. |

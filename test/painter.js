@@ -2089,7 +2089,8 @@ describe('Painter', function() {
       paper.page(false);
 
       /* The line is against the right edge of the paper, so the area is the
-         paper, and the page is as tall as its dots because no area was set */
+         paper, and the page is as tall as the line box it holds because no
+         area was set */
 
       assert.equal(Bitmap.getPixel(stitch(paper.end(), {width: WIDTH}), WIDTH - 9, 10), 1);
     });
@@ -2358,7 +2359,7 @@ describe('Painter', function() {
       assert.isFalse(paper.pageMode);
     });
 
-    it('should print nothing for a page without an area and without dots', function() {
+    it('should print nothing for a page without an area and without a box', function() {
       const paper = painter();
 
       paper.text('A');
@@ -2379,7 +2380,7 @@ describe('Painter', function() {
       assert.deepEqual(paper.end(), same.end());
     });
 
-    it('should be as tall as its dots when it was given no area', function() {
+    it('should be as tall as the boxes it holds when it was given no area', function() {
       const paper = painter();
       const standard = painter();
 
@@ -2392,15 +2393,226 @@ describe('Painter', function() {
       standard.text('A');
       standard.lineFeed();
 
-      /* The row below the deepest dot of the same line in standard mode */
-
-      const rows = toAscii(stitch(standard.end(), {width: WIDTH}));
-      const ink = rows.reduce((last, row, index) => row.includes('#') ? index + 1 : last, 0);
+      /* The line box of the page, the gap of the line spacing below the cell
+         included, which is the paper the same line feeds in standard mode and
+         not the rows its dots reach */
 
       const items = paper.end();
 
       assert.equal(items.length, 1);
-      assert.equal(items[0].height, ink);
+      assert.equal(items[0].height, stitch(standard.end(), {width: WIDTH}).height);
+    });
+
+    it('should feed a trailing blank line of a page without an area', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.text('A');
+      paper.lineFeed();
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      const items = paper.end();
+
+      /* The blank line is a box of its own, the line spacing, so the page is
+         two lines tall and not one */
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 60);
+    });
+
+    it('should be taller by a feed at the end of a page without an area', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.text('A');
+      paper.lineFeed();
+      paper.feed(20);
+      paper.printPage();
+      paper.page(false);
+
+      const items = paper.end();
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 50);
+    });
+
+    it('should be as tall as the whole page in a turned direction without an area', function() {
+      for (const direction of [1, 2, 3]) {
+        const paper = painter();
+
+        paper.page(true);
+        paper.pageDirection(direction);
+        paper.text('A');
+        paper.lineFeed();
+        paper.printPage();
+        paper.page(false);
+
+        /* A line box spans the whole width of the layout. The directions 1 and
+           3 swap the axes, so that width is the height of the area and one
+           line reaches the bottom of it; direction 2 mirrors, and this line
+           starts at the top of the layout, so it lands against the bottom. The
+           area is the default one, the whole page */
+
+        const items = paper.end();
+
+        assert.equal(items.length, 1);
+        assert.equal(items[0].height, profiles.epson.pageHeight);
+      }
+    });
+
+    it('should mirror the top of the highest box to the bottom in direction 2', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.pageDirection(2);
+      paper.pageVertical(150);
+      paper.text('Hi');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      /* The line box is at 150 to 180 of the layout and direction 2 turns it
+         half a turn, so it lands on the rows 1482 to 1512 of the default area
+         and the page ends there, 150 dots above the bottom of the page */
+
+      const items = paper.end();
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, profiles.epson.pageHeight - 150);
+    });
+
+    it('should print nothing for a page a position alone moved down', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.pageVertical(300);
+      paper.printPage();
+      paper.page(false);
+
+      /* The position is not a box: the page holds nothing that was laid out,
+         so there is nothing to feed */
+
+      assert.deepEqual(paper.end(), []);
+    });
+
+    it('should print the same page twice on printPage({keep: true}) without an area', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.text('A');
+      paper.lineFeed();
+      paper.printPage({keep: true});
+      paper.printPage({keep: true});
+      paper.page(false);
+
+      const items = paper.end();
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 60);
+    });
+
+    it('should print nothing for a second printPage() without new content', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.text('A');
+      paper.lineFeed();
+      paper.printPage();
+      paper.printPage();
+      paper.page(false);
+
+      /* The first print took the page with it, boxes and areas alike, so the
+         second one has nothing to feed */
+
+      const items = paper.end();
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 30);
+    });
+
+    it('should add no extent for a reverse feed inside a page', function() {
+      const paper = painter();
+      const standard = painter();
+
+      paper.page(true);
+      paper.text('A');
+      paper.lineFeed();
+      paper.text('B');
+      paper.lineFeed();
+      paper.reverseLineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      standard.text('A');
+      standard.lineFeed();
+      standard.text('B');
+      standard.lineFeed();
+      standard.reverseLineFeed();
+
+      /* The position moves back over rows that are already laid out, so the
+         page is as tall as the two lines, which is what the same lines feed in
+         standard mode */
+
+      const items = paper.end();
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, stitch(standard.end(), {width: WIDTH}).height);
+    });
+
+    it('should throw the boxes away with the dots on cancelPage() without an area', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.text('Hi');
+      paper.lineFeed();
+      paper.lineFeed();
+      paper.cancelPage();
+      paper.text('Yo');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      /* Only the line behind the CAN is laid out, so the page is one line
+         spacing tall and not three */
+
+      const items = paper.end();
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 30);
+    });
+
+    it('should be as tall as an area that holds nothing at all', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.pageArea({x: 0, y: 0, width: WIDTH, height: 48});
+      paper.printPage();
+      paper.page(false);
+
+      assert.equal(stitch(paper.end(), {width: WIDTH}).height, 48);
+    });
+
+    it('should be as tall as the lowest of its areas', function() {
+      const paper = painter();
+
+      paper.page(true);
+      paper.pageArea({x: 0, y: 0, width: 48, height: 90});
+      paper.text('A');
+      paper.lineFeed();
+      paper.pageArea({x: 48, y: 0, width: 48, height: 30});
+      paper.text('B');
+      paper.lineFeed();
+      paper.printPage();
+      paper.page(false);
+
+      /* The two areas start at the same row and the taller one decides */
+
+      const items = paper.end();
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 90);
     });
 
     it('should not enter page mode while a line is being composed', function() {

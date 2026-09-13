@@ -563,6 +563,15 @@ describe('StarPrntRenderer', function() {
       );
     });
 
+    it('should be as tall as the boxes of a page without a print area', function() {
+      const paper = page('In the page', LF, LF);
+
+      /* Two line boxes of the Star line spacing, the trailing blank line
+         included, and not the rows the dots of the first line reach */
+
+      assert.equal(paper.height, 64);
+    });
+
     it('should print the page when page mode ends', function() {
       const paper = page(area(0, 0, WIDTH, 64), 'In the page', LF);
 
