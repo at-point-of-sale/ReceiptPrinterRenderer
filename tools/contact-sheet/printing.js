@@ -118,71 +118,98 @@ export function scripts(found) {
  */
 export function styles() {
   return `
-  header { position: sticky; top: 0; z-index: 2; margin: -2rem -2rem 1.5rem; padding: .75rem 2rem;
-    background: #fff; border-bottom: 1px solid #ccc; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
-  header .row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
-  header label { color: #666; }
-  header select, header input, header button { font: inherit; padding: .25rem .5rem; }
-  header button { cursor: pointer; }
+  header, .toolbar { position: sticky; z-index: 2; display: flex; box-sizing: border-box; }
+  header { top: 0; height: 61px; padding: 0 0 0 15px; background: #eee; border-bottom: 1px solid #ddd; }
+  .toolbar { top: 61px; padding: 0 5px 15px 10px; background: #fafafa; border-bottom: 1px solid #ddd;
+    flex-wrap: wrap; align-content: start; }
+  header select, header input, header button, .toolbar button {
+    border: none; border-radius: 6px; height: 32px; margin: 15px 15px 0 0; padding: 0 8px;
+    font-family: system-ui; font-weight: 600; font-size: 10pt; background: #fff; }
+  header select { appearance: none; padding: 0 28px 0 6px;
+    background-image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHg9IjBweCIgeT0iMHB4IiB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCI+CjxwYXRoIGZpbGw9IiMyMTk2RjMiIGQ9Ik00MyAxNy4xTDM5LjkgMTQgMjQgMjkuOSA4LjEgMTQgNSAxNy4xIDI0IDM2eiI+PC9wYXRoPgo8L3N2Zz4=);
+    background-repeat: no-repeat; background-position: right 6px center; background-size: 16px; }
+  header input { width: 6em; }
+  header button { cursor: pointer; user-select: none; }
   header button:disabled { cursor: default; opacity: .5; }
-  header .note { color: #666; margin: .5rem 0 0; max-width: 60rem; }
-  header .status { margin: .5rem 0 0; font-family: ui-monospace, monospace; }
-  header .status.on { color: #1b5e20; }
-  header .status.off { color: #666; }
+  header button[hidden] { display: none; }
+  header #connect { background: #bbdefb; color: #1976d2; }
+  header .status { align-self: center; margin: 15px 15px 0 0; font-family: var(--font-stack-mono); font-size: 11px; color: #888; }
+  header .status.on { color: #1976d2; }
   header .status.error { color: #b71c1c; }
-  .print { margin-top: .75rem; display: flex; gap: .5rem; align-items: center; }
-  .print button { font: inherit; padding: .25rem .75rem; cursor: pointer; }
+  .toolbar .libraries { display: flex; flex-wrap: wrap; align-content: start; margin-right: auto; }
+  .toolbar .libraries a { display: flex; align-items: center; height: 32px; margin: 15px 0 0; padding: 0 6px;
+    border-radius: 6px; color: #000; text-decoration: none; font-size: 10pt; }
+  .toolbar .libraries a:hover { background: #eaeaea; }
+  .toolbar .filters { display: flex; flex-wrap: wrap; align-content: start; justify-content: end; margin-left: auto; }
+  .toolbar nav { display: flex; align-items: stretch; height: 32px; margin: 15px 0 0 15px; border-radius: 6px;
+    background: #eaeaea; font-size: 10pt; user-select: none; }
+  .toolbar nav label { display: flex; align-items: center; padding: 0 9px; cursor: pointer; }
+  .toolbar nav label:first-child { border-radius: 6px 0 0 6px; }
+  .toolbar nav label:last-child { border-radius: 0 6px 6px 0; }
+  .toolbar nav label:has(:focus-visible) { outline: -webkit-focus-ring-color auto 1px; }
+  .toolbar nav label:has(input:checked) { background: #d5d5d5; }
+  .toolbar nav input { position: absolute; opacity: 0; }
+  .print { margin-top: 15px; display: flex; gap: 12px; align-items: center; }
+  .print button { border: none; border-radius: 6px; height: 32px; padding: 0 12px; cursor: pointer;
+    font-family: system-ui; font-weight: 600; font-size: 10pt; background: #eaeaea; }
   .print button:disabled { cursor: default; opacity: .5; }
-  .print .result { font-family: ui-monospace, monospace; color: #666; }
+  .print .result { font-family: var(--font-stack-mono); font-size: 11px; color: #888; }
   .print .result.error { color: #b71c1c; }
-  .language { color: #666; font-family: ui-monospace, monospace; }`;
+  .language { color: #666; font-family: var(--font-stack-mono); }`;
 }
 
 /**
- * The sticky header: the driver, the connection, and the language and width
- * filters, which narrow the sheet to the fixtures a printer can take
+ * The sticky header, the driver and the connection, and the toolbar under it
+ * with the libraries of the sheet and the language and width filters, which
+ * narrow the sheet to the fixtures a printer can take
  *
  * @param  {object[]}   found       What drivers() returned
  * @param  {string[]}   languages   The languages the fixtures of the sheet are in
  * @param  {object[]}   widths      The widths they come in, as {columns, width} pairs
+ * @param  {string[]}   libraries   The libraries of the sheet, for the links
  * @return {string}                 The HTML
  */
-export function header(found, languages, widths) {
+export function header(found, languages, widths, libraries) {
   const options = found.map((driver) =>
     `<option value="${driver.id}"${driver.available ? '' : ' disabled'}>${driver.label}${
       driver.available ? '' : ' (not installed)'}</option>`).join('\n    ');
 
-  const filter = ['all'].concat(languages).map((language) =>
-    `<option value="${language}">${language}</option>`).join('\n    ');
+  const segment = (name, entries) => entries.map((entry, index) =>
+    `<label><input type="radio" name="${name}" value="${entry.value}"${index ? '' : ' checked'}>${entry.label}</label>`)
+      .join('\n      ');
 
-  const sizes = ['<option value="all">all</option>'].concat(widths.map((size) =>
-    `<option value="${size.columns}|${size.width}">${size.columns} columns, ${size.width} dots</option>`))
-      .join('\n    ');
+  const filter = segment('language', [{value: 'all', label: 'all'}].concat(languages.map((language) =>
+    ({value: language, label: language}))));
+
+  const sizes = segment('width', [{value: 'all', label: 'all'}].concat(widths.map((size) =>
+    ({value: `${size.columns}|${size.width}`, label: `${size.columns} columns`}))));
+
+  const links = libraries.map((library) => `<a href="#${library}">${library}</a>`).join('\n      ');
 
   return `<header>
-  <div class="row">
-    <label for="driver">Printer</label>
     <select id="driver">
     ${options}
     </select>
     <span id="serial-settings" hidden>
-      <label for="baudrate">Baud rate</label>
-      <input id="baudrate" type="number" value="${BAUD_RATE}" min="300" max="4000000" step="100" size="8">
+      <input id="baudrate" type="number" value="${BAUD_RATE}" min="300" max="4000000" step="100" title="Baud rate">
     </span>
     <button id="connect">Connect</button>
-    <button id="disconnect" disabled>Disconnect</button>
-    <span style="margin-left:auto"></span>
-    <label for="language">Language</label>
-    <select id="language">
-    ${filter}
-    </select>
-    <label for="width">Width</label>
-    <select id="width">
-    ${sizes}
-    </select>
-  </div>
-  <p class="status off" id="status">Not connected.</p>
-</header>`;
+    <button id="disconnect" hidden>Disconnect</button>
+    <span class="status off" id="status">Not connected.</span>
+</header>
+<div class="toolbar">
+    <div class="libraries">
+      ${links}
+    </div>
+    <div class="filters">
+      <nav id="language" title="Language">
+      ${filter}
+      </nav>
+      <nav id="width" title="Width">
+      ${sizes}
+      </nav>
+    </div>
+</div>`;
 }
 
 /**
@@ -300,8 +327,8 @@ function connected(event) {
 
   report('Connected: ' + describe(event), 'on');
 
-  connect.disabled = true;
-  disconnect.disabled = false;
+  connect.hidden = true;
+  disconnect.hidden = false;
   driver.disabled = true;
   baudrate.disabled = true;
 
@@ -316,8 +343,8 @@ function disconnected() {
 
   report('Not connected.', 'off');
 
-  connect.disabled = false;
-  disconnect.disabled = true;
+  connect.hidden = false;
+  disconnect.hidden = true;
   driver.disabled = false;
   baudrate.disabled = false;
 
@@ -429,8 +456,11 @@ function filter() {
   for (const section of document.querySelectorAll('section[data-language]')) {
     const size = section.dataset.columns + '|' + section.dataset.width;
 
-    section.hidden = (language.value !== 'all' && section.dataset.language !== language.value) ||
-      (width.value !== 'all' && size !== width.value);
+    const wanted = language.querySelector('input:checked').value;
+    const wantedSize = width.querySelector('input:checked').value;
+
+    section.hidden = (wanted !== 'all' && section.dataset.language !== wanted) ||
+      (wantedSize !== 'all' && size !== wantedSize);
   }
 
   for (const group of document.querySelectorAll('.library')) {
