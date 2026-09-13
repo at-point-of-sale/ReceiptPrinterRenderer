@@ -228,6 +228,42 @@ describe('Font', function() {
     });
   });
 
+  describe('baseline and cellBaseline()', function() {
+    it('should carry the baseline of the built in fonts', function() {
+      assert.equal(Font.get('12x24').baseline, 18);
+      assert.equal(Font.get('8x16').baseline, 12);
+    });
+
+    it('should put the baseline of a cell at the fraction of its height the font has', function() {
+      const a = Font.get('12x24');
+      const b = Font.get('8x16');
+
+      /* The cell of font A, and the same cell at double height */
+
+      assert.equal(a.cellBaseline(24), 18);
+      assert.equal(a.cellBaseline(48), 36);
+
+      /* The glyphs of font B, the 9x17 cell of an Epson and the 9x24 cell of a
+         Star, which is where font A has its baseline as well */
+
+      assert.equal(b.cellBaseline(16), 12);
+      assert.equal(b.cellBaseline(17), 12);
+      assert.equal(b.cellBaseline(24), 18);
+    });
+
+    it('should give a font without a baseline three quarters of its height', function() {
+      const packed = {
+        width: 8,
+        height: 8,
+        fallback: 0,
+        index: {65: 0},
+        data: Buffer.alloc(8).toString('base64'),
+      };
+
+      assert.equal(new Font(packed).baseline, 6);
+    });
+  });
+
   describe('renderGlyph() of the letter A', function() {
     const font = Font.get('12x24');
     const cell = font.renderGlyph(font.lookup(0x41), {});
@@ -277,13 +313,19 @@ describe('Font', function() {
       assert.deepEqual(toAscii(cell)[16], '.........');
     });
 
-    it('should centre the glyph in a 9x24 cell, four rows above and below', function() {
+    it('should stand the glyph on the baseline of a 9x24 cell, six rows below the top', function() {
       const cell = font.renderGlyph(glyph, {cellWidth: 9, cellHeight: 24});
       const art = toAscii(cell);
 
-      assert.deepEqual(art.slice(0, 4), new Array(4).fill('.........'));
-      assert.deepEqual(art.slice(20), new Array(4).fill('.........'));
-      assert.deepEqual(art.slice(4, 20), toAscii(glyph).map((line) => line + '.'));
+      /* The baseline of a 24 row cell of this font is row 18, the baseline of
+         the glyph is row 12, so the glyph starts on row 6 and its own baseline
+         lands on row 18, where a 12x24 font has its baseline too */
+
+      assert.equal(font.cellBaseline(24), 18);
+
+      assert.deepEqual(art.slice(0, 6), new Array(6).fill('.........'));
+      assert.deepEqual(art.slice(22), new Array(2).fill('.........'));
+      assert.deepEqual(art.slice(6, 22), toAscii(glyph).map((line) => line + '.'));
     });
   });
 
@@ -302,7 +344,7 @@ describe('Font', function() {
       const font = Font.get('8x16');
       const art = toAscii(strip(font, single, 9, 24, {stretch: true}));
 
-      assert.deepEqual(art[11], '...#############################....');
+      assert.deepEqual(art[13], '...#############################....');
     });
 
     it('should break the rule when the glyphs are not stretched', function() {
@@ -362,47 +404,52 @@ describe('Font', function() {
       '#..#',
     ]);
 
-    const options = {cellWidth: 5, cellHeight: 6};
+    /* The glyph is not a glyph of this font, so it brings its own baseline: it
+       is four rows tall and has no descender, which puts its baseline on row 4.
+       The baseline of the six row cell is row 4 as well, so the glyph starts at
+       the top of it */
 
-    it('should centre the glyph in the cell without styles', function() {
+    const options = {cellWidth: 5, cellHeight: 6, baseline: 4};
+
+    it('should stand the glyph on the baseline of the cell without styles', function() {
       assert.deepEqual(toAscii(font.renderGlyph(glyph, options)), [
-        '.....',
         '.##..',
         '#..#.',
         '####.',
         '#..#.',
+        '.....',
         '.....',
       ]);
     });
 
     it('should overstrike the glyph when bold', function() {
       assert.deepEqual(toAscii(font.renderGlyph(glyph, {...options, bold: true})), [
-        '.....',
         '.###.',
         '##.##',
         '#####',
         '##.##',
+        '.....',
         '.....',
       ]);
     });
 
     it('should draw one row across the cell when underlined', function() {
       assert.deepEqual(toAscii(font.renderGlyph(glyph, {...options, underline: 1})), [
-        '.....',
         '.##..',
         '#..#.',
         '####.',
         '#..#.',
+        '.....',
         '#####',
       ]);
     });
 
     it('should draw two rows across the cell when underlined twice', function() {
       assert.deepEqual(toAscii(font.renderGlyph(glyph, {...options, underline: 2})), [
-        '.....',
         '.##..',
         '#..#.',
         '####.',
+        '#..#.',
         '#####',
         '#####',
       ]);
@@ -410,11 +457,11 @@ describe('Font', function() {
 
     it('should draw the cell white on black when inverted', function() {
       assert.deepEqual(toAscii(font.renderGlyph(glyph, {...options, invert: true})), [
-        '#####',
         '#..##',
         '.##.#',
         '....#',
         '.##.#',
+        '#####',
         '#####',
       ]);
     });
@@ -429,7 +476,7 @@ describe('Font', function() {
     it('should not leave ink beyond the width when inverted', function() {
       const cell = font.renderGlyph(glyph, {...options, invert: true});
 
-      assert.deepEqual(Array.from(cell.data.subarray(0, 1)), [0b11111000]);
+      assert.deepEqual(Array.from(cell.data.subarray(0, 1)), [0b10011000]);
     });
 
     it('should not leave ink beyond the width when inverted and scaled', function() {
@@ -453,8 +500,6 @@ describe('Font', function() {
       assert.equal(cell.height, 12);
 
       assert.deepEqual(toAscii(cell), [
-        '..........',
-        '..........',
         '..####....',
         '..####....',
         '##....##..',
@@ -463,6 +508,8 @@ describe('Font', function() {
         '########..',
         '##....##..',
         '##....##..',
+        '..........',
+        '..........',
         '..........',
         '..........',
       ]);

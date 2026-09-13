@@ -12,6 +12,7 @@ import fonts from '../generated/fonts.js';
  * @typedef {object} PackedFont
  * @property {number} width                     Cell width of the font in dots
  * @property {number} height                    Cell height of the font in dots
+ * @property {number} [baseline]                Row the glyphs stand on, three quarters of the height when left out
  * @property {number} fallback                  Glyph number drawn for code points the font does not have
  * @property {Object<string, number>} index     Code point to glyph number
  * @property {string} data                      Base64 encoded glyph rows
@@ -21,6 +22,7 @@ import fonts from '../generated/fonts.js';
  * @typedef {object} GlyphOptions
  * @property {number} [cellWidth]          Width of the cell the glyph is drawn in, defaults to the font width
  * @property {number} [cellHeight]         Height of the cell the glyph is drawn in, defaults to the font height
+ * @property {number} [baseline]           Row the glyph stands on, defaults to the baseline of the font
  * @property {number} [widthMultiplier]    Horizontal scale, 1 to 8, dots are repeated
  * @property {number} [heightMultiplier]   Vertical scale, 1 to 8, dots are repeated
  * @property {boolean} [bold]              Overstrike the glyph with a one dot horizontal offset
@@ -70,6 +72,7 @@ class Font {
 
   #width;
   #height;
+  #baseline;
   #rowBytes;
   #glyphBytes;
   #index;
@@ -89,6 +92,15 @@ class Font {
 
     this.#width = packed.width;
     this.#height = packed.height;
+
+    /* A font carries the row its glyphs stand on. A font that does not, which
+       is a font an application built by hand, gets three quarters of its
+       height, which is where the baseline of a screen font usually sits */
+
+    this.#baseline = typeof packed.baseline === 'number' ?
+      packed.baseline :
+      Math.floor(packed.height * 3 / 4);
+
     this.#rowBytes = Bitmap.rowBytes(packed.width);
     this.#glyphBytes = this.#rowBytes * packed.height;
     /* A null prototype, so that a code point never finds a property of Object,
@@ -165,6 +177,30 @@ class Font {
   }
 
   /**
+     * Row of the glyphs of this font their baseline sits on, the row the
+     * characters without a descender stand on
+     *
+     * @return {number}   Row of the glyph, counted from its top
+     */
+  get baseline() {
+    return this.#baseline;
+  }
+
+  /**
+     * The row a cell of a given height has its baseline on. A printer draws a
+     * font in a cell that is taller than the glyphs of the font, and the
+     * baseline of that cell sits at the same fraction of its height as the
+     * baseline of the font does, so that cells of different sizes on one line
+     * share a baseline.
+     *
+     * @param  {number}   cellHeight   Height of the cell in dots
+     * @return {number}                Row of the cell, counted from its top
+     */
+  cellBaseline(cellHeight) {
+    return Math.floor(cellHeight * this.#baseline / this.#height);
+  }
+
+  /**
      * The glyph drawn for code points this font does not have, a hollow box
      *
      * @return {Bitmap}   The fallback glyph
@@ -208,6 +244,7 @@ class Font {
     const settings = {
       cellWidth: this.#width,
       cellHeight: this.#height,
+      baseline: this.#baseline,
       widthMultiplier: 1,
       heightMultiplier: 1,
       bold: false,
@@ -219,13 +256,15 @@ class Font {
       ...options,
     };
 
-    /* The glyph is centred in the cell, horizontally and vertically, so that a
-       font smaller than the cell keeps its line of text in the middle and the
-       gap between the characters on both sides */
+    /* The glyph is centred in the cell horizontally, so that a font narrower
+       than the cell keeps the gap between the characters on both sides, and is
+       placed on the baseline of the cell vertically, so that a font shorter
+       than the cell stands where a taller font in a taller cell stands and the
+       two share a baseline when they are on one line */
 
     let cell = Bitmap.create(settings.cellWidth, settings.cellHeight);
     const left = Math.floor((settings.cellWidth - glyph.width) / 2);
-    const top = Math.floor((settings.cellHeight - glyph.height) / 2);
+    const top = this.cellBaseline(settings.cellHeight) - settings.baseline;
 
     Bitmap.blit(glyph, cell, left, top);
 

@@ -422,10 +422,12 @@ class Painter {
      * @param  {string}   value   The text to print
      */
   text(value) {
+    const ascent = this.#ascent();
+
     for (const character of value) {
       const cell = this.#cell(character.codePointAt(0));
 
-      this.#place(cell, this.#spacing * this.#style.width);
+      this.#place(cell, this.#spacing * this.#style.width, ascent);
     }
   }
 
@@ -437,8 +439,10 @@ class Painter {
      * @param  {number}   count   Number of cells to draw
      */
   placeholder(count) {
+    const ascent = this.#ascent();
+
     for (let cell = 0; cell < count; cell++) {
-      this.#place(this.#cell(PLACEHOLDER), this.#spacing * this.#style.width);
+      this.#place(this.#cell(PLACEHOLDER), this.#spacing * this.#style.width, ascent);
     }
   }
 
@@ -502,7 +506,7 @@ class Painter {
     /* The character spacing follows every cell the glyph takes, so a multibyte
        glyph of two cells leaves the space placeholder(2) would have left */
 
-    this.#place(this.#glyphCell(definition, cells), this.#spacing * this.#style.width * cells);
+    this.#place(this.#glyphCell(definition, cells), this.#spacing * this.#style.width * cells, this.#ascent());
 
     return true;
   }
@@ -1475,9 +1479,13 @@ class Painter {
 
     Bitmap.blit(definition.bitmap, glyph, 0, 0);
 
+    /* The glyph is as tall as the cell it is drawn in, so its own baseline is
+       the baseline of that cell and its dots keep the corner they were put in */
+
     const cell = font.renderGlyph(glyph, {
       cellWidth: glyph.width,
       cellHeight: glyph.height,
+      baseline: font.cellBaseline(glyph.height),
       widthMultiplier: style.width,
       heightMultiplier: style.height,
       bold: style.bold,
@@ -1502,6 +1510,31 @@ class Painter {
   #styleKey(style) {
     return `${style.bold ? 1 : 0}${style.underline}${style.upperline || 0}${style.invert ? 1 : 0}` +
       `${this.#rotated(style) ? 1 : 0}|${style.width}x${style.height}`;
+  }
+
+  /**
+     * How far the baseline of a text cell sits below its top edge. The cell of
+     * a font has its baseline at the same fraction of its height as the font
+     * does, and the height multiplier repeats every dot, so the ascent of the
+     * cell is the baseline of the cell times the multiplier.
+     *
+     * A cell that is turned by ESC V has no baseline of its own any more, its
+     * text runs down the line instead of along it, so it stands on the bottom
+     * of the line box like a strip does.
+     *
+     * @param  {string}   [name]    Font of the cell, the current font when it is left out
+     * @param  {Style}    [style]   Style of the cell, the current style when it is left out
+     * @return {number|null}        Ascent of the cell in dots, or null when the cell has no baseline
+     */
+  #ascent(name, style) {
+    name = name || this.#font;
+    style = style || this.#style;
+
+    if (this.#rotated(style)) {
+      return null;
+    }
+
+    return this.#fonts[name].cellBaseline(this.#cells[name].height) * style.height;
   }
 
   /**
@@ -1560,7 +1593,7 @@ class Painter {
      * @return {object}   The line
      */
   #empty() {
-    return {cells: [], x: 0, extent: 0, height: 0};
+    return {cells: [], x: 0, extent: 0, height: 0, ascent: 0, descent: 0, blocks: 0};
   }
 
   /**
@@ -1779,18 +1812,34 @@ class Painter {
      * Put a cell on the current line, wrapping to the next line when it does
      * not fit on the rest of this one
      *
-     * @param  {Bitmap}   cell        The cell to place
-     * @param  {number}   [spacing]   Dots to leave behind the cell, the character spacing
+     * A text cell brings the ascent of its baseline with it, and the rest of
+     * the cell below the baseline is its descent. The line is as tall as the
+     * largest ascent plus the largest descent, which is not the tallest cell
+     * when a tall cell and a cell with a deep descender meet. A cell without a
+     * baseline, a strip of a column image or a cell turned by ESC V, only has
+     * to fit in the line box.
+     *
+     * @param  {Bitmap}        cell        The cell to place
+     * @param  {number}        [spacing]   Dots to leave behind the cell, the character spacing
+     * @param  {number|null}   [ascent]    Dots between the top of the cell and its baseline, null when it has none
      */
-  #place(cell, spacing = 0) {
+  #place(cell, spacing = 0, ascent = null) {
     if (this.#line.x > 0 && this.#line.x + cell.width > this.#area()) {
       this.lineFeed();
     }
 
-    this.#line.cells.push({bitmap: cell, x: this.#line.x});
+    this.#line.cells.push({bitmap: cell, x: this.#line.x, ascent});
     this.#line.extent = Math.max(this.#line.extent, this.#line.x + cell.width);
     this.#line.x += cell.width + spacing;
-    this.#line.height = Math.max(this.#line.height, cell.height);
+
+    if (ascent === null) {
+      this.#line.blocks = Math.max(this.#line.blocks, cell.height);
+    } else {
+      this.#line.ascent = Math.max(this.#line.ascent, ascent);
+      this.#line.descent = Math.max(this.#line.descent, cell.height - ascent);
+    }
+
+    this.#line.height = Math.max(this.#line.ascent + this.#line.descent, this.#line.blocks);
   }
 
   /**
@@ -1818,12 +1867,15 @@ class Painter {
      * Commit the current line: draw its cells into a line of the right height,
      * aligned inside the print area, and append the rows.
      *
-     * The cells sit on a baseline, which is the bottom edge of the tallest cell
-     * of the line: a cell is drawn at `line.height - cell.height` from the top
-     * of the line box, so a single height character next to a double height one
-     * sits on the same line as the tall one instead of hanging from the top. The
-     * underline and the upperline are part of the cell and move with it. The gap
-     * of the line spacing is the rows below the tallest cell and stays there.
+     * The text cells of the line share one baseline, the way the characters of
+     * a printer do: the baseline of the line sits a descent above its bottom
+     * edge and a cell is drawn at `baseline - ascent` from the top of the line
+     * box, so a single height character next to a double height one stands on
+     * the same line as the tall one and the descender space of the tall one
+     * hangs below it. A cell without a baseline, a strip of a column image or a
+     * cell turned by ESC V, is put on the bottom of the line box. The underline
+     * and the upperline are part of the cell and move with it. The gap of the
+     * line spacing is the rows below the line and stays there.
      *
      * @param  {number}   minimum   Smallest height of the line in dots
      */
@@ -1847,8 +1899,14 @@ class Painter {
     const bitmap = Bitmap.create(this.#surface(), height);
     const offset = left + this.#offset(line.extent, area);
 
+    const baseline = line.height - line.descent;
+
     for (const cell of line.cells) {
-      Bitmap.blit(cell.bitmap, bitmap, offset + cell.x, line.height - cell.bitmap.height);
+      const top = cell.ascent === null ?
+        line.height - cell.bitmap.height :
+        baseline - cell.ascent;
+
+      Bitmap.blit(cell.bitmap, bitmap, offset + cell.x, top);
     }
 
     this.#append(this.#turn(bitmap));

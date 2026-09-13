@@ -325,12 +325,20 @@ describe('EscPosRenderer', function() {
       assert.equal(paper.height, 48);
 
       /* The double size cell is 24 dots wide, so the single size one behind it
-         starts at 24 and is the bottom 24 rows of the 48 dot line */
+         starts at 24. The tall cell has an ascent of 36 and a descent of 12,
+         the small one an ascent of 18 and a descent of 6, so the small cell
+         stands on the same baseline on rows 18 to 41, with the descender space
+         of the tall cell in the six rows below it */
 
       for (let y = 0; y < 24; y++) {
         for (let x = 0; x < 12; x++) {
-          assert.equal(Bitmap.getPixel(paper, 24 + x, 24 + y), Bitmap.getPixel(small, x, y), `dot ${x},${y}`);
-          assert.equal(Bitmap.getPixel(paper, 24 + x, y), 0, `dot ${x},${y} above the cell`);
+          assert.equal(Bitmap.getPixel(paper, 24 + x, 18 + y), Bitmap.getPixel(small, x, y), `dot ${x},${y}`);
+        }
+      }
+
+      for (const y of [...Array(18).keys()].concat([42, 43, 44, 45, 46, 47])) {
+        for (let x = 0; x < 12; x++) {
+          assert.equal(Bitmap.getPixel(paper, 24 + x, y), 0, `dot ${x},${y} outside the cell`);
         }
       }
     });

@@ -222,10 +222,13 @@ describe('Painter', function() {
   });
 
   describe('the baseline of a line', function() {
-    /* Every cell of a line stands on the bottom edge of the tallest cell of
-       that line, which is what an Epson prints */
+    /* The text cells of a line share the baseline of the font, whatever their
+       size: the ascent of a cell is the baseline of the cell times the height
+       multiplier and the rest of the cell is its descent, the line is as tall
+       as the largest ascent plus the largest descent, and a cell is drawn with
+       its baseline on the baseline of the line. That is what an Epson prints */
 
-    it('should put a single height cell on the bottom of a double height line', function() {
+    it('should put a single height cell on the baseline of a double height line', function() {
       const mixed = painter();
       const alone = painter();
 
@@ -241,16 +244,20 @@ describe('Painter', function() {
       const line = stitch(mixed.end(), {width: WIDTH});
       const cell = stitch(alone.end(), {width: WIDTH});
 
+      /* The double height cell is 48 rows with an ascent of 36 and a descent of
+         12, the single height one 24 rows with an ascent of 18 and a descent of
+         6, so the line is 48 rows and the small cell starts on row 36 - 18 and
+         occupies rows 18 to 41, with the descender space of the tall cell in
+         the six rows below it */
+
       assert.equal(line.height, 48);
 
-      /* The 12 by 24 cell is the bottom 24 rows of the 48 dot line, and the
-         24 rows above it are white */
-
-      assert.deepEqual(toAscii(crop(line, 0, 24, 12, 24)), toAscii(crop(cell, 0, 0, 12, 24)));
-      assert.deepEqual(toAscii(crop(line, 0, 0, 12, 24)), toAscii(Bitmap.create(12, 24)));
+      assert.deepEqual(toAscii(crop(line, 0, 18, 12, 24)), toAscii(crop(cell, 0, 0, 12, 24)));
+      assert.deepEqual(toAscii(crop(line, 0, 0, 12, 18)), toAscii(Bitmap.create(12, 18)));
+      assert.deepEqual(toAscii(crop(line, 0, 42, 12, 6)), toAscii(Bitmap.create(12, 6)));
     });
 
-    it('should put the underline of a single height cell on the bottom row of the line', function() {
+    it('should put the underline of a single height cell on the bottom row of its own cell', function() {
       const paper = painter();
 
       paper.style({underline: 1});
@@ -263,10 +270,70 @@ describe('Painter', function() {
 
       assert.equal(line.height, 48);
 
+      /* The underline is the bottom row of the cell, which sits on rows 18 to
+         41, so it is row 41 and the descender space below it stays white */
+
       for (let x = 0; x < 12; x++) {
-        assert.equal(Bitmap.getPixel(line, x, 47), 1, `dot ${x},47`);
-        assert.equal(Bitmap.getPixel(line, x, 23), 0, `dot ${x},23`);
+        assert.equal(Bitmap.getPixel(line, x, 41), 1, `dot ${x},41`);
+        assert.equal(Bitmap.getPixel(line, x, 42), 0, `dot ${x},42`);
+        assert.equal(Bitmap.getPixel(line, x, 47), 0, `dot ${x},47`);
+        assert.equal(Bitmap.getPixel(line, x, 17), 0, `dot ${x},17`);
       }
+    });
+
+    it('should share the baseline between font A and font B on an Epson', function() {
+      const mixed = painter();
+      const alone = painter();
+
+      mixed.lineSpacing(24);
+      mixed.text('A');
+      mixed.font('B');
+      mixed.text('B');
+      mixed.lineFeed();
+
+      alone.lineSpacing(17);
+      alone.font('B');
+      alone.text('B');
+      alone.lineFeed();
+
+      const line = stitch(mixed.end(), {width: WIDTH});
+      const cell = stitch(alone.end(), {width: WIDTH});
+
+      /* The font A cell is 24 rows with an ascent of 18, the font B cell of an
+         Epson is 17 rows with an ascent of 12, so the line is 18 + 6 rows and
+         the font B cell sits on rows 6 to 22 */
+
+      assert.equal(line.height, 24);
+
+      assert.deepEqual(toAscii(crop(line, 12, 6, 9, 17)), toAscii(crop(cell, 0, 0, 9, 17)));
+      assert.deepEqual(toAscii(crop(line, 12, 0, 9, 6)), toAscii(Bitmap.create(9, 6)));
+      assert.deepEqual(toAscii(crop(line, 12, 23, 9, 1)), toAscii(Bitmap.create(9, 1)));
+    });
+
+    it('should share the baseline between font A and font B on a Star', function() {
+      const mixed = painter({profile: profiles.star});
+      const alone = painter({profile: profiles.star});
+
+      mixed.lineSpacing(24);
+      mixed.text('A');
+      mixed.font('B');
+      mixed.text('B');
+      mixed.lineFeed();
+
+      alone.lineSpacing(24);
+      alone.font('B');
+      alone.text('B');
+      alone.lineFeed();
+
+      const line = stitch(mixed.end(), {width: WIDTH});
+      const cell = stitch(alone.end(), {width: WIDTH});
+
+      /* The font B cell of a Star is 24 rows with an ascent of 18, the same as
+         font A, so the line is 24 rows, not 26, and the cell starts at the top */
+
+      assert.equal(line.height, 24);
+
+      assert.deepEqual(toAscii(crop(line, 12, 0, 9, 24)), toAscii(crop(cell, 0, 0, 9, 24)));
     });
 
     it('should put a strip on the bottom of a double height line', function() {
@@ -1880,11 +1947,12 @@ describe('Painter', function() {
 
       assert.deepEqual(toAscii(page), toAscii(stitch(standard.end(), {width: WIDTH})));
 
-      /* The single height cell is the bottom 24 rows of the 48 dot line, the
-         same rule the paper follows */
+      /* The single height cell sits on the baseline of the 48 dot line, rows 18
+         to 41, the same rule the paper follows */
 
-      assert.deepEqual(toAscii(crop(page, 0, 0, 12, 24)), toAscii(Bitmap.create(12, 24)));
-      assert.notDeepEqual(toAscii(crop(page, 0, 24, 12, 24)), toAscii(Bitmap.create(12, 24)));
+      assert.deepEqual(toAscii(crop(page, 0, 0, 12, 18)), toAscii(Bitmap.create(12, 18)));
+      assert.deepEqual(toAscii(crop(page, 0, 42, 12, 6)), toAscii(Bitmap.create(12, 6)));
+      assert.notDeepEqual(toAscii(crop(page, 0, 18, 12, 24)), toAscii(Bitmap.create(12, 24)));
     });
 
     it('should turn direction 1 a quarter turn counter-clockwise', function() {

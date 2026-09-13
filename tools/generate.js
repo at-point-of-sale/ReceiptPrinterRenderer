@@ -143,6 +143,7 @@ function generatePdf417() {
           '12x24': {
             width: 12,            cell width in dots
             height: 24,           cell height in dots
+            baseline: 18,         row of the cell the glyphs stand on
             fallback: 0,          glyph number used for code points without a glyph
             index: {32: 1, ...},  code point to glyph number
             data: 'base64'        all glyphs, one after the other
@@ -292,6 +293,7 @@ function generateFonts() {
     output += `\t'${font.name}': {\n`;
     output += `\t\twidth: ${font.width},\n`;
     output += `\t\theight: ${font.height},\n`;
+    output += `\t\tbaseline: ${font.baseline},\n`;
     output += '\t\tfallback: 0,\n';
     output += `\t\tindex: ${JSON.stringify(index)},\n`;
     output += `\t\tdata: '${data}',\n`;
