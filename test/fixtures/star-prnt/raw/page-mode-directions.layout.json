@@ -1,0 +1,3206 @@
+{
+  "version": 1,
+  "language": "star-prnt",
+  "width": 576,
+  "height": 304,
+  "dpi": 203,
+  "entries": [
+    {
+      "type": "line",
+      "y": 0,
+      "height": 32,
+      "rotation": 0,
+      "operations": [
+        {
+          "type": "text",
+          "x": 0,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 70,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 12,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 111,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 24,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 117,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 36,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 114,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 48,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 32,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 60,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 100,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 72,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 105,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 84,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 114,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 96,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 101,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 108,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 99,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 120,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 116,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 132,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 105,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 144,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 111,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 156,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 110,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 168,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 115,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 180,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 32,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 192,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 111,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 204,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 110,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 216,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 32,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 228,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 111,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 240,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 110,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 252,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 101,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 264,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 32,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 276,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 112,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 288,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 97,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 300,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 103,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 312,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 101,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        }
+      ]
+    },
+    {
+      "type": "page",
+      "y": 32,
+      "height": 240,
+      "areas": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 288,
+          "height": 120,
+          "direction": 0,
+          "entries": [
+            {
+              "type": "line",
+              "y": 0,
+              "height": 32,
+              "rotation": 0,
+              "operations": [
+                {
+                  "type": "text",
+                  "x": 0,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 68,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 12,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 105,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 24,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 114,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 36,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 32,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 48,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 48,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                }
+              ]
+            },
+            {
+              "type": "line",
+              "y": 32,
+              "height": 32,
+              "rotation": 0,
+              "operations": [
+                {
+                  "type": "text",
+                  "x": 0,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 12,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 24,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 36,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 48,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 60,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 72,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 84,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 96,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 108,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "x": 288,
+          "y": 0,
+          "width": 288,
+          "height": 120,
+          "direction": 1,
+          "entries": [
+            {
+              "type": "line",
+              "y": 0,
+              "height": 32,
+              "rotation": 0,
+              "operations": [
+                {
+                  "type": "text",
+                  "x": 0,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 68,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 12,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 105,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 24,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 114,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 36,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 32,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 48,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 49,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                }
+              ]
+            },
+            {
+              "type": "line",
+              "y": 32,
+              "height": 32,
+              "rotation": 0,
+              "operations": [
+                {
+                  "type": "text",
+                  "x": 0,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 12,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 24,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 36,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 48,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 60,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 72,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 84,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 96,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 108,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "x": 0,
+          "y": 120,
+          "width": 288,
+          "height": 120,
+          "direction": 2,
+          "entries": [
+            {
+              "type": "line",
+              "y": 0,
+              "height": 32,
+              "rotation": 0,
+              "operations": [
+                {
+                  "type": "text",
+                  "x": 0,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 68,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 12,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 105,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 24,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 114,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 36,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 32,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 48,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 50,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                }
+              ]
+            },
+            {
+              "type": "line",
+              "y": 32,
+              "height": 32,
+              "rotation": 0,
+              "operations": [
+                {
+                  "type": "text",
+                  "x": 0,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 12,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 24,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 36,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 48,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 60,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 72,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 84,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 96,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 108,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "x": 288,
+          "y": 120,
+          "width": 288,
+          "height": 120,
+          "direction": 3,
+          "entries": [
+            {
+              "type": "line",
+              "y": 0,
+              "height": 32,
+              "rotation": 0,
+              "operations": [
+                {
+                  "type": "text",
+                  "x": 0,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 68,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 12,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 105,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 24,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 114,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 36,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 32,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 48,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 51,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                }
+              ]
+            },
+            {
+              "type": "line",
+              "y": 32,
+              "height": 32,
+              "rotation": 0,
+              "operations": [
+                {
+                  "type": "text",
+                  "x": 0,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 12,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 24,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 36,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 48,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 60,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 72,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 84,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 96,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                },
+                {
+                  "type": "text",
+                  "x": 108,
+                  "y": 0,
+                  "width": 12,
+                  "height": 24,
+                  "codepoint": 45,
+                  "font": "A",
+                  "cell": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "glyph": {
+                    "width": 12,
+                    "height": 24
+                  },
+                  "baseline": 18,
+                  "scale": {
+                    "x": 1,
+                    "y": 1
+                  },
+                  "style": {
+                    "bold": false,
+                    "underline": 0,
+                    "upperline": 0,
+                    "invert": false
+                  },
+                  "rotation": 0
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "line",
+      "y": 272,
+      "height": 32,
+      "rotation": 0,
+      "operations": [
+        {
+          "type": "text",
+          "x": 0,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 83,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 12,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 116,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 24,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 97,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 36,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 110,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 48,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 100,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 60,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 97,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 72,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 114,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 84,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 100,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 96,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 32,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 108,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 109,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 120,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 111,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 132,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 100,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 144,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 101,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 156,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 32,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 168,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 97,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 180,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 103,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 192,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 97,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 204,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 105,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        },
+        {
+          "type": "text",
+          "x": 216,
+          "y": 0,
+          "width": 12,
+          "height": 24,
+          "codepoint": 110,
+          "font": "A",
+          "cell": {
+            "width": 12,
+            "height": 24
+          },
+          "glyph": {
+            "width": 12,
+            "height": 24
+          },
+          "baseline": 18,
+          "scale": {
+            "x": 1,
+            "y": 1
+          },
+          "style": {
+            "bold": false,
+            "underline": 0,
+            "upperline": 0,
+            "invert": false
+          },
+          "rotation": 0
+        }
+      ]
+    }
+  ]
+}

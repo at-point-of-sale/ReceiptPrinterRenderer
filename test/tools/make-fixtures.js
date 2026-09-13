@@ -9,6 +9,7 @@ import {EscPosRenderer, StarPrntRenderer} from '../../src/receipt-printer-render
 import {toPbm} from '../../src/formats/pbm.js';
 import {stitch} from '../../src/formats/stitch.js';
 import {commands} from '../helpers/items.js';
+import {toJson} from '../helpers/layout.js';
 
 /*
     Fixtures for the renderers.
@@ -28,7 +29,43 @@ import {commands} from '../helpers/items.js';
     The PBM is the paper, not the stream: the image items are stitched below
     each other and a feed item becomes white rows, so that a change in where the
     renderer splits its images does not change the fixture.
+
+    A few fixtures also get their display list, <name>.layout.json, which freezes
+    the format of layout() the way the PBM freezes the dots, see GOLDEN_LAYOUTS
+    below and documentation/display-list.md.
 */
+
+/* The fixtures whose display list is frozen next to the paper: a receipt of
+   text, one with a barcode and its human readable text, one with a raster
+   image, a page of the four print directions and a Star raster job */
+
+const GOLDEN_LAYOUTS = [
+  'esc-pos/receipt',
+  'esc-pos/hri',
+  'esc-pos/image-raster',
+  'star-prnt/raw/page-mode-directions',
+  'star-prnt/raw/star-graphics',
+];
+
+/**
+ * Write the display list of a fixture, when it is one of the frozen ones
+ *
+ * @param  {string}       key         Directory and name of the fixture
+ * @param  {string}       directory   Where the fixture goes
+ * @param  {string}       name        Name of the fixture
+ * @param  {object}       renderer    The renderer of its language
+ * @param  {Uint8Array}   bytes       The commands
+ */
+function writeLayout(key, directory, name, renderer, bytes) {
+  if (!GOLDEN_LAYOUTS.includes(key)) {
+    return;
+  }
+
+  fs.writeFileSync(
+      path.join(directory, `${name}.layout.json`),
+      JSON.stringify(toJson(renderer.layout(bytes)), null, 2) + '\n',
+  );
+}
 
 /* The printer the fixtures are made for: 80 mm paper, 576 dots, 48 columns of
    font A */
@@ -480,6 +517,8 @@ for (const language of languages) {
 
     const items = new Renderer(RENDERER).render(bytes);
     const bitmap = stitch(items, {width: WIDTH});
+
+    writeLayout(`${language.name}/${name}`, directory, name, new Renderer(RENDERER), bytes);
 
     fs.writeFileSync(path.join(directory, `${name}.bin`), bytes);
     fs.writeFileSync(path.join(directory, `${name}.pbm`), toPbm(bitmap));
@@ -1574,6 +1613,8 @@ for (const language of languages) {
     const items = new Renderer(RENDERER).render(bytes);
     const bitmap = stitch(items, {width: WIDTH});
 
+    writeLayout(`${language.name}/raw/${name}`, directory, name, new Renderer(RENDERER), bytes);
+
     fs.writeFileSync(path.join(directory, `${name}.bin`), bytes);
     fs.writeFileSync(path.join(directory, `${name}.pbm`), toPbm(bitmap));
     fs.writeFileSync(
@@ -1606,6 +1647,10 @@ for (const language of languages) {
   const bytes = new StarGraphicsPrinterEncoder().encode(new StarPrntRenderer(RENDERER).render(receipt));
   const items = new StarPrntRenderer(RENDERER).render(bytes);
   const bitmap = stitch(items, {width: WIDTH});
+
+  writeLayout(
+      'star-prnt/raw/star-graphics', directory, 'star-graphics', new StarPrntRenderer(RENDERER), bytes,
+  );
 
   fs.writeFileSync(path.join(directory, 'star-graphics.bin'), bytes);
   fs.writeFileSync(path.join(directory, 'star-graphics.pbm'), toPbm(bitmap));

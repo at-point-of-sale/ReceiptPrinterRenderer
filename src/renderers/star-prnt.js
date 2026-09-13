@@ -8,6 +8,7 @@ import printerProfiles from '../../generated/profiles.js';
 /**
  * @typedef {import('../painter.js').Profile} Profile
  * @typedef {import('../painter.js').PainterOptions} PainterOptions
+ * @typedef {import('../types.js').Layout} Layout
  * @typedef {import('../types.js').RendererOptions} RendererOptions
  * @typedef {import('../types.js').RenderItem} RenderItem
  */
@@ -209,6 +210,13 @@ const PAGE_MODE_ARGUMENTS = [0, 0, 8, 1, 2, 2];
 
 const DEFAULT_PULSE = 200;
 
+/* The languages this renderer speaks, which are one command set: star-line
+   differs only in the line buffering of the encoder, and star-graphics is the
+   raster protocol of a TSP100, which is the raster mode of this set. A renderer
+   reports the one it was created for in its display list */
+
+const STAR_LANGUAGES = ['star-prnt', 'star-line', 'star-graphics'];
+
 /**
  * The 256 entry table of a codepage, or null when the codepage encoder does not
  * implement it. Some of the mappings name codepages it does not have.
@@ -224,6 +232,16 @@ function codepointsOf(name) {
   try {
     return CodepageEncoder.getCodepoints(name, true);
   } catch (error) {
+    /* A name the encoder knows as an alias only has no definition of its own
+       and throws a TypeError on the way in, which is the case this catch is
+       here for. Anything else is a fault of the platform, a global a sandbox
+       does not have for instance, and is not ours to swallow: a stream that
+       silently decodes to nothing but fallback glyphs is worse than an error */
+
+    if (!(error instanceof TypeError)) {
+      throw error;
+    }
+
     return null;
   }
 }
@@ -635,6 +653,9 @@ class StarPrntRenderer {
     }
 
     this.#painter = new Painter({
+      language: STAR_LANGUAGES.indexOf(settings.language) === -1 ?
+        StarPrntRenderer.language :
+        settings.language,
       width: settings.width,
       profile: resolved,
       commands: settings.commands || [],
@@ -668,6 +689,34 @@ class StarPrntRenderer {
      * @return {RenderItem[]}                  The items, see the output contract in design.md
      */
   render(bytes) {
+    return this.#run(bytes);
+  }
+
+  /**
+     * Lay a stream of StarPRNT commands out and return the display list instead
+     * of the dots, see documentation/display-list.md.
+     *
+     * The list carries every command of the stream, whatever the `commands`
+     * option says, and `commands` decides which of them the printer performs
+     * and so where the paper leaves it, see the method of the same name on
+     * ReceiptPrinterRenderer
+     *
+     * @param  {Uint8Array|number[]}   bytes   The commands
+     * @return {Layout}                        The display list
+     */
+  layout(bytes) {
+    this.#painter.collect();
+
+    return this.#run(bytes);
+  }
+
+  /**
+     * Parse a stream and return whatever the painter made of it
+     *
+     * @param  {Uint8Array|number[]}   bytes   The commands
+     * @return {RenderItem[]|Layout}           The items, or the display list
+     */
+  #run(bytes) {
     const data = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes || []);
 
     /* Whatever happens, this renderer starts the next stream empty: a stream

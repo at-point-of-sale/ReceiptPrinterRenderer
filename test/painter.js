@@ -2693,4 +2693,144 @@ describe('Painter', function() {
       assert.equal(Bitmap.getPixel(bitmap, 15, 10), 1);
     });
   });
+  describe('the sink', function() {
+    it('should return the display list of the stream after collect()', function() {
+      const paper = painter();
+
+      paper.collect();
+      paper.text('A');
+      paper.lineFeed();
+
+      const list = paper.end();
+
+      assert.equal(list.version, 1);
+      assert.equal(list.width, WIDTH);
+      assert.equal(list.height, 30);
+      assert.deepEqual(list.entries.map((entry) => [entry.type, entry.y, entry.height]), [['line', 0, 30]]);
+      assert.equal(list.entries[0].operations.length, 1);
+      assert.equal(list.entries[0].operations[0].codepoint, 0x41);
+    });
+
+    it('should draw the stream after a collected one again', function() {
+      const paper = painter();
+
+      paper.collect();
+      paper.text('A');
+      paper.lineFeed();
+      paper.end();
+
+      paper.text('A');
+      paper.lineFeed();
+
+      const items = paper.end();
+
+      assert.deepEqual(items.map((item) => item.type), ['image']);
+      assert.equal(items[0].height, 30);
+    });
+
+    it('should draw again after a collected stream was discarded', function() {
+      const paper = painter();
+
+      paper.collect();
+      paper.text('A');
+      paper.discard();
+
+      paper.text('A');
+      paper.lineFeed();
+
+      assert.deepEqual(paper.end().map((item) => item.type), ['image']);
+    });
+
+    it('should keep the memory of the printer across the sinks', function() {
+      const paper = painter();
+
+      paper.define('logo', black(24, 24));
+
+      paper.collect();
+      assert.isTrue(paper.print('logo'));
+
+      const list = paper.end();
+
+      assert.equal(list.entries[0].operations[0].type, 'image');
+
+      /* The image is still there for the render of the next stream, because it
+         is the memory of the printer and not of the sink */
+
+      assert.isTrue(paper.print('logo'));
+      assert.equal(paper.end()[0].height, 24);
+    });
+
+    it('should take the paper in front of a cut away', function() {
+      const paper = painter({commands: ['cut']});
+
+      paper.lineSpacing(24);
+      paper.text('A');
+      paper.lineFeed();
+      paper.text('B');
+      paper.lineFeed();
+      paper.reverseFeed(24);
+
+      paper.collect();
+      paper.command({type: 'cut', value: 'full'});
+      paper.text('C');
+      paper.lineFeed();
+
+      const list = paper.end();
+
+      /* The cut stands at the bottom of the paper, not at the position the
+         reverse feed left behind, and the line behind it is printed below it */
+
+      assert.deepEqual(list.entries.map((entry) => [entry.type, entry.y]), [['cut', 48], ['line', 48]]);
+      assert.equal(list.entries[1].height, 24);
+    });
+
+    it('should not move a reverse feed above a cut', function() {
+      const paper = painter({commands: ['cut']});
+
+      paper.lineSpacing(24);
+      paper.collect();
+      paper.text('A');
+      paper.lineFeed();
+      paper.command({type: 'cut', value: 'full'});
+      paper.text('B');
+      paper.lineFeed();
+      paper.reverseFeed(1000);
+      paper.text('C');
+      paper.lineFeed();
+
+      const list = paper.end();
+
+      assert.deepEqual(list.entries.map((entry) => [entry.type, entry.y]), [
+        ['line', 0],
+        ['cut', 24],
+        ['line', 24],
+        ['line', 24],
+      ]);
+    });
+
+    it('should hold every command of the stream, whatever the commands option says', function() {
+      const paper = painter({commands: []});
+
+      paper.collect();
+      paper.text('A');
+      paper.lineFeed();
+      paper.command({type: 'cut', value: 'partial'});
+      paper.command({type: 'pulse', device: 0, on: 100, off: 500});
+
+      const list = paper.end();
+
+      assert.deepEqual(list.entries.map((entry) => entry.type), ['line', 'cut', 'pulse']);
+      assert.deepEqual(list.entries[1], {type: 'cut', y: 30, value: 'partial'});
+      assert.deepEqual(list.entries[2], {type: 'pulse', y: 30, device: 0, on: 100, off: 500});
+
+      /* And the render of the same stream drops both of them, because the
+         driver does not support them */
+
+      paper.text('A');
+      paper.lineFeed();
+      paper.command({type: 'cut', value: 'partial'});
+
+      assert.deepEqual(paper.end().map((item) => item.type), ['image']);
+    });
+  });
 });

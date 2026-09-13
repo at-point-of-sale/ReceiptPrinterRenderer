@@ -10,8 +10,8 @@
 */
 
 /**
- * @typedef {import('./painter.js').CellSize} CellSize
- * @typedef {import('./painter.js').Profile} Profile
+ * @typedef {import('./layout.js').CellSize} CellSize
+ * @typedef {import('./layout.js').Profile} Profile
  * @typedef {import('./font.js').PackedFont} PackedFont
  */
 
@@ -92,6 +92,159 @@
  * language of the commands it is given
  *
  * @typedef {RendererOptions & {language?: RenderLanguage}} ReceiptPrinterRendererOptions
+ */
+
+/**
+ * The display list of a stream: what a printer prints, where it prints it, and
+ * nothing about how the dots are made. See documentation/display-list.md.
+ *
+ * @typedef {object} Layout
+ * @property {number} version               Version of the format, 1
+ * @property {RenderLanguage} language      Language of the commands the list was made from
+ * @property {number} width                 Width of the paper in dots
+ * @property {number} height                Height of the paper in dots, from its first row to its last
+ * @property {number} dpi                   Resolution of the printer in dots per inch
+ * @property {LayoutEntry[]} entries        The entries, in stream order, which is draw order
+ */
+
+/** @typedef {LineEntry | PageEntry | FeedEntry | CutEntry | PulseEntry | UnknownEntry} LayoutEntry */
+
+/**
+ * A line box: a text line, or a block on a line of its own. It spans the width
+ * of the surface it was laid out on.
+ *
+ * @typedef {object} LineEntry
+ * @property {'line'} type
+ * @property {number} y                        Row of the paper the line starts on
+ * @property {number} height                   Height of the line box in dots
+ * @property {number} rotation                 0, or 180 for the upside down printing of ESC {
+ * @property {LineOperation[]} operations      What is on the line, in draw order
+ */
+
+/**
+ * A page of page mode as it reaches the paper, one block of the paper width
+ *
+ * @typedef {object} PageEntry
+ * @property {'page'} type
+ * @property {number} y              Row of the paper the page starts on
+ * @property {number} height         Height of the page in dots
+ * @property {PageArea[]} areas      The print areas it was composed of, in the order the stream set them
+ */
+
+/**
+ * A print area of a page, with what was laid out in it in the logical frame of
+ * its print direction
+ *
+ * @typedef {object} PageArea
+ * @property {number} x                                  Left edge of the area, from the left of the page
+ * @property {number} y                                  Top of the area, from the top of the page
+ * @property {number} width                              Width of the area in dots
+ * @property {number} height                             Height of the area in dots
+ * @property {number} direction                          Print direction, 0 to 3
+ * @property {(LineEntry | FeedEntry)[]} entries         What was laid out in it, in the logical frame
+ */
+
+/**
+ * Rows the paper advanced without printing
+ *
+ * @typedef {object} FeedEntry
+ * @property {'feed'} type
+ * @property {number} y        Row of the paper the feed starts on
+ * @property {number} height   Number of rows
+ */
+
+/**
+ * The paper is cut between row `y - 1` and row `y`
+ *
+ * @typedef {object} CutEntry
+ * @property {'cut'} type
+ * @property {number} y
+ * @property {'full' | 'partial'} value
+ */
+
+/**
+ * The drawer opens when the paper is at row `y`
+ *
+ * @typedef {object} PulseEntry
+ * @property {'pulse'} type
+ * @property {number} y
+ * @property {number} device   0 or 1
+ * @property {number} on       Pulse on time in milliseconds
+ * @property {number} off      Pulse off time in milliseconds
+ */
+
+/**
+ * A command that was not understood, with a copy of its bytes
+ *
+ * @typedef {object} UnknownEntry
+ * @property {'unknown'} type
+ * @property {number} y
+ * @property {Uint8Array} data
+ */
+
+/** @typedef {TextOperation | RectOperation | ImageOperation} LineOperation */
+
+/**
+ * One cell of text. Every operation carries its whole style, there are no state
+ * changes in the list.
+ *
+ * @typedef {object} TextOperation
+ * @property {'text'} type
+ * @property {number} x                  Left edge of the box, from the left edge of the surface
+ * @property {number} y                  Top of the box, from the top of the line
+ * @property {number} width              Width of the box in dots
+ * @property {number} height             Height of the box in dots
+ * @property {number} [codepoint]        The Unicode code point, U+FFFD for a byte without a glyph
+ * @property {Bitmap} [bitmap]           The dots of a glyph the stream downloaded, instead of a code point
+ * @property {string} font               'A' or 'B'
+ * @property {CellSize} cell             The unscaled cell of this operation
+ * @property {CellSize} glyph            The unscaled glyph box, which sits centred in the cell
+ * @property {number} baseline           Row of the cell the glyph stands on, unscaled
+ * @property {{x: number, y: number}} scale   Size multipliers, 1 to 8
+ * @property {TextStyle} style           The style of the cell
+ * @property {number} rotation           0, or 90 for the quarter turn of ESC V
+ */
+
+/**
+ * The style of a text operation
+ *
+ * @typedef {object} TextStyle
+ * @property {boolean} bold      The glyph a second time one glyph dot to the right
+ * @property {number} underline  Thickness of the line along the bottom of the cell in dots, 0, 1 or 2
+ * @property {number} upperline  Thickness of the line along the top of the cell in dots, 0, 1 or 2
+ * @property {boolean} invert    The cell black and the glyph white
+ */
+
+/**
+ * A filled black rectangle: a bar of a barcode, or a run of black modules of a
+ * QR code, a PDF417 symbol or a DataBar
+ *
+ * @typedef {object} RectOperation
+ * @property {'rect'} type
+ * @property {number} x
+ * @property {number} y
+ * @property {number} width
+ * @property {number} height
+ */
+
+/**
+ * A 1-bit bitmap, one dot on one dot, in the format of the output contract
+ *
+ * @typedef {object} ImageOperation
+ * @property {'image'} type
+ * @property {number} x
+ * @property {number} y
+ * @property {number} width
+ * @property {number} height
+ * @property {Uint8Array} data   Packed rows, Math.ceil(width / 8) bytes per row
+ */
+
+/**
+ * @typedef {object} RasterizeOptions
+ * @property {RenderCommand[]} [commands]          Command types that appear in the output, the rest is dropped
+ * @property {number} [maxHeight]                  Maximum height of an image item, taller segments are split
+ * @property {number} [feedThreshold]              Runs of blank rows at least this tall become feed items
+ * @property {Object<string, PackedFont>} [font]   Font data, in the packed format of the built in fonts
  */
 
 export {};

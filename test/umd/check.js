@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 
 /*
     The UMD build, checked the way a script tag loads it.
@@ -24,9 +24,14 @@ if (!fs.existsSync(bundle)) {
 }
 
 /* A script tag has no exports, no module and no define, so the bundle falls
-   through to the global. Only the globals a browser has are in the context */
+   through to the global. Only the globals a browser has are in the context.
 
-const context = vm.createContext({console, TextDecoder, TextEncoder, atob, btoa, URL});
+   structuredClone is one of them and it has to be here: the codepage encoder
+   calls it to hand out a codepage definition, and without it every byte of a
+   render decodes to the fallback glyph instead of its character, which is what
+   this check missed for as long as it only compared the shape of the items */
+
+const context = vm.createContext({console, TextDecoder, TextEncoder, atob, btoa, URL, structuredClone});
 
 vm.runInContext(fs.readFileSync(bundle, 'utf8'), context, {filename: 'receipt-printer-renderer.umd.js'});
 
@@ -44,7 +49,7 @@ assert.equal(typeof ReceiptPrinterRenderer.StarPrntRenderer, 'function');
 assert.equal(ReceiptPrinterRenderer.EscPosRenderer.language, 'esc-pos');
 assert.equal(ReceiptPrinterRenderer.StarPrntRenderer.language, 'star-prnt');
 
-for (const helper of ['toPbm', 'toPng', 'toImageData', 'stitch']) {
+for (const helper of ['rasterize', 'toPbm', 'toPng', 'toImageData', 'stitch']) {
   assert.equal(typeof ReceiptPrinterRenderer[helper], 'function', `${helper} is attached to the class`);
 }
 
@@ -74,4 +79,78 @@ for (const language of ReceiptPrinterRenderer.languages) {
 
 assert.throws(() => new ReceiptPrinterRenderer({language: 'meow', width: 576}), /Unknown language meow/);
 
-console.log('UMD global is ReceiptPrinterRenderer, renders esc-pos, star-prnt, star-line and star-graphics');
+/* The display list and the rasterizer, which a page that draws a receipt of
+   its own needs from the same global */
+
+{
+  const renderer = new ReceiptPrinterRenderer({language: 'esc-pos', width: 576, commands: ['cut']});
+  const layout = renderer.layout(new Uint8Array([0x1b, 0x40, 0x41, 0x0a]));
+
+  assert.equal(layout.version, 1);
+  assert.equal(layout.language, 'esc-pos');
+  assert.equal(layout.width, 576);
+  assert.equal(layout.height, 30);
+  assert.equal(layout.entries.length, 1);
+  assert.equal(layout.entries[0].type, 'line');
+  assert.equal(layout.entries[0].operations.length, 1);
+  assert.equal(layout.entries[0].operations[0].type, 'text');
+  assert.equal(layout.entries[0].operations[0].codepoint, 0x41);
+  assert.equal(layout.entries[0].operations[0].width, 12);
+  assert.equal(layout.entries[0].operations[0].height, 24);
+
+  const drawn = ReceiptPrinterRenderer.rasterize(layout, {commands: ['cut']});
+  const items = renderer.render(new Uint8Array([0x1b, 0x40, 0x41, 0x0a]));
+
+  assert.equal(drawn.length, items.length);
+  assert.equal(drawn[0].height, items[0].height);
+  assert.equal(Array.from(drawn[0].data).join(','), Array.from(items[0].data).join(','));
+}
+
+/* And it draws the same dots as the module build of the same sources, text
+   included, which is the check that a bundle that decodes nothing would fail */
+
+{
+  const module = await import(
+      pathToFileURL(path.join(path.dirname(bundle), 'receipt-printer-renderer.esm.js')).href
+  );
+
+  const options = {language: 'esc-pos', width: 576, codepageMapping: 'epson', commands: ['cut', 'pulse', 'feed']};
+  const bytes = new Uint8Array([
+    0x1b, 0x40,
+    ...Array.from('Total').map((character) => character.charCodeAt(0)),
+    0x0a,
+    0x1b, 0x21, 0x30,
+    ...Array.from('16.75').map((character) => character.charCodeAt(0)),
+    0x0a,
+    0x1d, 0x56, 0x00,
+  ]);
+
+  const drawn = new ReceiptPrinterRenderer(options).render(bytes);
+  const expected = new module.ReceiptPrinterRenderer(options).render(bytes);
+
+  assert.equal(drawn.length, expected.length, 'the UMD build returns the items of the module build');
+
+  for (let index = 0; index < expected.length; index++) {
+    assert.equal(drawn[index].type, expected[index].type);
+
+    if (expected[index].type === 'image') {
+      assert.equal(drawn[index].height, expected[index].height);
+      assert.equal(
+          Array.from(drawn[index].data).join(','),
+          Array.from(expected[index].data).join(','),
+          'the UMD build draws the dots of the module build',
+      );
+    }
+  }
+
+  /* Something is drawn at all: a render that decodes nothing still fills its
+     rows with fallback glyphs, so the dots above are the check, and this is the
+     guard against comparing two empty papers */
+
+  assert.ok(expected.some((item) => item.type === 'image' && item.data.some((byte) => byte !== 0)));
+}
+
+console.log(
+    'UMD global is ReceiptPrinterRenderer, renders and lays out esc-pos, star-prnt, star-line and star-graphics, ' +
+    'and draws the dots of the module build',
+);

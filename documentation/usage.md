@@ -14,10 +14,12 @@ Render the ESC/POS and StarPRNT commands created by [ReceiptPrinterEncoder](http
   - [Feed items and maximum height](#feed-items-and-maximum-height)
   - [Image format helpers](#image-format-helpers)
   - [Previewing a receipt](#previewing-a-receipt)
+  - [The display list](#the-display-list)
   - [Drivers and applications](#drivers-and-applications)
   - [What is not rendered](#what-is-not-rendered)
 - [ESC/POS commands](commands-esc-pos.md)
 - [StarPRNT commands](commands-star-prnt.md)
+- [The display list](display-list.md)
 - [Design document](design.md)
 
 <br>
@@ -328,6 +330,45 @@ canvas.getContext('2d').putImageData(image, 0, 0);
 ```
 
 To preview the same receipt for a Star printer, encode it with `language: 'star-prnt'` and render it with the same language and `codepageMapping: 'star'`. Nothing else changes.
+
+<br>
+
+### The display list
+
+`render(bytes)` gives you the dots. `layout(bytes)` gives you what is printed and where, without drawing a dot of it: a list of line boxes with the cells, the rectangles and the images that are on them, in the order the printer prints them. It is on all three renderer classes and it takes the same bytes.
+
+```js
+let layout = renderer.layout(bytes);
+
+// {
+//   version: 1,
+//   language: 'esc-pos',
+//   width: 576,
+//   height: 713,
+//   dpi: 203,
+//   entries: [
+//     {type: 'line', y: 0, height: 30, rotation: 0, operations: [ ... ]},
+//     {type: 'feed', y: 60, height: 30},
+//     {type: 'cut', y: 683, value: 'partial'},
+//   ],
+// }
+```
+
+A `line` entry holds `text` operations, one per character cell, with the code point, the font, the cell, the size, the style and the position of the cell, `rect` operations for the bars of a barcode and the modules of a QR code, and `image` operations for the bitmaps a stream sent. A `page` entry holds the print areas of a page of page mode. Every operation carries its whole style, so a consumer needs no state of its own.
+
+The list is a description, not an image: it says that an `A` of font A in bold stands at dot 24 of the line that starts at row 210, and it leaves drawing the `A` to whoever consumes it. That is what an SVG or a PDF writer needs, and what a debugging view of a receipt needs.
+
+`rasterize(layout, options)` draws a list again and returns the items `render()` returns, so the two paths are interchangeable:
+
+```js
+import ReceiptPrinterRenderer, { rasterize } from '@point-of-sale/receipt-printer-renderer';
+
+let items = rasterize(renderer.layout(bytes), { commands: ['cut', 'pulse'] });
+```
+
+It takes `commands`, `maxHeight`, `feedThreshold` and `font`, the options of a renderer that decide how the dots come out, and it is a static of `ReceiptPrinterRenderer` as well as a named export, so a page that loads the UMD build reaches it too. The list itself is never filtered by `commands`: every cut, pulse, feed and unknown command is in it. What `commands` does decide is which of them the printer performs, so a cut the driver supports takes the paper in front of it away and a reverse feed cannot move above it, in the list exactly as on the paper.
+
+[The display list](display-list.md) is the reference page of the format, with the entries, the operations and a worked example.
 
 <br>
 

@@ -11,6 +11,7 @@ import ReceiptPrinterRenderer, {
   ReceiptPrinterRenderer as NamedReceiptPrinterRenderer,
   EscPosRenderer,
   StarPrntRenderer,
+  rasterize,
   toPbm,
   toPng,
   toImageData,
@@ -30,6 +31,21 @@ import type {
   RendererOptions,
   ReceiptPrinterRendererOptions,
   StitchOptions,
+  Layout,
+  LayoutEntry,
+  LineEntry,
+  PageEntry,
+  PageArea,
+  FeedEntry,
+  CutEntry,
+  PulseEntry,
+  UnknownEntry,
+  LineOperation,
+  TextOperation,
+  RectOperation,
+  ImageOperation,
+  TextStyle,
+  RasterizeOptions,
 } from '@point-of-sale/receipt-printer-renderer';
 
 /* The static language property, which drivers report in their connected event */
@@ -172,3 +188,114 @@ void pbm;
 void png;
 void pixels;
 void withConstructor;
+
+/* The display list, which layout() returns on all three renderer classes */
+
+const commandBytes = new Uint8Array([0x1b, 0x40, 0x41, 0x0a]);
+
+const list: Layout = renderer.layout(commandBytes);
+const escposList: Layout = escpos.layout(commandBytes);
+const starList: Layout = star.layout([0x1b, 0x40, 0x41, 0x0a]);
+
+const version: number = list.version;
+const listLanguage: RenderLanguage = list.language;
+const listWidth: number = list.width;
+const listHeight: number = list.height;
+const dpi: number = list.dpi;
+
+for (const entry of list.entries) {
+  const box: LayoutEntry = entry;
+
+  switch (box.type) {
+    case 'line': {
+      const line: LineEntry = box;
+      const rotation: number = line.rotation;
+
+      for (const operation of line.operations) {
+        const one: LineOperation = operation;
+
+        if (one.type === 'text') {
+          const cell: TextOperation = one;
+          const style: TextStyle = cell.style;
+          const point: number | undefined = cell.codepoint;
+          const dots: Bitmap | undefined = cell.bitmap;
+          const baseline: number = cell.baseline;
+
+          void style;
+          void point;
+          void dots;
+          void baseline;
+        }
+
+        if (one.type === 'rect') {
+          const rectangle: RectOperation = one;
+          void rectangle.width;
+        }
+
+        if (one.type === 'image') {
+          const picture: ImageOperation = one;
+          void picture.data;
+        }
+      }
+
+      void rotation;
+      break;
+    }
+
+    case 'page': {
+      const page: PageEntry = box;
+
+      for (const area of page.areas) {
+        const one: PageArea = area;
+        const direction: number = one.direction;
+        const inside: (LineEntry | FeedEntry)[] = one.entries;
+
+        void direction;
+        void inside;
+      }
+
+      break;
+    }
+
+    case 'feed': {
+      const feed: FeedEntry = box;
+      void feed.height;
+      break;
+    }
+
+    case 'cut': {
+      const cut: CutEntry = box;
+      void cut.value;
+      break;
+    }
+
+    case 'pulse': {
+      const pulse: PulseEntry = box;
+      void pulse.device;
+      break;
+    }
+
+    case 'unknown': {
+      const unknown: UnknownEntry = box;
+      void unknown.data;
+      break;
+    }
+  }
+}
+
+/* And the display list drawn again, through the named export and the static */
+
+const rasterizeOptions: RasterizeOptions = {commands, maxHeight: 1024, feedThreshold: 24};
+
+const drawn: RenderItem[] = rasterize(list, rasterizeOptions);
+const drawnAgain: RenderItem[] = ReceiptPrinterRenderer.rasterize(list);
+
+void escposList;
+void starList;
+void version;
+void listLanguage;
+void listWidth;
+void listHeight;
+void dpi;
+void drawn;
+void drawnAgain;

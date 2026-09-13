@@ -8,6 +8,7 @@ import printerProfiles from '../../generated/profiles.js';
 /**
  * @typedef {import('../painter.js').Profile} Profile
  * @typedef {import('../painter.js').PainterOptions} PainterOptions
+ * @typedef {import('../types.js').Layout} Layout
  * @typedef {import('../types.js').RendererOptions} RendererOptions
  * @typedef {import('../types.js').RenderItem} RenderItem
  */
@@ -223,6 +224,16 @@ function codepointsOf(name) {
   try {
     return CodepageEncoder.getCodepoints(name, true);
   } catch (error) {
+    /* A name the encoder knows as an alias only has no definition of its own
+       and throws a TypeError on the way in, which is the case this catch is
+       here for. Anything else is a fault of the platform, a global a sandbox
+       does not have for instance, and is not ours to swallow: a stream that
+       silently decodes to nothing but fallback glyphs is worse than an error */
+
+    if (!(error instanceof TypeError)) {
+      throw error;
+    }
+
     return null;
   }
 }
@@ -626,6 +637,7 @@ class EscPosRenderer {
     }
 
     this.#painter = new Painter({
+      language: EscPosRenderer.language,
       width: settings.width,
       profile: resolved,
       commands: settings.commands || [],
@@ -658,6 +670,34 @@ class EscPosRenderer {
      * @return {RenderItem[]}                  The items, see the output contract in design.md
      */
   render(bytes) {
+    return this.#run(bytes);
+  }
+
+  /**
+     * Lay a stream of ESC/POS commands out and return the display list instead
+     * of the dots, see documentation/display-list.md.
+     *
+     * The list carries every command of the stream, whatever the `commands`
+     * option says, and `commands` decides which of them the printer performs
+     * and so where the paper leaves it, see the method of the same name on
+     * ReceiptPrinterRenderer
+     *
+     * @param  {Uint8Array|number[]}   bytes   The commands
+     * @return {Layout}                        The display list
+     */
+  layout(bytes) {
+    this.#painter.collect();
+
+    return this.#run(bytes);
+  }
+
+  /**
+     * Parse a stream and return whatever the painter made of it
+     *
+     * @param  {Uint8Array|number[]}   bytes   The commands
+     * @return {RenderItem[]|Layout}           The items, or the display list
+     */
+  #run(bytes) {
     const data = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes || []);
 
     /* Whatever happens, this renderer starts the next stream empty: a stream

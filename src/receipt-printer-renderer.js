@@ -2,6 +2,7 @@ import {toPbm} from './formats/pbm.js';
 import {toPng} from './formats/png.js';
 import {toImageData} from './formats/image-data.js';
 import {stitch} from './formats/stitch.js';
+import {rasterize} from './backends/bitmap.js';
 import EscPosRenderer from './renderers/esc-pos.js';
 import StarPrntRenderer from './renderers/star-prnt.js';
 
@@ -35,6 +36,21 @@ import StarPrntRenderer from './renderers/star-prnt.js';
  * @typedef {import('./types.js').CellSize} CellSize
  * @typedef {import('./types.js').Profile} Profile
  * @typedef {import('./types.js').PackedFont} PackedFont
+ * @typedef {import('./types.js').Layout} Layout
+ * @typedef {import('./types.js').LayoutEntry} LayoutEntry
+ * @typedef {import('./types.js').LineEntry} LineEntry
+ * @typedef {import('./types.js').PageEntry} PageEntry
+ * @typedef {import('./types.js').PageArea} PageArea
+ * @typedef {import('./types.js').FeedEntry} FeedEntry
+ * @typedef {import('./types.js').CutEntry} CutEntry
+ * @typedef {import('./types.js').PulseEntry} PulseEntry
+ * @typedef {import('./types.js').UnknownEntry} UnknownEntry
+ * @typedef {import('./types.js').LineOperation} LineOperation
+ * @typedef {import('./types.js').TextOperation} TextOperation
+ * @typedef {import('./types.js').RectOperation} RectOperation
+ * @typedef {import('./types.js').ImageOperation} ImageOperation
+ * @typedef {import('./types.js').TextStyle} TextStyle
+ * @typedef {import('./types.js').RasterizeOptions} RasterizeOptions
  * @typedef {import('./formats/stitch.js').StitchOptions} StitchOptions
  */
 
@@ -72,6 +88,8 @@ class ReceiptPrinterRenderer {
 
   static EscPosRenderer = EscPosRenderer;
   static StarPrntRenderer = StarPrntRenderer;
+
+  static rasterize = rasterize;
 
   static toPbm = toPbm;
   static toPng = toPng;
@@ -144,8 +162,36 @@ class ReceiptPrinterRenderer {
   render(bytes) {
     return this.#renderer.render(bytes);
   }
+
+  /**
+     * Lay a stream of commands out and return the display list instead of the
+     * dots: what is printed and where, with no dot of it drawn, see
+     * documentation/display-list.md.
+     *
+     * The list carries every command of the stream, whatever the `commands`
+     * option says, and `commands` decides which of them the printer performs
+     * and so where the paper leaves it: a cut the printer performs takes the
+     * paper in front of it away and a reverse feed cannot move above it. A list
+     * is drawn again with the commands it was laid out with, or the rows above
+     * a cut that is performed are lost.
+     *
+     * @param  {Uint8Array|number[]}   bytes   The commands
+     * @return {Layout}                        The display list
+     */
+  layout(bytes) {
+    return this.#renderer.layout(bytes);
+  }
 }
 
 export default ReceiptPrinterRenderer;
 
-export {ReceiptPrinterRenderer, EscPosRenderer, StarPrntRenderer, toPbm, toPng, toImageData, stitch};
+export {
+  ReceiptPrinterRenderer,
+  EscPosRenderer,
+  StarPrntRenderer,
+  rasterize,
+  toPbm,
+  toPng,
+  toImageData,
+  stitch,
+};

@@ -12,6 +12,7 @@ Contents
 - [Scope of version 1](#scope-of-version-1)
 - [Architecture](#architecture)
 - [Output contract](#output-contract)
+- [The display list](#the-display-list)
 - [Renderer options](#renderer-options)
 - [Supported ESC/POS commands](#supported-escpos-commands)
 - [Supported StarPRNT commands](#supported-starprnt-commands)
@@ -92,16 +93,19 @@ Dependencies are kept to a minimum. Runtime dependencies are `@point-of-sale/cod
 
 ## Architecture
 
-Three layers, each unaware of the next:
+Three layers, each unaware of the next, and the middle one split in two since the display list:
 
 ```
-bytes ──▶ parser ──▶ painter ──▶ items
-          (per language)   (shared)
+bytes ──▶ parser ──▶ layout engine ──▶ sink ──▶ items
+          (per language)   (shared)      │
+                                         └──▶ display list
 ```
 
 - **Parser.** Turns bytes into calls on the painter: text with a decoded string, style changes, size, font, alignment, line feed, image rows, barcode and QR code requests, cut, pulse. There is one parser per language. Each renderer class is a parser bound to the shared painter.
-- **Painter.** Keeps the printer state, composes the current line from cells, applies alignment when a line is committed, draws blocks, and produces image items. It flushes on the commands the driver supports and at the end of the stream.
-- **Items.** The output stream, see [Output contract](#output-contract).
+- **Layout engine.** `src/layout.js` keeps the printer state, composes the current line from cells, applies alignment when a line is committed, lays blocks and pages out, and emits the boxes of the paper: a line box with the operations that are on it, a page with its print areas, a feed, a command. It draws no dots at all: a cell is as wide as the profile says times the width multiplier, a barcode is as wide as its bars, and what the glyph of a code point looks like is the business of whoever draws it. It holds the memory of the printer, the kept images and the downloaded glyphs, so it lives as long as the renderer does.
+- **Sink.** Where the boxes go, attached per stream. `src/backends/bitmap.js` draws them: the cells from the packed font with a cache, the rectangles filled, the images blitted, the line turned when it is upside down, the rows accumulated and cut into image items on the rules below. `src/backends/collector.js` keeps them instead and returns the display list of `layout()`. The sink interface is internal: `line(entry)`, `page(entry)`, `feed(entry)`, `command(entry)`, `end()` and `discard()`.
+- **Painter.** `src/painter.js` is the wiring of the two: it owns an engine with a bitmap back-end and is the interface both parsers talk to, so the split changed nothing they see.
+- **Items.** The output stream, see [Output contract](#output-contract). The other output is the [display list](#the-display-list).
 
 Repository layout, mirroring ReceiptPrinterEncoder:
 
@@ -112,7 +116,11 @@ src/
   renderers/
     esc-pos.js                  ESC/POS parser and state machine
     star-prnt.js                StarPRNT parser and state machine
-  painter.js                    line composition, styles, blocks, flushing
+  painter.js                    the wiring of the layout engine and its sink
+  layout.js                     the layout engine: printer state, line composition, the boxes of the paper
+  backends/
+    bitmap.js                   the bitmap back-end: glyphs, blocks, the row buffer, flushing, rasterize()
+    collector.js                the sink that returns the display list of layout()
   bitmap.js                     the 1-bit image type: create, blit, pack rows, split
   font.js                       glyph lookup, fallback glyph, scaling
   symbologies/
@@ -203,6 +211,21 @@ Receipts contain many blank rows, especially the feed before a cut, and in an im
 ### Incremental use
 
 Emission points are supported commands and the end of the stream, so the renderer can also be fed in chunks: `write(bytes)` returns the items completed so far, `end()` returns the remainder and resets. `render(bytes)` is `write` followed by `end`. Drivers receive a job as one buffer and use `render`. An emulator receiving a socket stream uses `write` and `end`. Version 1 implements `render`, and keeps the parser state in a form that allows `write` to be added without a redesign.
+
+<br>
+
+## The display list
+
+`layout(bytes)` is the other output of a renderer: what is printed and where, with no dot of it drawn. It is a list of entries in stream order, which is draw order: a `line` box with `text`, `rect` and `image` operations in the coordinates of the line, a `page` with the print areas of page mode, a `feed`, and the `cut`, `pulse` and `unknown` markers at the row the paper has when their command arrives. Everything is in dots, as integers, and every operation carries its whole style, so a consumer keeps no state.
+
+```js
+const layout = renderer.layout(bytes);
+const items = rasterize(layout, {commands: ['cut']});   // the same items render() returns
+```
+
+The list is the engine with a collector attached instead of the bitmap back-end, so it is the same layout the render takes, and `rasterize()` is the same back-end fed from a finished list: `rasterize(layout(bytes))` equals `render(bytes)` on every fixture, which `test/rasterize.js` proves under every option combination. It is not filtered by the `commands` option: every command is in it. The commands do reach the engine, because a cut or a pulse the printer performs takes the paper in front of it away, so the print head stands at the bottom of that paper afterwards and a reverse feed cannot move above it. The height of a list is therefore the height of the paper of a render with the same options, for every fixture.
+
+The list is public because a consumer outside this package is the reason to have one: the SVG writer of the package, a PDF writer some day, a preview or a debugging view. [display-list.md](display-list.md) is the reference page, with the entries, the operations, the page areas and a worked example, and `test/fixtures/**/*.layout.json` freezes the format the way the PBM files freeze the dots. `version` is 1; a field that is added does not change it, a change in the meaning of an existing field does.
 
 <br>
 
@@ -487,6 +510,8 @@ The Star barcode symbology numbers map onto the same generators as the ESC/POS o
 
 ## Painter
 
+The rules below are the printer's, and they live in two files since the display list: `src/layout.js` decides them and emits the boxes of the paper, `src/backends/bitmap.js` draws the boxes and cuts the image items from the rows, and `src/painter.js` wires the two together for the parsers. Everything about a cell, a line, a block and a page is a decision of the engine; everything about a dot, a glyph, a row buffer and an item is the back-end's.
+
 - **Cells.** The line is a row of cells. A cell is a glyph in the current style with a width and height multiplier. Font A cells are 12 by 24 dots. Font B cells come from the profile: 9 by 17 dots in the Epson profile, 9 by 24 in the Star profile. Both are drawn from the same 8x16 glyphs, centred horizontally in the cell and standing on the baseline of the cell, which is three quarters of its height: row 12 of the 17 row Epson cell, where the 8x16 glyphs already have their baseline, and row 18 of the 24 row Star cell, where font A has its baseline as well. `width / 12` cells fit on a line for font A.
 - **Line height.** The height of a committed text line is the larger of the tallest cell on the line and the current line spacing. With the Epson default of 30 dots and a 24 dot font there is a six dot gap, with the Star default of 32 dots an eight dot gap. Lines with only double height text are 48 dots tall, not 60, which is also how the firmware behaves.
 - **Baseline.** Cells of different sizes share the baseline of the font, which is what the firmware does. A font carries the row its glyphs stand on, row 18 of the 24 row font A cell and row 12 of the 16 row font B one, and the cell a printer draws that font in has its baseline at the same fraction of its height, `floor(cellHeight * baseline / height)`: 18 for the 24 dot font A cell, 12 for the 9x17 font B cell of an Epson and 18 for the 9x24 one of a Star. The ascent of a cell is that row times the height multiplier and its descent is the rest of the cell, the line is as tall as the largest ascent plus the largest descent, and every text cell is drawn with its baseline on the baseline of the line, `ascentMax - ascent` dots from the top. So the small text next to a double height word stands on the same line as that word and the descender space of the tall cell hangs below it. Text cells of every font and size, downloaded glyphs and placeholders follow the rule, on the paper and in a page alike, and the underline and the upperline are part of the cell and move with it. Cells with no baseline of their own, the strips of a column image and the cells turned by `ESC V`, sit on the bottom of the line box instead, and a strip that is taller than the text pushes the text down to it. The gap of the line spacing stays below the line. A line whose cells all have one font and one size is unchanged by the rule, to the dot. Corrected on 2026-09-13, confirmed on an Epson printout; the cells stood on the bottom edge of the tallest cell of the line before, and on the top of the line box before that.
@@ -494,7 +519,7 @@ The Star barcode symbology numbers map onto the same generators as the ESC/POS o
 - **Overflow.** Cells beyond the width wrap to the next line, as a printer wraps. The encoder never produces this, but the painter must not lose content.
 - **Blocks.** Barcodes, QR codes and raster images are committed as their own lines: the pending text line is committed first, the block is drawn aligned, and the paper advances by the block height. Column mode images are different, they are 24 row strips inside normal lines with the line spacing set to 24, so they go through the regular line mechanism.
 - **Kept images.** The definition commands of the graphics group hand the painter an image under a key, `nv:65:66` or `nv-bit-image:1`, and a print command draws it as a block, scaled by repeating its dots. The images live as long as the painter does: an initialize does not empty them and neither does the end of a stream, which is the memory of a printer. A key without an image prints nothing at all, the pending line included, and the parser reports the command.
-- **Flushing.** The painter accumulates committed rows in a growing bitmap and cuts image items from it on the rules in [Output contract](#output-contract). Blank row runs are tracked while committing, so that feed items and the `feedThreshold` need no second pass.
+- **Flushing.** The painter accumulates committed rows in a growing bitmap and cuts image items from it on the rules in [Output contract](#output-contract). Blank row runs are tracked while committing, so that feed items and the `feedThreshold` need no second pass. A command the printer performs takes the paper in front of it away: the position moves down to the bottom of everything printed so far and a reverse feed cannot move above that row again, so a stream that moved the paper back before a cut prints what follows behind the cut and not over it.
 - **Print area.** `margins({left, width})` moves the left edge of the line and narrows the area the line is composed in. The commands that set it are only effective at the beginning of a line, so a call while a line is being composed does nothing, the way a printer drops the command. Wrapping, the alignment and the tab stops all work inside the area. `block(bitmap, {margins: false})` puts a block on the paper instead, for content that carries its own position, such as the rows of the Star raster mode.
 - **Cursor.** `position(dots)` moves the cursor inside the line, `cursor` reads it, and `tab()` moves to the next stop of `tabs([columns])`, which counts in characters of the current font, the character spacing included. An empty list cancels every stop, `null` and a reset go back to a stop every eight characters of font A, and a stop outside the print area sends the cursor past it so that the next character wraps. Cells that were already placed stay where they are, so moving back and printing again overprints.
 - **Character spacing.** `spacing(dots)` leaves white behind every cell, scaled with the width multiplier and not counted in the width the alignment centres.
