@@ -4,7 +4,8 @@ import outlines from '../generated/outlines.js';
 import fonts from '../generated/fonts.js';
 import Font from '../src/font.js';
 import Bitmap from '../src/bitmap.js';
-import {flatten, fill, SEGMENTS, INK_THRESHOLD, SAMPLES} from '../tools/rasterize.js';
+import Rasterizer, {flatten, fill, isFormat, METRIC_CHARACTERS, SEGMENTS, INK_THRESHOLD, SAMPLES}
+  from '../tools/rasterize.js';
 import {usedCodepoints, REPLACEMENT_CHARACTER} from '../tools/codepoints.js';
 import {BOX_DRAWING} from '../tools/box-drawing.js';
 
@@ -74,19 +75,31 @@ const CELLS = [
 
 /*
     What lies outside the 12 by 24 cell. A path is not clipped and the bitmap of
-    a glyph is, so a glyph whose ink leaves its cell, a combining accent that a
-    font gives no advance, paints outside the cell in SVG unless the writer
-    clips it, which is what Section 4 has it do. The numbers are recorded here
-    so that a regeneration that moves them is visible; the list is in the notes
-    of Section 3. They dropped from 93, 41 and 5 when the glyphs that are wider
-    than the face, the em dash and the ellipsis among them, were fitted into the
-    cell instead of clipped by it.
+    a glyph is, so a glyph whose ink leaves its cell, an accented capital of a
+    face drawn for a taller cell, paints outside the cell in SVG unless the
+    writer clips it, which is what Section 4 has it do. The numbers are recorded
+    here so that a regeneration that moves them is visible; the list is in the
+    notes of Section 3.
+
+    They were 93, 41 and 5 before the glyphs that are wider than the face, the
+    em dash and the ellipsis among them, were fitted into the cell instead of
+    clipped by it; 59, 7 and 5 before the combining marks were centred in their
+    cell by their ink, which brought in the five that were wholly outside; and
+    54, 1 and 0 before a glyph whose ink lies outside its own advance was
+    fitted by its ink, which brought in the last one that was more than two
+    dots out, U+0E33.
+
+    What is left is outside the cell at the top and not at the side: the
+    Vietnamese precomposed letters and the horn letters of a face drawn for a
+    taller cell, whose accents rise above it, and U+221A, whose ink is fitted
+    to the cell but still starts half a dot inside its own left edge, so the
+    path ends half a dot past the right edge while the bitmap rounds it away.
 */
 
 const OUTSIDE_THE_CELL = {
-  total: 59,
-  far: 7,
-  whole: ['U+0300', 'U+0301', 'U+0303', 'U+0309', 'U+0323'],
+  total: 43,
+  far: 0,
+  whole: [],
 };
 
 /* Font B is drawn as font A at two thirds, unless it has an outline of its own */
@@ -298,6 +311,125 @@ const boxed = (codepoint) => codepoint >= BOX_DRAWING.first && codepoint <= BOX_
 
 const report = [];
 
+describe('the fitting rule', function() {
+  /* The sources of tools/generate.js, in the order a glyph is looked for */
+
+  const FACE = 'data/fonts/iosevka-medium-subset.ttf';
+  const HEBREW = 'data/fonts/noto-sans-hebrew-medium-subset.ttf';
+
+  const CELL = {width: 12, height: 24, baseline: 18};
+
+  describe('isFormat()', function() {
+    it('should cover the four ranges of the Unicode format characters, and their edges', function() {
+      for (const [first, last] of [[0x200b, 0x200f], [0x2028, 0x202e], [0x2060, 0x2064], [0xfeff, 0xfeff]]) {
+        assert.isTrue(isFormat(first), name(first));
+        assert.isTrue(isFormat(last), name(last));
+        assert.isTrue(isFormat(Math.floor((first + last) / 2)), 'inside the range');
+
+        assert.isFalse(isFormat(first - 1), `${name(first - 1)}, one below the range`);
+        assert.isFalse(isFormat(last + 1), `${name(last + 1)}, one above the range`);
+      }
+    });
+
+    it('should cover nothing else', function() {
+      for (const codepoint of [0x20, 0x41, 0x300, 0x5d0, 0xe01, 0x2500, 0xff71, 0xfffd, 0x10ffff]) {
+        assert.isFalse(isFormat(codepoint), name(codepoint));
+      }
+    });
+  });
+
+  describe('metrics()', function() {
+    it('should measure the face', function() {
+      const fit = new Rasterizer(FACE).metrics(CELL);
+
+      assert.equal(fit.unitsPerEm, 1000);
+      assert.equal(fit.advance, 500);
+      assert.equal(fit.scaleX, CELL.width / 500);
+      assert.isFalse(fit.inherited);
+    });
+
+    it('should refuse a face that lacks any of the thirteen metric characters, and name them', function() {
+      /* A source of a script and no Latin has none of the thirteen. It is a
+         source and never the face, so measuring it is the mistake this
+         catches, and the message says which characters are missing rather than
+         leaving the face fitted to .notdef */
+
+      assert.throws(
+          () => new Rasterizer(HEBREW).metrics(CELL),
+          /has no glyph for .*which the fitting rule measures a face on/,
+      );
+
+      const message = (() => {
+        try {
+          new Rasterizer(HEBREW).metrics(CELL);
+        } catch (error) {
+          return error.message;
+        }
+
+        return '';
+      })();
+
+      for (const character of METRIC_CHARACTERS) {
+        assert.include(message, `'${character}'`, `the message does not name '${character}'`);
+      }
+    });
+  });
+
+  describe('inherit()', function() {
+    const face = new Rasterizer(FACE).metrics(CELL);
+
+    it('should give a source at the em of the face the numbers of the face', function() {
+      const fit = new Rasterizer(HEBREW).inherit(face);
+
+      assert.equal(fit.unitsPerEm, face.unitsPerEm);
+      assert.equal(fit.scaleX, face.scaleX);
+      assert.equal(fit.scaleY, face.scaleY);
+      assert.equal(fit.advance, face.advance);
+      assert.equal(fit.verticalCap, face.verticalCap);
+      assert.isTrue(fit.inherited);
+
+      /* And the extents of the source itself, which are zero for a source
+         without a Latin: they are reported and never used */
+
+      assert.equal(fit.cap, 0);
+      assert.equal(fit.ascender, 0);
+      assert.equal(fit.descender, 0);
+    });
+
+    it('should scale a source at another em by the ratio of the two', function() {
+      const fit = new Rasterizer(HEBREW).inherit({...face, unitsPerEm: 2000, advance: 1000});
+
+      assert.equal(fit.scaleX, face.scaleX * 2);
+      assert.equal(fit.advance, face.advance);
+    });
+
+    it('should refuse a fit that is not the measured fit of a face', function() {
+      const source = new Rasterizer(HEBREW);
+
+      for (const broken of [null, undefined, {}, {...face, scaleX: 0}, {...face, advance: 0},
+        {...face, unitsPerEm: 0}]) {
+        assert.throws(
+            () => source.inherit(broken),
+            /fitted to the metrics of the face/,
+            `for ${JSON.stringify(broken)}`,
+        );
+      }
+    });
+
+    it('should refuse a source whose em is not a number of units', function() {
+      /* No TrueType font says so, which is why the em is read through the
+         getter: the guard is reachable and the font that would trip it is not
+         one opentype.js would parse */
+
+      const source = new Rasterizer(HEBREW);
+
+      Object.defineProperty(source, 'unitsPerEm', {value: 0});
+
+      assert.throws(() => source.inherit(face), /does not say how many units its em holds/);
+    });
+  });
+});
+
 describe('Outlines', function() {
   describe('the file', function() {
     it('should be version 1', function() {
@@ -424,12 +556,18 @@ describe('Outlines', function() {
           .filter(([, path]) => path === '')
           .map(([codepoint]) => Number(codepoint));
 
-      /* The carriage return, the space and the no break space. A combining
-         accent is not among them: it has an outline, which sits outside the
-         cell of a font that gives it no advance, so its packed glyph is blank
-         while its path is not */
+      /* The carriage return, the space and the no break space, and the four
+         Unicode format characters of the set: every one of those is an empty
+         cell whatever outline a source has for it, and an empty cell when no
+         source has one at all, see isFormat() of tools/rasterize.js, so their
+         path is empty too. A combining accent is not among them: it has an
+         outline, and since the centring it sits in its cell, so both its path
+         and its packed glyph carry the mark */
 
-      assert.deepEqual(empty.map(name), [name(0x0d), name(0x20), name(0xa0)]);
+      assert.deepEqual(
+          empty.map(name),
+          [name(0x0d), name(0x20), name(0xa0), name(0x200c), name(0x200d), name(0x200e), name(0x200f)],
+      );
 
       for (const codepoint of empty) {
         assert.isFalse(font.lookup(codepoint).data.some((byte) => byte !== 0), name(codepoint));
@@ -616,6 +754,166 @@ describe('Outlines', function() {
       }
 
       assert.deepEqual(failed, []);
+    });
+  });
+
+  describe('the glyphs of the Hebrew and the Thai codepages', function() {
+    /* The 51 Hebrew and the 87 Thai code points of the set, which the third
+       and the fourth source supply, the baht sign excepted, which Iosevka has
+       and which therefore still comes from the face */
+
+    const hebrew = codepoints.filter((codepoint) => codepoint >= 0x590 && codepoint <= 0x5ff);
+    const thai = codepoints.filter((codepoint) => codepoint >= 0xe00 && codepoint <= 0xe7f);
+
+    it('should have an outline for every one of them', function() {
+      assert.equal(hebrew.length, 51);
+      assert.equal(thai.length, 87);
+
+      const missing = [...hebrew, ...thai].filter((codepoint) => outlines.glyphs[codepoint] === undefined);
+
+      assert.deepEqual(missing.map(name), []);
+    });
+
+    it('should keep every one of them inside its cell', function() {
+      /*
+         The sources are fitted to the face and most of their letters are drawn
+         wider than the advance the face is fitted by, so the wide glyph rule
+         catches them the way it catches a kanji.
+
+         Two are caught by the ink rule instead. U+0E33, the Thai sara am, is a
+         spacing character of an advance of 415 units whose ink runs from -279
+         to 337, because the nikhahit half of it is drawn over the consonant in
+         front of it: its advance is narrower than the face's, so the wide
+         glyph rule does not fire, and it is not zero, so the centring does not
+         either, and the nikhahit fell off the left edge of the cell until a
+         glyph whose ink lies outside its own advance was fitted by its ink.
+         U+0E44, the sara ai maimalai, overhangs by nine units, a fifth of a
+         dot, which is the side bearing of a face that lets its vowels lean on
+         the letter beside them.
+      */
+
+      const outside = [];
+
+      for (const codepoint of [...hebrew, ...thai]) {
+        const box = bounds(parsePath(outlines.glyphs[codepoint], outlines.units));
+
+        if (box && (box.x1 < 0 || box.x2 > outlines.cell.width)) {
+          outside.push(codepoint);
+        }
+      }
+
+      assert.deepEqual(outside.map(name), []);
+    });
+
+    it('should fill to the packed glyphs of both fonts within the tolerance', function() {
+      const a = Font.get('12x24');
+      const b = Font.get('8x16');
+
+      const failed = [];
+
+      for (const codepoint of [...hebrew, ...thai]) {
+        const own = outlines.glyphsB[codepoint];
+
+        const contoursA = parsePath(outlines.glyphs[codepoint], outlines.units);
+
+        const contoursB = own === undefined ?
+          scaleContours(contoursA, FONT_B_SCALE) :
+          parsePath(own, outlines.units);
+
+        const dotsA = difference(fillPath(contoursA, 12, 24), a.lookup(codepoint));
+        const dotsB = difference(fillPath(contoursB, 8, 16), b.lookup(codepoint));
+
+        if (dotsA > TOLERANCE || dotsB > TOLERANCE) {
+          failed.push(`${name(codepoint)} by ${dotsA} and ${dotsB} dots`);
+        }
+      }
+
+      assert.deepEqual(failed, []);
+    });
+  });
+
+  describe('the combining marks', function() {
+    /*
+       The glyphs whose advance is zero: Iosevka's five combining accents, the
+       sixteen niqqud of Hebrew and the sixteen vowel and tone marks of Thai.
+       They are centred in their cell by their ink, on a dot centre, see the
+       rule of the face in tools/rasterize.js.
+
+       They are the only glyphs of the file that font B refits. The phase of
+       the centring is half a dot past the middle dot of the cell, which is 6.5
+       dots in the 12 dot cell and 4.5 in the 8 dot one, and 4.5 is not two
+       thirds of 6.5: a centred mark is therefore in a different place in the
+       two cells by design, and `glyphsB` is where it says so. Every other
+       glyph of font B is still font A at two thirds exactly.
+    */
+
+    const MARKS = [
+      0x300, 0x301, 0x303, 0x309, 0x323,
+      0x5b0, 0x5b1, 0x5b2, 0x5b3, 0x5b4, 0x5b5, 0x5b6, 0x5b7,
+      0x5b8, 0x5b9, 0x5bb, 0x5bc, 0x5bd, 0x5bf, 0x5c1, 0x5c2,
+      0xe31, 0xe34, 0xe35, 0xe36, 0xe37, 0xe38, 0xe39, 0xe3a,
+      0xe47, 0xe48, 0xe49, 0xe4a, 0xe4b, 0xe4c, 0xe4d, 0xe4e,
+    ];
+
+    it('should be the glyphs font B refits, and no others', function() {
+      assert.deepEqual(Object.keys(outlines.glyphsB).map(Number).sort((a, b) => a - b), MARKS);
+    });
+
+    it('should draw the ink of every one of them inside the cell', function() {
+      for (const codepoint of MARKS) {
+        const box = bounds(parsePath(outlines.glyphs[codepoint], outlines.units));
+
+        assert.isNotNull(box, name(codepoint));
+        assert.isAtLeast(box.x1, 0, name(codepoint));
+        assert.isAtMost(box.x2, outlines.cell.width, name(codepoint));
+      }
+    });
+
+    it('should centre the ink of every one of them on the dot centre of the cell', function() {
+      /* floor(width / 2) + 0.5, which is 6.5 of the 12 dot cell, to within the
+         tenth of a dot the paths are written in */
+
+      for (const codepoint of MARKS) {
+        const box = bounds(parsePath(outlines.glyphs[codepoint], outlines.units));
+
+        assert.closeTo((box.x1 + box.x2) / 2, Math.floor(outlines.cell.width / 2) + 0.5, 0.1, name(codepoint));
+      }
+    });
+
+    it('should print something in both fonts, which five of them did not before', function() {
+      for (const [size, font] of [['12x24', Font.get('12x24')], ['8x16', Font.get('8x16')]]) {
+        for (const codepoint of MARKS) {
+          assert.isTrue(
+              font.lookup(codepoint).data.some((byte) => byte !== 0),
+              `${size} draws nothing for ${name(codepoint)}`,
+          );
+        }
+      }
+    });
+  });
+
+  describe('the Unicode format characters', function() {
+    /* A format character is an instruction to whatever lays out the text and
+       never a character on the paper, so every source draws one as an empty
+       cell and its path is empty, see isFormat() of tools/rasterize.js. The
+       set holds the two joiners, which Iosevka drew straddling its origin and
+       which printed as a sliver against the left wall of the cell */
+
+    const FORMAT = [0x200c, 0x200d];
+
+    it('should draw an empty cell and an empty path for every one of them', function() {
+      for (const codepoint of FORMAT) {
+        assert.equal(outlines.glyphs[codepoint], '', name(codepoint));
+        assert.isUndefined(outlines.glyphsB[codepoint], name(codepoint));
+
+        for (const [size, font] of [['12x24', Font.get('12x24')], ['8x16', Font.get('8x16')]]) {
+          assert.isTrue(font.has(codepoint), `${size} has no cell for ${name(codepoint)}`);
+          assert.isFalse(
+              font.lookup(codepoint).data.some((byte) => byte !== 0),
+              `${size} draws ink for ${name(codepoint)}`,
+          );
+        }
+      }
     });
   });
 

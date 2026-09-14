@@ -326,6 +326,60 @@ const receipts = {
       .newline()
       .line('ｺｰﾋｰ ﾁｰｽﾞｹｰｷ ﾋﾞｰﾙ'),
 
+  /*
+      The Hebrew of the set, the 27 letters and final forms of U+05D0 to
+      U+05EA, in the two rows of the code block and then in words.
+
+      cp862 is the Hebrew page of both printer families, number 36 in Epson's
+      table and 13 in Star's, and the two hold these 27 letters at the same
+      bytes 0x80 to 0x9A, so the two languages print the same paper. It carries
+      no niqqud: the marks are in Windows-1255, which only Epson's table has,
+      so they are in the hand assembled hebrew-niqqud fixture below.
+
+      Nothing here reorders anything. A printer draws one cell per code point
+      in the order the bytes arrive, left to right, so a Hebrew word comes out
+      with its first letter on the left; bidirectional layout is the job of
+      whatever composes the receipt, not of the printer or of this renderer.
+  */
+
+  'hebrew': (encoder) => encoder
+      .codepage('cp862')
+      .line('אבגדהוזחטיךכלםמן')
+      .line('נסעףפץצקרשת')
+      .newline()
+      .line('שלום')
+      .line('תודה רבה'),
+
+  /*
+      The Thai of the set, the 86 code points both printer families have, in
+      the rows of the code block and then in syllables.
+
+      The page is not the same on the two: Epson's table has thai11 and
+      Star's has its own cp874, and both of them happen to be number 21, so
+      each language selects its own by name, the way the katakana fixture
+      does. The two pages hold the same 86 code points at different bytes, and
+      the renderer decodes both to the same characters, so the paper is the
+      same. The 87th, the khomut U+0E5B, is in Star's page alone and is left
+      out so that parity holds without an exception; test/font.js covers it.
+
+      The last two lines have the vowel signs and the tone marks in them. They
+      have an advance of zero in the face and a printer gives each of them a
+      cell of its own all the same, so a marked syllable prints as the letter
+      and the mark beside it, which is what a single byte codepage on a fixed
+      cell printer can do.
+  */
+
+  'thai': (encoder, language) => encoder
+      .codepage(language === 'esc-pos' ? 'thai11' : 'star/cp874')
+      .line('กขฃคฅฆงจฉชซฌญฎฏฐฑฒณดตถท')
+      .line('ธนบปผฝพฟภมยรฤลฦวศษสหฬอฮ')
+      .line('ฯะัาำิีึืฺุู฿')
+      .line('เแโใไๅๆ็่้๊๋์ํ๎๏')
+      .line('๐๑๒๓๔๕๖๗๘๙๚')
+      .newline()
+      .line('ขอบคุณ ก่ ก้ ก๊ ก๋')
+      .line('๑๒๓ บาท'),
+
   /* Characters from several codepages, which the encoder switches between.
      Every candidate is in both mappings, so both languages switch at the same
      place, to the same codepage, with a different number */
@@ -1203,6 +1257,31 @@ const raw = {
         [0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd], LF,
         '2026', [0xf2], '9', [0xf3], '13', [0xf4], ' 12', [0xf5], '30', [0xf6], LF,
         [0xf8], '105-0011 ', [0xfa], [0xfb], [0xfc], ' 1200', [0xf1], LF,
+    ),
+  },
+
+  /*
+      The niqqud of Windows-1255. `ESC t 49`, number 49 of Epson's table,
+      selects it and the marks sit at
+      0xC0 to 0xD8: the sixteen niqqud, the maqaf, the paseq, the sof pasuq,
+      the three Yiddish digraphs, the geresh and the gershayim, none of which
+      cp862 carries.
+
+      This fixture exists in ESC/POS alone, because Windows-1255 is in Epson's
+      table and in no Star page: Star's only Hebrew page is cp862, which is
+      the hebrew fixture above. The last line is שָׁלוֹם written with its points,
+      which a printer draws as seven cells, the letters and the marks beside
+      each other, since every code point gets a cell of its own.
+  */
+
+  'hebrew-niqqud': {
+    'esc-pos': stream(
+        ESC, '@',
+        ESC, 't', 49,
+        [0xc0, 0xc1, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7, 0xc8, 0xc9,
+          0xcb, 0xcc, 0xcd, 0xcf, 0xd1, 0xd2], LF,
+        [0xce, 0xd0, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8], LF,
+        [0xf9, 0xc8, 0xd1, 0xec, 0xe5, 0xc9, 0xed], LF,
     ),
   },
 

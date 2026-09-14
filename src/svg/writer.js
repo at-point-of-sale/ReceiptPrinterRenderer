@@ -30,8 +30,8 @@ import {toStoredPng} from './png.js';
       - A line is clipped to the width of its surface, because the line bitmap of
         the back-end has that width. One clipPath serves every line of the paper.
       - A cell is clipped to its scaled cell, because the bitmap of a cell is the
-        cell. A path is not clipped by anything, and 93 of the 704 glyphs of the
-        face paint outside the 12 by 24 cell, five of them wholly, so an
+        cell. A path is not clipped by anything, and 43 of the 919 glyphs of the
+        fonts paint outside the 12 by 24 cell, none of them wholly, so an
         unclipped glyph puts ink where the printer has none. Every glyph element
         carries a clip, the bold overstrike included, and the clip is written in
         the element's own coordinate system, where it depends on the cell and the

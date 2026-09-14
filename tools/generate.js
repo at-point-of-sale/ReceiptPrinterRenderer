@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import {stringify} from 'javascript-stringify';
 
-import Rasterizer, {pathData, INK_THRESHOLD, SAMPLES} from './rasterize.js';
+import Rasterizer, {pathData, isFormat, INK_THRESHOLD, SAMPLES} from './rasterize.js';
 import {boxGlyph, BOX_DRAWING} from './box-drawing.js';
 import {usedCodepoints, REPLACEMENT_CHARACTER} from './codepoints.js';
 import Font from '../src/font.js';
@@ -166,20 +166,29 @@ function generatePdf417() {
     The fallback glyph is U+FFFD when the font has it, and a hollow box drawn
     here when it does not.
 
-    The glyphs are rasterized from the outline fonts in data/fonts, Iosevka
-    Medium and behind it a subset of Sarasa Mono J SemiBold for the half width
-    katakana, both subset by tools/subset-font.js; a glyph comes from the first
-    of them that has the code point. A face is monospaced, so it is fitted by
-    its advance width, see tools/rasterize.js: the advance of one character is
-    exactly one cell, 12 dots for font A and 8 for font B, which puts the em of
-    both faces, whose advance is half an em, on 24 and 16 dots, and the
-    baseline on row 18 of font A and row 12 of font B. Nothing is squeezed
-    horizontally, so the rhythm of the face survives dot for dot, with the one
-    exception of a glyph whose own advance is wider than that of the face: the
-    twelve kanji and the postal mark of the katakana codepage, and the 34
-    glyphs Iosevka draws on a full em, the em dash, the ellipsis, the arrows
-    and the shapes of the tail of cp437. Those are fitted by their own advance,
-    so that the cell holds the whole glyph instead of the left half of it.
+    The glyphs are rasterized from the four outline fonts in data/fonts,
+    Iosevka Medium and behind it the subsets of Sarasa Mono J SemiBold, Noto
+    Sans Hebrew Medium and Noto Sans Thai Medium, all subset by
+    tools/subset-font.js; a glyph comes from the first of them that has the
+    code point. The face is monospaced, so it is fitted by its advance width,
+    see the rule of the face in tools/rasterize.js: the advance of one
+    character is exactly one cell, 12 dots for font A and 8 for font B, which
+    puts the em of the face, whose advance is half an em, on 24 and 16 dots,
+    and the baseline on row 18 of font A and row 12 of font B. The sources
+    behind the face are not measured, they inherit that scale through the size
+    of their em, which is the same 1000 units for all four.
+
+    Nothing is squeezed horizontally, so the rhythm of the face survives dot
+    for dot, with the one exception of a glyph whose own advance is wider than
+    that of the face: the twelve kanji and the postal mark of the katakana
+    codepage, the 34 glyphs Iosevka draws on a full em, the em dash, the
+    ellipsis, the arrows and the shapes of the tail of cp437, and most of the
+    Hebrew and the Thai. Those are fitted by their own advance, so that the
+    cell holds the whole glyph instead of the left half of it.
+
+    A glyph whose advance is zero, a combining mark, is centred in the cell by
+    its ink on a dot centre, and a Unicode format character is an empty cell in
+    every source; both are in tools/rasterize.js with their reasons.
 */
 
 /*
@@ -211,10 +220,10 @@ function generatePdf417() {
     no break space are: test a code point with `codepoint in glyphs`, not with
     the truth of what comes out.
 
-    A path is not clipped by its cell and the bitmap of a glyph is. 93 of the
-    glyphs of the face paint outside the 12 by 24 cell, five of them wholly,
-    the combining accents a monospaced face gives no advance; a consumer clips
-    every glyph to its cell, which is what the bitmap does for the printer.
+    A path is not clipped by its cell and the bitmap of a glyph is. 54 of the
+    glyphs paint outside the 12 by 24 cell, none of them wholly; a consumer
+    clips every glyph to its cell, which is what the bitmap does for the
+    printer.
 
     A glyph path is the same set of placed contours the bitmap of the glyph was
     filled from, see tools/rasterize.js: the advance of the face is one cell
@@ -225,10 +234,13 @@ function generatePdf417() {
     `glyphs` holds an entry for every code point of tools/codepoints.js one of
     the sources has, outside the box drawing range; a code point without an
     entry is drawn with the glyph of `fallback`, as the packed font does. Font
-    B is fitted into its own 8 by 16 cell by its own metrics, which comes out
-    as exactly two thirds of font A for every glyph whose vertical squeeze is
-    the same in both cells; `glyphsB` holds the ones where it does not, in the frame of the 8 by
-    16 cell and in the same units, and is empty while the two cells agree.
+    B is fitted into its own 8 by 16 cell by the same rule, which comes out as
+    exactly two thirds of font A for every glyph whose vertical squeeze is the
+    same in both cells; `glyphsB` holds the ones where it does not, in the
+    frame of the 8 by 16 cell and in the same units. It holds the 37 combining
+    marks and nothing else: the dot centre their ink is centred on is 6.5 dots
+    in the 12 dot cell and 4.5 in the 8 dot one, and 4.5 is not two thirds of
+    6.5.
 
     `box` holds the box drawing and block characters, U+2500 to U+259F, which
     are not outlines at all: they are drawn on the dot grid, stretched to the
@@ -240,21 +252,45 @@ function generatePdf417() {
 
 /*
     The outline fonts the glyphs are rasterized from, in the order a glyph is
-    looked for: a glyph, its outline and its metrics come from the first source
-    that has the code point. Iosevka is the face of the renderer and covers
-    everything the codepage tables hold but the scripts listed in the design;
-    the subset of Sarasa Mono J SemiBold behind it holds the half width
-    katakana of the katakana codepage of both printer families, the twelve
-    kanji of Epson's table and the postal mark, which Iosevka has no glyph for.
-    Every source is fitted into the cell by the same rule with its own metrics,
-    see tools/rasterize.js, and tools/subset-font.js keeps the characters that
-    rule is measured on in every subset.
+    looked for: a glyph and its outline come from the first source that has the
+    code point.
+
+    Iosevka is the face of the renderer and covers everything the codepage
+    tables hold but the scripts listed in the design. The subset of Sarasa Mono
+    J SemiBold behind it holds the half width katakana of the katakana codepage
+    of both printer families, the twelve kanji of Epson's table and the postal
+    mark; the Noto Sans Hebrew subset holds the Hebrew of Windows-1255 and the
+    Hebrew codepages of the three printer makers, and the Noto Sans Thai subset
+    the Thai of cp874 and the Star and Epson Thai pages.
+
+    Only the first source is measured. Every source behind it is fitted to the
+    face by the ratio of the two ems, see the rule of the face in
+    tools/rasterize.js: that is what lets the two Noto subsets, which hold a
+    script and no Latin at all, be sources. tools/subset-font.js keeps the
+    characters a face is measured on in a subset when the source has them and
+    asks for none when it has not.
 */
 
 const SOURCES = [
   'data/fonts/iosevka-medium-subset.ttf',
   'data/fonts/sarasa-mono-j-semibold-subset.ttf',
+  'data/fonts/noto-sans-hebrew-medium-subset.ttf',
+  'data/fonts/noto-sans-thai-medium-subset.ttf',
 ];
+
+/**
+ * How every source is fitted into one cell: the first is the face and is
+ * measured, the rest inherit the face's scale through the size of their em
+ *
+ * @param  {Rasterizer[]}   rasterizers   The outline fonts, in order
+ * @param  {object}         cell          Width, height and baseline row of the cell
+ * @return {object[]}                     The fit of each source in that cell
+ */
+function fitAll(rasterizers, cell) {
+  const face = rasterizers[0].metrics(cell);
+
+  return rasterizers.map((rasterizer, index) => index === 0 ? face : rasterizer.inherit(face));
+}
 
 /* The fonts that are packed, in the order they appear in the output, with the
    cell they are drawn in and the row their baseline sits on */
@@ -360,20 +396,36 @@ function generateFonts(rasterizers, codepoints) {
   let output = 'const fonts = {\n';
 
   for (const font of FONTS) {
-    /* Every source is fitted into the cell by its own metrics */
+    /* The first source is measured and the rest are fitted to it */
 
-    const metrics = rasterizers.map((rasterizer) => rasterizer.metrics(font));
+    const metrics = fitAll(rasterizers, font);
 
     const box = (codepoint) => codepoint >= BOX_DRAWING.first && codepoint <= BOX_DRAWING.last;
 
     /*
-       The cell of a code point and where it came from: the dot grid of
+       The cell of a code point and where it came from: the empty cell of a
+       Unicode format character, which is source -2, the dot grid of
        tools/box-drawing.js, which is source -1, or the first source that has
        the code point. A box drawing character the dot grid does not draw falls
        back to the face, at the size of the face and clipped by the cell.
+
+       A format character is drawn here and not by a rasterizer, because it has
+       to be an empty cell whether or not a source has a glyph for it: the two
+       joiners are in Iosevka's cmap and the two bidi marks of Windows-1255 are
+       in no subset at all, and all four are instructions to whatever lays out
+       the text rather than characters on the paper. Left to the sources, the
+       two no subset has would have had no cell of their own and the painter
+       would have drawn the fallback box for them. See isFormat() and the rule
+       of the face in tools/rasterize.js.
     */
 
+    const empty = () => new Uint8Array(Math.ceil(font.width / 8) * font.height);
+
     const draw = (codepoint) => {
+      if (isFormat(codepoint)) {
+        return {cell: empty(), source: -2};
+      }
+
       const grid = box(codepoint) ? boxGlyph(codepoint, font.width, font.height) : null;
 
       if (grid) {
@@ -405,12 +457,13 @@ function generateFonts(rasterizers, codepoints) {
     const cells = [replacement ? replacement.cell : packFallback(font)];
     const index = {};
 
-    /* How many glyphs each source contributed, and how many the dot grid drew,
-       for the report */
+    /* How many glyphs each source contributed, how many the dot grid drew and
+       how many empty cells the format characters took, for the report */
 
     const contributed = new Array(rasterizers.length).fill(0);
 
     let grid = 0;
+    let format = 0;
 
     for (const codepoint of codepoints) {
       if (codepoint === REPLACEMENT_CHARACTER) {
@@ -423,7 +476,9 @@ function generateFonts(rasterizers, codepoints) {
         continue;
       }
 
-      if (glyph.source < 0) {
+      if (glyph.source === -2) {
+        format++;
+      } else if (glyph.source < 0) {
         grid++;
       } else {
         contributed[glyph.source]++;
@@ -439,9 +494,11 @@ function generateFonts(rasterizers, codepoints) {
 
     process.stdout.write(
         `${font.name}: ${cells.length} glyphs of ${codepoints.length} code points, ` +
-        `${contributed.join(' and ')} of them from the sources in order, ${grid} from the dot grid\n` +
+        `${contributed.join(' and ')} of them from the sources in order, ${grid} from the dot grid, ` +
+        `${format} empty cells for the format characters\n` +
         metrics.map((fit, source) =>
-          `  ${SOURCES[source]}: em ${fit.size} dots, cap ${fit.cap}, descender ${fit.descender}\n`).join(''),
+          `  ${SOURCES[source]}: em ${fit.size} dots, cap ${fit.cap}, descender ${fit.descender}` +
+          `${fit.inherited ? ', fitted to the face' : ''}\n`).join(''),
     );
 
     output += `\t'${font.name}': {\n`;
@@ -524,8 +581,8 @@ function sameContours(contours, reference, scale, tolerance) {
 function generateOutlines(rasterizers, codepoints, packed) {
   const [cellA, cellB] = FONTS;
 
-  const metricsA = rasterizers.map((rasterizer) => rasterizer.metrics(cellA));
-  const metricsB = rasterizers.map((rasterizer) => rasterizer.metrics(cellB));
+  const metricsA = fitAll(rasterizers, cellA);
+  const metricsB = fitAll(rasterizers, cellB);
 
   const boxed = (codepoint) => codepoint >= BOX_DRAWING.first && codepoint <= BOX_DRAWING.last;
 
@@ -539,6 +596,15 @@ function generateOutlines(rasterizers, codepoints, packed) {
 
   for (const codepoint of list) {
     if (boxed(codepoint)) {
+      continue;
+    }
+
+    /* A format character is an empty cell in the packed font whatever any
+       source has for it, so its outline is the empty path, and font B has none
+       of its own */
+
+    if (isFormat(codepoint)) {
+      glyphs[codepoint] = '';
       continue;
     }
 

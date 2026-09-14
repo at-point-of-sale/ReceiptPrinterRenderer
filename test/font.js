@@ -2,6 +2,8 @@ import CodepageEncoder from '@point-of-sale/codepage-encoder';
 
 import Font from '../src/font.js';
 import Bitmap from '../src/bitmap.js';
+import {isFormat} from '../tools/rasterize.js';
+import {usedCodepoints} from '../tools/codepoints.js';
 import {toAscii, fromAscii} from './helpers/ascii.js';
 import {assert} from 'chai';
 
@@ -215,6 +217,201 @@ describe('Font', function() {
           }
         }
       }
+    });
+
+    /*
+        The codepages of a script, which is every encoding of the codepage
+        encoder that holds a code point of its Unicode block. They are looked
+        up rather than listed, so that a codepage the encoder gains is covered
+        here the day it arrives.
+    */
+
+    /**
+     * The encodings that carry a block of code points
+     *
+     * @param  {number}     first   First code point of the block
+     * @param  {number}     last    Last code point of the block
+     * @return {string[]}           The names of the encodings
+     */
+    function encodingsOf(first, last) {
+      return CodepageEncoder.getEncodings().filter((encoding) =>
+        CodepageEncoder.getCodepoints(encoding, true)
+            .some((codepoint) => codepoint >= first && codepoint <= last));
+    }
+
+    /*
+        What a coverage check leaves out of a codepage table, and it is only
+        the two things no glyph could ever be: the control codes, since a table
+        maps byte 0x7F to U+007F, which is DEL, and U+FFFD, which is what the
+        encoder puts where a table has no character at all and which is the
+        fallback glyph by definition.
+
+        The Unicode format characters are not left out. They are drawn as an
+        empty cell, by tools/generate.js when no source has a glyph and by the
+        rasterizer when one has, so they are covered like anything else and the
+        check below sees a cell that is not the fallback.
+    */
+
+    const printable = (codepoint) => Boolean(codepoint) && codepoint >= 0x20 && codepoint !== 0x7f &&
+      codepoint !== 0xfffd;
+
+    /**
+     * Assert that every printable code point of a set of encodings has a glyph
+     * of its own in both fonts
+     *
+     * @param  {string[]}   encodings   The names of the encodings
+     */
+    function shouldCover(encodings) {
+      assert.isAbove(encodings.length, 0);
+
+      for (const encoding of encodings) {
+        const table = CodepageEncoder.getCodepoints(encoding, true);
+
+        for (const name of ['12x24', '8x16']) {
+          const size = Font.get(name);
+
+          for (let byte = 0x20; byte <= 0xff; byte++) {
+            const codepoint = table[byte];
+
+            if (!printable(codepoint)) {
+              continue;
+            }
+
+            assert.isTrue(
+                size.has(codepoint),
+                `${name} has no glyph for byte ${byte} of ${encoding}, code point ${codepoint}`,
+            );
+
+            assert.notDeepEqual(
+                Array.from(size.lookup(codepoint).data),
+                Array.from(size.fallback.data),
+                `${name} draws the fallback for byte ${byte} of ${encoding}, code point ${codepoint}`,
+            );
+          }
+        }
+      }
+    }
+
+    it('should have a glyph for every code point of the Hebrew codepages in both fonts', function() {
+      /* The Hebrew of the third source: cp862 of both printer families,
+         Windows-1255 of Epson's table, and the pages of Bixolon, Xprinter and
+         the POS-8360 */
+
+      const encodings = encodingsOf(0x590, 0x5ff);
+
+      assert.includeMembers(encodings, ['cp862', 'windows1255']);
+
+      shouldCover(encodings);
+    });
+
+    it('should have a glyph for every code point of the Thai codepages in both fonts', function() {
+      /* The Thai of the fourth source: cp874 and Star's own cp874, the three
+         Thai pages of Epson's table, thai42, thai11 and thai13, and the six
+         thai pages the ESC/POS mappings carry between them */
+
+      const encodings = encodingsOf(0xe00, 0xe7f);
+
+      assert.includeMembers(encodings, ['cp874', 'star/cp874', 'thai11']);
+
+      shouldCover(encodings);
+    });
+
+    it('should draw ink for every combining mark of the set in both fonts', function() {
+      /*
+         A glyph whose advance is zero is centred in its cell by its ink, see
+         the rule of the face in tools/rasterize.js. Before that, Iosevka's
+         five combining accents printed an empty cell, because a monospaced
+         face draws them wholly to the left of an origin it gives them no
+         advance from, and eight of the sixteen niqqud would have printed one
+         in font B, because seven of them are under a dot wide and the middle
+         of an even cell is a boundary between two dots.
+      */
+
+      const marks = [
+        0x300, 0x301, 0x303, 0x309, 0x323,
+        0x5b0, 0x5b1, 0x5b2, 0x5b3, 0x5b4, 0x5b5, 0x5b6, 0x5b7,
+        0x5b8, 0x5b9, 0x5bb, 0x5bc, 0x5bd, 0x5bf, 0x5c1, 0x5c2,
+        0xe31, 0xe34, 0xe35, 0xe36, 0xe37, 0xe38, 0xe39, 0xe3a,
+        0xe47, 0xe48, 0xe49, 0xe4a, 0xe4b, 0xe4c, 0xe4d, 0xe4e,
+      ];
+
+      assert.equal(marks.length, 37);
+
+      for (const name of ['12x24', '8x16']) {
+        const size = Font.get(name);
+
+        for (const codepoint of marks) {
+          assert.isTrue(size.has(codepoint), `${name} has no glyph for ${codepoint.toString(16)}`);
+          assert.isTrue(
+              size.lookup(codepoint).data.some((byte) => byte !== 0),
+              `${name} draws nothing for ${codepoint.toString(16)}`,
+          );
+        }
+      }
+    });
+
+    it('should draw an empty cell for every Unicode format character of the set', function() {
+      /* The two joiners of Iosevka's cmap, which printed a sliver of their
+         right edge against the left wall of the cell, and the two bidi marks
+         of Windows-1255, which no subset carries and which printed the
+         fallback box until tools/generate.js drew their cell itself */
+
+      const format = usedCodepoints().filter(isFormat);
+
+      assert.deepEqual(format, [0x200c, 0x200d, 0x200e, 0x200f]);
+
+      for (const name of ['12x24', '8x16']) {
+        const size = Font.get(name);
+
+        for (const codepoint of format) {
+          assert.isTrue(size.has(codepoint), `${name} has no cell for ${codepoint.toString(16)}`);
+          assert.isFalse(
+              size.lookup(codepoint).data.some((byte) => byte !== 0),
+              `${name} draws ink for ${codepoint.toString(16)}`,
+          );
+        }
+      }
+    });
+
+    it('should draw the Hebrew and the Thai the way the fixtures were reviewed', function() {
+      /* א of the 12 by 24 font, from the third source, fitted to the face and
+         not measured for itself: 14 dots tall between the baseline and the
+         cap, where the Latin is 17.6 */
+
+      assert.deepEqual(toAscii(Font.get('12x24').lookup(0x5d0)).slice(4, 18), [
+        '.###.....##.',
+        '..###....##.',
+        '...##....##.',
+        '...###...##.',
+        '...###..###.',
+        '..#####.##..',
+        '..##.#####..',
+        '..##..###...',
+        '.##...###...',
+        '.##....##...',
+        '.##....###..',
+        '.##.....##..',
+        '.##.....###.',
+        '.##......##.',
+      ]);
+
+      /* And ก of the fourth, the same way */
+
+      assert.deepEqual(toAscii(Font.get('12x24').lookup(0xe01)).slice(5, 18), [
+        '...######...',
+        '..########..',
+        '.###....##..',
+        '.###....##..',
+        '..###...###.',
+        '...##...###.',
+        '..##....###.',
+        '.###....###.',
+        '.###....###.',
+        '.###....###.',
+        '.###....###.',
+        '.###....###.',
+        '.###....###.',
+      ]);
     });
 
     /* The twelve kanji and the postal mark of Epson's katakana table, the only
