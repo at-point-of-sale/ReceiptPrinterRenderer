@@ -4,6 +4,7 @@ import {stringify} from 'javascript-stringify';
 import Rasterizer, {pathData, isFormat, INK_THRESHOLD, SAMPLES} from './rasterize.js';
 import {boxGlyph, BOX_DRAWING} from './box-drawing.js';
 import {usedCodepoints, REPLACEMENT_CHARACTER} from './codepoints.js';
+import {readOverrides, applyOverrides, overridesReport, OVERRIDES_FILE} from './overrides.js';
 import Font from '../src/font.js';
 import trace from '../src/svg/trace.js';
 
@@ -14,7 +15,9 @@ import trace from '../src/svg/trace.js';
                               text format and output as ReceiptPrinterEncoder
     - generated/profiles.js   printer profiles from data/profiles
     - generated/fonts.js      packed glyph bitmaps, rasterized from the outline
-                              font in data/fonts, added together with the painter
+                              font in data/fonts, with the hand made glyphs of
+                              data/fonts/overrides.json laid over them, added
+                              together with the painter
     - generated/outlines.js   the outlines of the same glyphs as path data, for
                               the SVG output
     - generated/pdf417.js     the symbol characters of PDF417 from data/pdf417,
@@ -189,6 +192,13 @@ function generatePdf417() {
     A glyph whose advance is zero, a combining mark, is centred in the cell by
     its ink on a dot centre, and a Unicode format character is an empty cell in
     every source; both are in tools/rasterize.js with their reasons.
+
+    Last of all, the dots of data/fonts/overrides.json are laid over the result:
+    the glyphs that were drawn by hand in ReceiptPrinterFontEditor, because the
+    rules get them wrong in a way no rule fixes. Every glyph is still rasterized
+    by the rules and only the code points that file names are replaced, so the
+    font stays a product of the outlines plus one small reviewable file. See
+    tools/overrides.js.
 */
 
 /*
@@ -230,6 +240,17 @@ function generatePdf417() {
     wide, the baseline sits on row 18, and a glyph that is taller than the cell
     is squeezed vertically by itself. The curves of the face are kept as they
     are, so an outline scales where the bitmap does not.
+
+    A glyph that data/fonts/overrides.json overrides keeps the outline of the
+    rasterized glyph, so its path is no longer the outline of its bitmap. The
+    SVG output draws the face and the bitmap is the printer's: a hand made
+    glyph is dots fitted to a cell of a printer, and tracing those dots into a
+    path would put a staircase of a dozen dots in a vector drawing beside the
+    curves of every glyph next to it. The two drift on purpose, which is what
+    test/outlines.js measures and does not demand. The box drawing characters
+    are the exception in the other direction, because they are traced out of
+    the rendered cell of the packed font and are dots to begin with: an
+    override inside U+2500 to U+259F moves its box path with it.
 
     `glyphs` holds an entry for every code point of tools/codepoints.js one of
     the sources has, outside the box drawing range; a code point without an
@@ -388,9 +409,10 @@ function sourceOf(rasterizers, codepoint) {
  *
  * @param  {Rasterizer[]}   rasterizers   The outline fonts, in the order a glyph is looked for
  * @param  {number[]}       codepoints    The code points to draw
+ * @param  {?object}        overrides     The hand made glyphs of data/fonts/overrides.json, when there are any
  * @return {object}                       The source of generated/fonts.js and the packed fonts themselves
  */
-function generateFonts(rasterizers, codepoints) {
+function generateFonts(rasterizers, codepoints, overrides) {
   const packed = {};
 
   let output = 'const fonts = {\n';
@@ -490,34 +512,58 @@ function generateFonts(rasterizers, codepoints) {
 
     index[REPLACEMENT_CHARACTER] = 0;
 
-    const data = Buffer.concat(cells).toString('base64');
-
-    process.stdout.write(
-        `${font.name}: ${cells.length} glyphs of ${codepoints.length} code points, ` +
-        `${contributed.join(' and ')} of them from the sources in order, ${grid} from the dot grid, ` +
-        `${format} empty cells for the format characters\n` +
-        metrics.map((fit, source) =>
-          `  ${SOURCES[source]}: em ${fit.size} dots, cap ${fit.cap}, descender ${fit.descender}` +
-          `${fit.inherited ? ', fitted to the face' : ''}\n`).join(''),
-    );
-
-    output += `\t'${font.name}': {\n`;
-    output += `\t\twidth: ${font.width},\n`;
-    output += `\t\theight: ${font.height},\n`;
-    output += `\t\tbaseline: ${font.baseline},\n`;
-    output += '\t\tfallback: 0,\n';
-    output += `\t\tindex: ${JSON.stringify(index)},\n`;
-    output += `\t\tdata: '${data}',\n`;
-    output += '\t},\n';
-
-    packed[font.name] = {
+    let entry = {
       width: font.width,
       height: font.height,
       baseline: font.baseline,
       fallback: 0,
       index,
-      data,
+      data: Buffer.concat(cells).toString('base64'),
     };
+
+    /*
+       The hand made glyphs go on last, over the result of the four rules: every
+       glyph is rasterized whether or not a hand touched it, and the dots of
+       data/fonts/overrides.json are laid over the ones that were touched. See
+       tools/overrides.js. A code point the file holds that this build has no
+       glyph for is added to the font, because the editor exports what its face
+       holds.
+    */
+
+    const face = overrides ? overrides.faces[font.name] : null;
+    const laid = face ? applyOverrides(entry, face) : null;
+
+    if (laid) {
+      entry = laid.packed;
+    }
+
+    const glyphs = Buffer.from(entry.data, 'base64').length /
+        (Math.ceil(font.width / 8) * font.height);
+
+    process.stdout.write(
+        `${font.name}: ${glyphs} glyphs of ${codepoints.length} code points, ` +
+        `${contributed.join(' and ')} of them from the sources in order, ${grid} from the dot grid, ` +
+        `${format} empty cells for the format characters\n` +
+        metrics.map((fit, source) =>
+          `  ${SOURCES[source]}: em ${fit.size} dots, cap ${fit.cap}, descender ${fit.descender}` +
+          `${fit.inherited ? ', fitted to the face' : ''}\n`).join('') +
+        (laid ?
+          `  ${OVERRIDES_FILE}: ${laid.overridden + laid.added} hand made ` +
+          `${laid.overridden + laid.added === 1 ? 'glyph' : 'glyphs'}, ` +
+          `${laid.overridden} of them over a rasterized glyph and ${laid.added} added to the font\n` :
+          ''),
+    );
+
+    output += `\t'${font.name}': {\n`;
+    output += `\t\twidth: ${entry.width},\n`;
+    output += `\t\theight: ${entry.height},\n`;
+    output += `\t\tbaseline: ${entry.baseline},\n`;
+    output += '\t\tfallback: 0,\n';
+    output += `\t\tindex: ${JSON.stringify(entry.index)},\n`;
+    output += `\t\tdata: '${entry.data}',\n`;
+    output += '\t},\n';
+
+    packed[font.name] = entry;
   }
 
   output += '};\n\n';
@@ -618,7 +664,10 @@ function generateOutlines(rasterizers, codepoints, packed) {
     }
 
     /* The outline of a glyph comes from the same source as its bitmap, fitted
-       into the cell by the metrics of that source */
+       into the cell by the metrics of that source, and from the rasterizer even
+       when the hand made glyphs of data/fonts/overrides.json replaced that
+       bitmap: the SVG output draws the face and the bitmap is the printer's,
+       see the outline format above */
 
     const contoursA = rasterizers[source].contours(codepoint, cellA, metricsA[source], {squeeze: true});
 
@@ -703,7 +752,10 @@ function generateOutlines(rasterizers, codepoints, packed) {
 
 const rasterizers = SOURCES.map((source) => new Rasterizer(source));
 const codepoints = usedCodepoints();
-const fonts = generateFonts(rasterizers, codepoints);
+const overrides = readOverrides(OVERRIDES_FILE, FONTS);
+const fonts = generateFonts(rasterizers, codepoints, overrides);
+
+process.stdout.write(overridesReport(overrides));
 
 fs.mkdirSync('generated', {recursive: true});
 fs.writeFileSync('generated/mapping.js', generateMappings());

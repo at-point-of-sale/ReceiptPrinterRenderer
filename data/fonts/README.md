@@ -3,6 +3,8 @@
 The bitmap fonts of the renderer are rasterized from outline fonts at build
 time by `tools/generate.js`, which writes `generated/fonts.js`. There is a list
 of sources, and a glyph comes from the first source that has the code point.
+The glyphs the rules get wrong are drawn by hand in the font editor and laid
+over the rasterized ones from `overrides.json`.
 
 | File | What it is |
 |---|---|
@@ -13,6 +15,53 @@ of sources, and a glyph comes from the first source that has the code point.
 | `noto-sans-hebrew-medium-subset.ttf` | Noto Sans Hebrew Medium, subset to the Hebrew no source before it has |
 | `noto-sans-thai-medium-subset.ttf` | Noto Sans Thai Medium, subset to the Thai no source before it has |
 | `LICENSE-Noto.md` | The SIL Open Font License 1.1 of both, with the copyright line of each |
+| `overrides.json` | The glyphs that were drawn by hand, laid over the rasterized ones |
+
+## The hand made glyphs
+
+`overrides.json` holds the dots that were made by hand, and nothing else.
+
+The rules of `tools/rasterize.js` fit every glyph of every source, and a
+handful of glyphs they cannot fit: `U+05C1` and `U+05C2`, the shin dot and the
+sin dot, come out as the same single dot; the Thai head loops of ก and ท fill
+solid at 12 by 24; the kana carry a stroke more than the cell has room for.
+Those glyphs are drawn on the dot grid in
+[ReceiptPrinterFontEditor](https://github.com/NielsLeenheer/ReceiptPrinterFontEditor),
+whose **Overrides** export writes this file, and `tools/generate.js` reads it:
+every glyph is still rasterized from the outlines by the rules, and the dots of
+this file are laid over the result last of all. See `tools/overrides.js` for
+the format and the reasons.
+
+So the build stays reproducible, `npm run generate` still needs nothing but
+this repository, and the font stays a product of the outlines plus one small
+file. **A review of the font is a review of the diff of this file**, which is
+why a glyph in it is rows of `#` and `.`, one row to a line, and not base64: a
+diff shows which dots changed.
+
+- A face is under the key of its cell, `12x24` and `8x16`, which is how the
+  generator names its fonts; a face of any other cell is refused, as is a
+  version other than 1, a face that stands on another baseline than the font of
+  the build, 18 for `12x24` and 12 for `8x16`, a row that is not the width of
+  the cell, a glyph that is not its height, and a character in a row that is not
+  `#` or `.`.
+- Only the glyphs a hand touched are in it. A glyph the rasterizer made would
+  be asking the generator to override its rasterizer with its rasterizer.
+- A code point in the file that no codepage of this build reaches is added to
+  the font as a glyph of its own: the editor exports what its face holds. Such
+  a glyph has dots and no outline, so the SVG output draws the fallback for it.
+- A glyph that is overridden keeps the outline of the rasterized glyph in
+  `generated/outlines.js`. The SVG output draws the face and the bitmap is the
+  printer's.
+- `fonts` and `commit` stay provenance only and nothing is refused over them:
+  they say which outlines the dots were drawn over and which port of these rules
+  drew the glyphs underneath them, and neither can be checked here. `npm run generate` prints both, and a commit
+  that is not the one the rules were last changed in is the cue to look at the
+  glyphs.
+
+The committed file is well formed and holds no glyphs at all, so that the shape
+is in the repository and the first export from the editor replaces it. With it,
+`generated/fonts.js` and `generated/outlines.js` are byte for byte what the
+rasterizer alone makes.
 
 ## The rule of the face
 
