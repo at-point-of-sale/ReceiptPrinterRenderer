@@ -279,8 +279,8 @@ async function main() {
   main { padding: 5px 20px 20px; }
   h1 { font-size: 13pt; font-weight: 600; margin: 40px 0 8px; }
   h2 { font-size: 11pt; font-weight: 600; color: #444; margin: 30px 0 10px; }
-  /* The two sticky bars are 61 and 62 dots tall, an anchor must land below them */
-  h1, h2, section { scroll-margin-top: 140px; }
+  /* The sticky header is 61 dots tall, an anchor must land below it */
+  h1, h2, section { scroll-margin-top: 76px; }
   h3 { font-size: 11pt; font-weight: 600; margin: 0 0 12px; font-family: var(--font-stack-mono); }
   h3 .language { font-weight: normal; color: #888; }
   p { color: #444; max-width: 60rem; }

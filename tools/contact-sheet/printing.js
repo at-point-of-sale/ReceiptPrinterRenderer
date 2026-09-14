@@ -118,11 +118,9 @@ export function scripts(found) {
  */
 export function styles() {
   return `
-  header, .toolbar { position: sticky; z-index: 2; display: flex; box-sizing: border-box; }
-  header { top: 0; height: 61px; padding: 0 0 0 15px; background: #eee; border-bottom: 1px solid #ddd; }
-  .toolbar { top: 61px; padding: 0 5px 15px 10px; background: #fafafa; border-bottom: 1px solid #ddd;
-    flex-wrap: wrap; align-content: start; }
-  header select, header input, header button, .toolbar button {
+  header { position: sticky; z-index: 2; display: flex; box-sizing: border-box;
+    top: 0; height: 61px; padding: 0 0 0 15px; background: #eee; border-bottom: 1px solid #ddd; }
+  header select, header input, header button {
     border: none; border-radius: 6px; height: 32px; margin: 15px 15px 0 0; padding: 0 8px;
     font-family: system-ui; font-weight: 600; font-size: 10pt; background: #fff; }
   header select { appearance: none; padding: 0 28px 0 6px;
@@ -136,10 +134,6 @@ export function styles() {
   header .status { align-self: center; margin: 15px 15px 0 0; font-family: var(--font-stack-mono); font-size: 11px; color: #888; }
   header .status.on { color: #1976d2; }
   header .status.error { color: #b71c1c; }
-  .toolbar .libraries { display: flex; flex-wrap: wrap; align-content: start; margin-right: auto; }
-  .toolbar .libraries a { display: flex; align-items: center; height: 32px; margin: 15px 0 0; padding: 0 6px;
-    border-radius: 6px; color: #000; text-decoration: none; font-size: 10pt; }
-  .toolbar .libraries a:hover { background: #eaeaea; }
   header .filters { margin-left: auto; display: flex; }
   .print { display: flex; gap: 12px; align-items: center; margin-top: -4px; }
   .print button { border: none; border-radius: 6px; height: 32px; padding: 0 12px; cursor: pointer;
@@ -173,7 +167,8 @@ export function header(found, languages, widths, libraries) {
     `<option value="${size.columns}|${size.width}">${size.columns} columns, ${size.width} dots</option>`))
       .join('\n    ');
 
-  const links = libraries.map((library) => `<a href="#${library}">${library}</a>`).join('\n      ');
+  const links = ['<option value="">Libraries</option>'].concat(libraries.map((library) =>
+    `<option value="${library}">${library}</option>`)).join('\n    ');
 
   return `<header>
     <select id="driver">
@@ -186,6 +181,9 @@ export function header(found, languages, widths, libraries) {
     <button id="disconnect" hidden>Disconnect</button>
     <span class="status off" id="status"></span>
     <span class="filters">
+      <select id="library" title="Go to a library">
+      ${links}
+      </select>
       <select id="language" title="Language">
       ${filter}
       </select>
@@ -193,12 +191,7 @@ export function header(found, languages, widths, libraries) {
       ${sizes}
       </select>
     </span>
-</header>
-<div class="toolbar">
-    <div class="libraries">
-      ${links}
-    </div>
-</div>`;
+</header>`;
 }
 
 /**
@@ -238,6 +231,7 @@ const connect = document.getElementById('connect');
 const disconnect = document.getElementById('disconnect');
 const status = document.getElementById('status');
 const language = document.getElementById('language');
+const library = document.getElementById('library');
 const width = document.getElementById('width');
 
 let printer = null;
@@ -460,6 +454,19 @@ driver.addEventListener('change', () => {
 
 language.addEventListener('change', filter);
 width.addEventListener('change', filter);
+
+/* The library menu is a shortcut: choosing one scrolls to its heading, and the
+   menu goes back to its label so that it can be chosen again */
+
+library.addEventListener('change', () => {
+  const heading = document.getElementById(library.value);
+
+  if (heading) {
+    heading.scrollIntoView();
+  }
+
+  library.value = '';
+});
 connect.addEventListener('click', open);
 disconnect.addEventListener('click', close);
 
