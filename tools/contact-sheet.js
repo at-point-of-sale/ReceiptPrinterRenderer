@@ -277,7 +277,7 @@ async function main() {
      page, a grey header with white rounded controls, a toolbar band below it,
      white panels, monospace captions in grey. Only the look is borrowed */
   :root { --font-stack-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, "Cascadia Mono", Consolas, monospace; }
-  body { margin: 0; padding: 0; background: #fafafa; color: #000; font-family: system-ui; font-size: 10pt; }
+  body { margin: 0; padding: 0; background: #fbfbfb; color: #000; font-family: system-ui; font-size: 10pt; }
   main { padding: 5px 20px 20px; }
   h1 { font-size: 13pt; font-weight: 600; margin: 40px 0 8px; }
   h2 { font-size: 11pt; font-weight: 600; color: #444; margin: 30px 0 10px; }
@@ -287,7 +287,7 @@ async function main() {
   h3 .language { font-weight: normal; color: #888; }
   p { color: #444; max-width: 60rem; }
   code { font-family: var(--font-stack-mono); font-size: 0.9em; }
-  section { background: #fff; border-radius: 8px; padding: 24px 32px 20px; margin: 15px 0; }
+  section { background: #f2f2f2; border-radius: 8px; padding: 24px 32px 20px; margin: 15px 0; }
   /* As many equal columns as the fixture has figures, five with receiptio and
      four without, over the whole width, and two rows: the captions on the
      first, aligned to the bottom, and the images on the second, so every image
@@ -298,7 +298,9 @@ async function main() {
   figcaption { grid-row: 1; align-self: end; color: #888; min-width: 0;
     font-family: var(--font-stack-mono); font-size: 11px; }
   figure > :not(figcaption) { grid-row: 2; min-width: 0; }
-  img { display: block; width: 100%; height: auto; background: #fff; border: 1px solid #eee; box-sizing: border-box; }
+  img { display: block; width: 100%; height: auto; background: #fff; padding: 10px;
+    border-top: 2px dotted #f2f2f2; border-bottom: 2px dotted #f2f2f2; border-left: none; border-right: none;
+    box-sizing: border-box; }
   .unavailable { background: #f0f0f0; border-radius: 6px; color: #888; padding: 6px 8px;
     font-family: var(--font-stack-mono); font-size: 11px; }
   .unavailable span { color: #aaa; }
