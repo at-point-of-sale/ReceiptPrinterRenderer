@@ -77,8 +77,8 @@ const GOLDEN = [
 
 /* How far the vector output and the dots of a fixture may differ, over the
    whole paper. An outline filled by a rasterizer and a bitmap filled with the
-   0.45 coverage rule of tools/rasterize.js disagree at the edges of a stroke,
-   and nowhere else, see the notes of section 3 */
+   0.45 coverage rule the font was rasterized with disagree at the edges of a
+   stroke, and nowhere else, see the notes of section 3 */
 
 const AGREEMENT = 0.98;
 

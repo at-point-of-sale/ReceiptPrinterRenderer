@@ -1,11 +1,28 @@
 import CodepageEncoder from '@point-of-sale/codepage-encoder';
 
+import fonts from '../generated/fonts.js';
 import Font from '../src/font.js';
 import Bitmap from '../src/bitmap.js';
-import {isFormat} from '../tools/rasterize.js';
-import {usedCodepoints} from '../tools/codepoints.js';
 import {toAscii, fromAscii} from './helpers/ascii.js';
 import {assert} from 'chai';
+
+/* The Unicode format characters, U+200B to U+200F, U+2028 to U+202E, U+2060 to
+   U+2064 and U+FEFF: a zero width instruction to whatever lays out the text and
+   never a character on the paper, which the font draws as an empty cell. The
+   ranges are the ones the font editor draws by, listed here because this
+   repository no longer holds the code that made the font */
+
+const FORMAT = [[0x200b, 0x200f], [0x2028, 0x202e], [0x2060, 0x2064], [0xfeff, 0xfeff]];
+
+/**
+ * Whether a code point is a Unicode format character
+ *
+ * @param  {number}    codepoint   Unicode code point
+ * @return {boolean}               True when it is one
+ */
+function isFormat(codepoint) {
+  return FORMAT.some(([first, last]) => codepoint >= first && codepoint <= last);
+}
 
 /* Draw code points next to each other in cells of a given size, the way the
    painter puts the characters of a line next to each other */
@@ -182,9 +199,9 @@ describe('Font', function() {
 
     it('should have a glyph for every code point of the katakana codepages in both fonts', function() {
       /*
-         The half width katakana of JIS X 0201, which the second source of
-         tools/generate.js supplies, and for Epson the twelve kanji and the
-         postal mark of the same table, which no other codepage holds.
+         The half width katakana of JIS X 0201, which the Sarasa source of the
+         font supplies, and for Epson the twelve kanji and the postal mark of
+         the same table, which no other codepage holds.
 
          Star's table has two bytes whose code point is U+FFFD itself, the
          entries of the codepage encoder for a position that is not a
@@ -247,9 +264,9 @@ describe('Font', function() {
         fallback glyph by definition.
 
         The Unicode format characters are not left out. They are drawn as an
-        empty cell, by tools/generate.js when no source has a glyph and by the
-        rasterizer when one has, so they are covered like anything else and the
-        check below sees a cell that is not the fallback.
+        empty cell whether or not a source has a glyph for one, so they are
+        covered like anything else and the check below sees a cell that is not
+        the fallback.
     */
 
     const printable = (codepoint) => Boolean(codepoint) && codepoint >= 0x20 && codepoint !== 0x7f &&
@@ -318,8 +335,8 @@ describe('Font', function() {
 
     it('should draw ink for every combining mark of the set in both fonts', function() {
       /*
-         A glyph whose advance is zero is centred in its cell by its ink, see
-         the rule of the face in tools/rasterize.js. Before that, Iosevka's
+         A glyph whose advance is zero is centred in its cell by its ink, which
+         is the rule of the face of the font editor. Before that, Iosevka's
          five combining accents printed an empty cell, because a monospaced
          face draws them wholly to the left of an origin it gives them no
          advance from, and eight of the sixteen niqqud would have printed one
@@ -354,9 +371,9 @@ describe('Font', function() {
       /* The two joiners of Iosevka's cmap, which printed a sliver of their
          right edge against the left wall of the cell, and the two bidi marks
          of Windows-1255, which no subset carries and which printed the
-         fallback box until tools/generate.js drew their cell itself */
+         fallback box until the font gave them a cell of their own */
 
-      const format = usedCodepoints().filter(isFormat);
+      const format = Object.keys(fonts['12x24'].index).map(Number).filter(isFormat);
 
       assert.deepEqual(format, [0x200c, 0x200d, 0x200e, 0x200f]);
 

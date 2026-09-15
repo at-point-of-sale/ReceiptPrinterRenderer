@@ -1,92 +1,35 @@
 # Fonts
 
-The bitmap fonts of the renderer are rasterized from outline fonts at build
-time by `tools/generate.js`, which writes `generated/fonts.js`. There is a list
-of sources, and a glyph comes from the first source that has the code point.
-The glyphs the rules get wrong are drawn by hand in the font editor and laid
-over the rasterized ones from `overrides.json`.
+The bitmap fonts of the renderer, `generated/fonts.js` and `generated/outlines.js`,
+are made in
+[ReceiptPrinterFontEditor](https://github.com/NielsLeenheer/ReceiptPrinterFontEditor)
+and exported from it. Nothing in this repository makes or remakes them, and no
+outline font is needed to build it.
+
+The editor works from a project file, `<project>.json` beside this README, which
+holds the font as the editor keeps it: the faces it is rasterized from, the rules
+of the fit and the glyphs that were drawn by hand. That file is the owner's,
+`iosevka-medium.json`, the project the two generated files are exported from,
+and the owner commits it with the fonts.
 
 | File | What it is |
 |---|---|
-| `iosevka-medium-subset.ttf` | Iosevka Medium, subset to the code points the renderer can print |
+| `iosevka-medium.json` | The font editor's project file, the source of the two generated fonts |
 | `LICENSE-Iosevka.md` | The SIL Open Font License 1.1 of Iosevka |
-| `sarasa-mono-j-semibold-subset.ttf` | Sarasa Mono J SemiBold, subset to the code points Iosevka has not |
 | `LICENSE-Sarasa.md` | The SIL Open Font License 1.1 of Sarasa Gothic |
-| `noto-sans-hebrew-medium-subset.ttf` | Noto Sans Hebrew Medium, subset to the Hebrew no source before it has |
-| `noto-sans-thai-medium-subset.ttf` | Noto Sans Thai Medium, subset to the Thai no source before it has |
-| `LICENSE-Noto.md` | The SIL Open Font License 1.1 of both, with the copyright line of each |
-| `overrides.json` | The glyphs that were drawn by hand, laid over the rasterized ones |
+| `LICENSE-Noto.md` | The SIL Open Font License 1.1 of both Noto faces, with the copyright line of each |
 
-## The hand made glyphs
+**The licence files stay here even though the outline fonts do not.** The packed
+glyphs and the glyph outlines of `generated/` are a derivative of these four
+faces, and the SIL Open Font License asks the copyright notices and the licence
+to travel with a derivative. The sections below are the provenance of the four:
+which release was rasterized, and under which copyright line.
 
-`overrides.json` holds the dots that were made by hand, and nothing else.
-
-The rules of `tools/rasterize.js` fit every glyph of every source, and a
-handful of glyphs they cannot fit: `U+05C1` and `U+05C2`, the shin dot and the
-sin dot, come out as the same single dot; the Thai head loops of ก and ท fill
-solid at 12 by 24; the kana carry a stroke more than the cell has room for.
-Those glyphs are drawn on the dot grid in
-[ReceiptPrinterFontEditor](https://github.com/NielsLeenheer/ReceiptPrinterFontEditor),
-whose **Overrides** export writes this file, and `tools/generate.js` reads it:
-every glyph is still rasterized from the outlines by the rules, and the dots of
-this file are laid over the result last of all. See `tools/overrides.js` for
-the format and the reasons.
-
-So the build stays reproducible, `npm run generate` still needs nothing but
-this repository, and the font stays a product of the outlines plus one small
-file. **A review of the font is a review of the diff of this file**, which is
-why a glyph in it is rows of `#` and `.`, one row to a line, and not base64: a
-diff shows which dots changed.
-
-- A face is under the key of its cell, `12x24` and `8x16`, which is how the
-  generator names its fonts; a face of any other cell is refused, as is a
-  version other than 1, a face that stands on another baseline than the font of
-  the build, 18 for `12x24` and 12 for `8x16`, a row that is not the width of
-  the cell, a glyph that is not its height, and a character in a row that is not
-  `#` or `.`.
-- Only the glyphs a hand touched are in it. A glyph the rasterizer made would
-  be asking the generator to override its rasterizer with its rasterizer.
-- A code point in the file that no codepage of this build reaches is added to
-  the font as a glyph of its own: the editor exports what its face holds. Such
-  a glyph has dots and no outline, so the SVG output draws the fallback for it.
-- A glyph that is overridden keeps the outline of the rasterized glyph in
-  `generated/outlines.js`. The SVG output draws the face and the bitmap is the
-  printer's.
-- `fonts` and `commit` stay provenance only and nothing is refused over them:
-  they say which outlines the dots were drawn over and which port of these rules
-  drew the glyphs underneath them, and neither can be checked here. `npm run generate` prints both, and a commit
-  that is not the one the rules were last changed in is the cue to look at the
-  glyphs.
-
-The committed file is well formed and holds no glyphs at all, so that the shape
-is in the repository and the first export from the editor replaces it. With it,
-`generated/fonts.js` and `generated/outlines.js` are byte for byte what the
-rasterizer alone makes.
-
-## The rule of the face
-
-**The first source is the face and every source behind it is fitted to it.**
-The face is measured, on its advance width and on the ascender and the
-descender of thirteen Latin characters; a source behind it is never measured,
-it takes the scale of the face corrected for the size of its em alone. See the
-rule of the face in `tools/rasterize.js`.
-
-That rule exists because of the two Noto fonts. Google publishes Noto Sans
-Hebrew and Noto Sans Thai as the script alone, 151 and 140 glyphs with no `M`
-anywhere to measure, so the old rule, which measured every source for itself,
-refused them at the door. The builds that do carry a Latin carry Noto's
-proportional one, whose `M` is 902 units at 1000 per em in the Hebrew and 918
-in the Thai where Iosevka's is 500: measured on that, the two would be drawn at
-a cap height of 9.5 and 9.3 dots beside a Latin of 17.6, correct by the letter
-of the rule and wrong on the paper.
-
-Fitted to the face instead, א is 14.3 dots tall and ก is 13.4, between the x
-height of Iosevka Medium, 12.5, and its cap height, 17.6, which is where a
-receipt wants them. Nothing was scaled to make that happen: it is the face's
-own scale, and all four fonts are drawn on the same em. Sarasa, whose em and
-whose reference advance are Iosevka's, therefore inherits exactly the numbers
-it used to measure for itself, and every glyph it draws is unchanged to the
-last bit.
+The rule of the face, the subsetting of the sources, the fit of a glyph in its
+cell and the rebuilding of the fonts are the editor's now, and are documented
+there, in its own `data/fonts/README.md` and `src/lib/rasterize.js`. What this
+repository asks of a font is the two formats in the Bitmap font section of
+`documentation/design.md`.
 
 ## Iosevka
 
@@ -96,12 +39,8 @@ The first source, and the face of the renderer.
   [`PkgTTF-Iosevka-34.8.1.zip`](https://github.com/be5invis/Iosevka/releases/download/v34.8.1/PkgTTF-Iosevka-34.8.1.zip),
   from [be5invis/Iosevka](https://github.com/be5invis/Iosevka/releases/tag/v34.8.1).
 - Copyright (c) 2015-2026, Renzhi Li (aka. Belleve Invis), licensed under the
-  SIL Open Font License 1.1. Iosevka declares no Reserved Font Name, so the
-  subset keeps the family and style names of the source.
-
-The full family is eleven megabytes, so only the glyphs that can ever be
-printed are kept, the union of the codepage tables of the codepage encoder and
-printable ASCII plus U+FFFD, 779 of them.
+  SIL Open Font License 1.1. Iosevka declares no Reserved Font Name.
+- **Medium** is the weight.
 
 ## Sarasa Mono J
 
@@ -117,24 +56,12 @@ Source Han Sans, so its kana sit on the same metrics as the face.
   (c) 2016 The Inter Project Authors. Portions Copyright (c) 2014-2021 Adobe
   Systems Incorporated, **with Reserved Font Name 'Source'**. Portions
   Copyright (c) 2012 Google Inc. Licensed under the SIL Open Font License 1.1.
-- The reserved name is Adobe's `Source`, which neither Sarasa nor this subset
-  carries. The subset is called after Sarasa, **Sarasa Mono J subset**, style
-  SemiBold: it is called after the face it is cut from, and the word `subset`
-  is there because a subset of a face is not that face and the name says so.
+  The reserved name is Adobe's `Source`, which neither Sarasa nor anything
+  derived from it here carries.
 - **SemiBold** is the weight, of the ExtraLight, Light, Regular, SemiBold and
-  Bold the family has; there is no Medium. Measured with the editor's
-  rasterizer at 12 by 24, SemiBold matches Iosevka Medium's stems dot for dot
-  on `H`, `l`, `n` and `e`, and Regular is a dot thinner.
-- Its metrics are Iosevka's to the second decimal: em 1000, advance of `M` 500,
-  cap height 17.64 dots, descender 5.35, vertical cap 1, so it inherits the fit
-  of the face without changing a number.
-
-The one `SarasaMonoJ-SemiBold.ttf` is fourteen megabytes and the release
-package holds the whole family, 51 megabytes. The subset holds the 76 code
-points of the set that Iosevka has not, the 63 half width katakana of JIS X
-0201 and the twelve kanji and the postal mark of Epson's katakana table, plus
-the thirteen characters the fitting rule measures a face on, which it has as
-well: 90 glyphs, 24 kB.
+  Bold the family has; there is no Medium. At 12 by 24 SemiBold matches Iosevka
+  Medium's stems dot for dot on `H`, `l`, `n` and `e`, and Regular is a dot
+  thinner.
 
 ## Noto Sans Hebrew
 
@@ -151,25 +78,10 @@ one of those pages printed nothing but the fallback box.
   table carries and the line `LICENSE-Noto.md` beside it repeats; the `OFL.txt`
   of the release package says 2022, which is the year that package was cut, and
   the font in it is the newer of the two. Licensed under the SIL Open Font
-  License 1.1. Noto declares no Reserved Font Name, so the subset keeps the
-  name of the source with the word `subset` added, **Noto Sans Hebrew Medium
-  subset**.
-- **Medium** is the weight, because Iosevka **Medium** is the face. The
-  unhinted build is the one taken, the way the Sarasa is: the rasterizer draws
-  the outlines itself and never reads a hint.
-- It holds every one of the 51 Hebrew code points of the set, the 22 letters
-  and the five final forms from U+05D0 to U+05EA, the sixteen niqqud, the three
-  Yiddish digraphs, the geresh and the gershayim, the maqaf, the paseq and the
-  sof pasuq.
-- It keeps none of the thirteen characters the fitting rule measures a face on,
-  because it has none of them: a source behind the face is not measured.
-- **`U+05C1` and `U+05C2`, the shin dot and the sin dot, come out as the same
-  single dot.** They are one dot each, drawn to the right and to the left of
-  the letter they sit over, and the centring puts ink in the middle of the cell
-  by the ink alone, which is the one thing that tells the two apart. A printer
-  that gives every code point a cell of its own has nowhere else to put them;
-  telling them apart is hand work in the editor, and so is the weight of the
-  rest of the niqqud.
+  License 1.1. Noto declares no Reserved Font Name.
+- **Medium** is the weight, because Iosevka **Medium** is the face, and the
+  unhinted build is the one taken: the rasterizer draws the outlines itself and
+  never reads a hint.
 
 ## Noto Sans Thai
 
@@ -182,80 +94,5 @@ mappings carry between them.
   [`NotoSansThai-v2.002.zip`](https://github.com/notofonts/thai/releases/download/NotoSansThai-v2.002/NotoSansThai-v2.002.zip),
   from [notofonts/thai](https://github.com/notofonts/thai/releases/tag/NotoSansThai-v2.002).
 - Copyright 2022 The Noto Project Authors (https://github.com/notofonts/thai),
-  licensed under the SIL Open Font License 1.1, and named **Noto Sans Thai
-  Medium subset** for the reason above.
+  licensed under the SIL Open Font License 1.1.
 - **Medium** and unhinted, for the reasons above.
-- The source has every one of the 87 Thai code points of the set, the
-  consonants, the vowels, the four tone marks, the digits and the two paragraph
-  marks, the sixteen combining vowel and tone marks among them, `U+0E31`,
-  `U+0E34` to `U+0E3A` and `U+0E47` to `U+0E4E`, which have an advance of zero.
-- The subset holds **86** of those, because the 87th, the baht sign `U+0E3F`
-  ฿, is one Iosevka already has and a glyph comes from the first source that
-  has it. No metric characters either, for the reason above.
-
-## The provenance of the build
-
-This is the table `tools/subset-font.js` prints at the end of the run that made
-the two Noto subsets, so these numbers are the tool's and not a hand's. The two
-fonts of the face were read for their coverage and left alone, which is why
-they have no file and no metric characters in the table.
-
-| Source | Subset | Code points of the set | Metric characters | Glyphs | Bytes |
-|---|---|---|---|---|---|
-| `iosevka-medium-subset.ttf` | read only | 779 |  |  |  |
-| `sarasa-mono-j-semibold-subset.ttf` | read only | 76 |  |  |  |
-| `NotoSansHebrew-Medium.ttf` | `data/fonts/noto-sans-hebrew-medium-subset.ttf` | 51 | 0 | 52 | 7944 |
-| `NotoSansThai-Medium.ttf` | `data/fonts/noto-sans-thai-medium-subset.ttf` | 86 | 0 | 87 | 19556 |
-
-992 of the 1326 code points of the set are covered by a source, and the
-generator adds the two bidi marks as empty cells, which makes 994 in
-`generated/fonts.js`; 332 are left over: Arabic 163, Khmer 103 and 66 that no
-printer prints, 63 control codes and three private use code points.
-
-## What a subset leaves out
-
-The **Unicode format characters**, all of them: `U+200B` to `U+200F`, `U+2028`
-to `U+202E`, `U+2060` to `U+2064` and `U+FEFF`. Four of those are in the code
-point set, the two joiners that Iosevka has and the two bidi marks that
-Windows-1255 carries and that Noto Sans Hebrew has a glyph for. A format
-character is an instruction to whatever lays out the text and never a character
-on the paper, and the fonts draw whatever they like for one: Noto's bidi marks
-are a full height marker and Iosevka's joiners straddle their origin. So no
-subset this tool writes carries one, the rasterizer draws an empty cell for one
-that reaches it anyway, and `tools/generate.js` gives every format character of
-the set a cell of its own whether or not a source has a glyph, so that none of
-them is the fallback box either. See `isFormat()` in `tools/rasterize.js`.
-
-The committed Iosevka subset is older than the rule and still holds the two
-joiners; they are drawn as an empty cell all the same, which is why they are
-counted among the 779 code points it covers here and not among the 701 it
-contributes to the packed font. The two bidi marks are in no subset, and the
-generator draws their empty cell itself.
-
-## Rebuilding
-
-Download the release packages, unpack them, and run the tool with one argument
-per source in the order a glyph is looked for, `input=output` on every source
-that is to be written:
-
-    node tools/subset-font.js \
-        path/to/Iosevka-Medium.ttf=data/fonts/iosevka-medium-subset.ttf \
-        path/to/SarasaMonoJ-SemiBold.ttf=data/fonts/sarasa-mono-j-semibold-subset.ttf \
-        NotoSansHebrew/unhinted/ttf/NotoSansHebrew-Medium.ttf=data/fonts/noto-sans-hebrew-medium-subset.ttf \
-        NotoSansThai/unhinted/ttf/NotoSansThai-Medium.ttf=data/fonts/noto-sans-thai-medium-subset.ttf
-
-A source given without an output, or one whose output is its own path, is read
-for its coverage and left alone, so a later subset is rebuilt without touching
-an earlier one:
-
-    node tools/subset-font.js \
-        data/fonts/iosevka-medium-subset.ttf \
-        data/fonts/sarasa-mono-j-semibold-subset.ttf \
-        NotoSansHebrew/unhinted/ttf/NotoSansHebrew-Medium.ttf=data/fonts/noto-sans-hebrew-medium-subset.ttf \
-        NotoSansThai/unhinted/ttf/NotoSansThai-Medium.ttf=data/fonts/noto-sans-thai-medium-subset.ttf
-
-It prints what every source contributed and the provenance of the run in the
-shape of the table above. The output is not byte for byte reproducible,
-opentype.js stamps the head table with the time of the run, which is why the
-subsets are committed and not built: `npm run generate` needs nothing but this
-repository.

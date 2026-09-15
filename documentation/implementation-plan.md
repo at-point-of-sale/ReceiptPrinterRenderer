@@ -1437,6 +1437,20 @@ Effort: half a day.
 
 <br>
 
+## Section 21: the fonts come from the editor
+
+Added on 2026-09-15 on the owner's decision: **this repository contains no font generation code; making its fonts is [ReceiptPrinterFontEditor](https://github.com/NielsLeenheer/ReceiptPrinterFontEditor)'s job.** The overrides step of 2026-09-14 is withdrawn with it. `generated/fonts.js` and `generated/outlines.js` stay in the repository as two files the editor's Renderer export writes (editor Section 20), and nothing here makes or remakes them.
+
+Removed: `tools/rasterize.js`, `tools/box-drawing.js`, `tools/codepoints.js`, `tools/subset-font.js`, `tools/overrides.js`; the font and outline parts of `tools/generate.js`, which keeps the mappings, the profiles and the PDF417 table and whose header says the two font files are the editor's; `test/overrides.js`; the four outline fonts and `overrides.json` of `data/fonts`; `opentype.js` from the dev dependencies. `test/outlines.js` loses its refill, which needed the rasterizer, and keeps what can be checked from the two files alone: every code point of the packed font outside the box range has an outline or is the fallback, every path parses, the box set covers the box code points of the font in the three cells, and the number of glyphs whose path paints outside its cell is reported and no longer pinned. `test/font.js` reads the format characters and the code point set from the font's own index and a list of its own instead of the tools. `src/svg/trace.js` stays: the SVG writer traces the glyphs a stream downloads with it.
+
+Kept in `data/fonts`: the three licence files, because the bitmap fonts are derived from those faces and the SIL Open Font License asks the notices to travel with a derivative; a rewritten `README.md` that says the fonts are made in the editor from the project file beside it, names the four faces with their versions and copyright lines as provenance, and points at the editor for the rules of the fit and the subsetting. The project file itself, `data/fonts/<project>.json`, is the owner's and is committed by the owner.
+
+Documentation: the Bitmap font section of `design.md` becomes what the font is, where it is made and the two formats, the packed font and the outlines, moved there from the generate tool's header, so that another font can still be converted; the rules of the fit are the editor's now and the section points at it. The README's line on the font says the fonts are made in the editor from those faces. `svg-plan.md` and the earlier sections stay as history.
+
+The owner's own export already sits in the working tree as `generated/fonts.js`, uncommitted. It is left exactly as it is: the tests of this section run against the committed file, copied aside and restored byte for byte, the fixtures do not change, and the owner commits the font with its fixtures when he chooses. `npm run build` no longer regenerates the file, so it survives a build from now on.
+
+Effort: half a day.
+
 ## Notes per section
 
 Filled in during implementation.
@@ -4898,4 +4912,106 @@ Acceptance:
 - `npm test` 2493 passing, lint clean, with the 24 playground fixtures making
   the three checks of section 16 and the twelve parity checks of this one.
 - `npm run contact-sheet` builds and `npm run contact-sheet:serve` serves it.
+- Version stays 0.3.0, nothing committed.
+
+<br>
+
+### Section 21
+
+Implemented on 2026-09-15. Files removed: `tools/rasterize.js`,
+`tools/box-drawing.js`, `tools/codepoints.js`, `tools/subset-font.js`,
+`tools/overrides.js`, `test/overrides.js`, the four `.ttf` sources and
+`overrides.json` of `data/fonts`. Files changed: `tools/generate.js`,
+`test/outlines.js`, `test/font.js`, `test/svg.js`,
+`test/tools/make-fixtures.js`, `data/fonts/README.md`,
+`documentation/design.md`, `documentation/usage.md`, `README.md`,
+`package.json`, `package-lock.json`.
+
+- **`tools/generate.js` is the mappings, the profiles and the PDF417 table**,
+  142 lines of the 765 it had. Its header says that `generated/fonts.js` and
+  `generated/outlines.js` are the Renderer export of ReceiptPrinterFontEditor
+  and are never written here, and the run writes `generated/mapping.js`,
+  `generated/profiles.js` and `generated/pdf417.js` and nothing else. Both font
+  files come out of a run byte for byte as they went in, which is what makes
+  `npm run build` safe for an uncommitted export. `javascript-stringify` stays a
+  dev dependency, the mappings and the profiles are written with it.
+- **`opentype.js` was taken out by hand.** `npm uninstall` cannot run in this
+  repository at all: the three driver packages of section 16g are not published
+  and npm refuses to resolve the tree, which is the same reason the lock has
+  been out of step since section 12. So the line went out of `package.json` and
+  the two places of `package-lock.json`, the root `devDependencies` entry and
+  the `node_modules/opentype.js` package entry, which has no dependencies of its
+  own to orphan. Nothing else imported it.
+- **`test/outlines.js` keeps what the two generated files prove about each
+  other**, 31 tests of the 43 it had: the header of the file, the code points,
+  which it now takes from the index of the packed font itself rather than from
+  the code point list of the tools, the paths, which all parse with the small
+  parser that stayed, the katakana, the Hebrew and the Thai and the combining
+  marks inside their cells, the format characters, and the box drawing
+  characters. The eight tests of the fitting rule went with the rasterizer they
+  tested, and the four refills went with its `fill()`.
+- **Two small pieces replaced the rasterizer's in that file.** `bounds()` needs
+  a curve flattened to measure where the ink of a path lies, so the test
+  flattens `Q` and `C` itself at ten segments, which is what the rasterizer
+  used; and the box drawing fill, the one check that ties `outlines.box` to
+  `generated/fonts.js` dot for dot, is a rectangle painter of six lines, because
+  a box path is the rectangles of a traced cell in whole dots, all wound the
+  same way, which the test beside it still asserts. All three cells still fill
+  to the rendered cell of the packed font exactly. Nothing else refills a path:
+  how near a filled outline is to its bitmap is the editor's measurement now.
+- **The count of glyphs that paint outside their cell is printed, not pinned.**
+  It is a property of the font that was exported, and this repository no longer
+  makes that font; the committed font has 43, none of them by more than two dots
+  and none wholly outside, and the line is in the test's summary.
+- **`test/font.js` carries the four format ranges itself**, U+200B–200F,
+  U+2028–202E, U+2060–2064 and U+FEFF, and filters the index of
+  `generated/fonts.js` with them instead of the code point list of the tools.
+  The four the set holds are still U+200C to U+200F and each is still an empty
+  cell.
+- **`test/rasterize.js` stays**, it is the proof that a display list rasterizes
+  to what a render draws and has nothing to do with the font. `src/svg/trace.js`
+  stays for the same kind of reason, the SVG writer traces the glyphs a stream
+  downloads into the printer with it.
+- **`data/fonts` is the licences, the project file and a README of provenance.**
+  The three licence files stay because the packed glyphs and the outlines are a
+  derivative of those four faces and the SIL Open Font License asks the notices
+  to travel with a derivative, which the README now says in as many words. Each
+  of the four keeps its version, its download link, its copyright line and its
+  weight; the rule of the face, the subsetting, the provenance table of the
+  subset tool and the rebuilding instructions are gone with a sentence that
+  names where they live now, the editor's `data/fonts/README.md` and
+  `src/lib/rasterize.js`. The project file is named `<project>.json` in the
+  README and is the owner's to commit.
+- **The Bitmap font section of `documentation/design.md` is what the font is,
+  where it is made, and the two formats.** The packed font format and the
+  outline format moved there verbatim from the header of the generate tool, with
+  the sentences that pointed at the rasterizer, the box drawing tool and the
+  overrides file rewritten to say what holds rather than which file did it, so
+  that another font can still be converted. The rules of the fit are a
+  paragraph that points at the editor, the coverage paragraph stayed with "as of
+  the committed font" added, and the overrides paragraph and the generate time
+  paragraphs are gone. The file tree of the design lost the three tool lines and
+  the opentype.js credit left its sources.
+- **`README.md` and `documentation/usage.md` say the fonts are made in the
+  editor from those faces.** `documentation/svg-plan.md` and the earlier
+  sections of this plan are history and were left alone.
+- **The owner's export was not touched.** `generated/fonts.js` in the working
+  tree and `data/fonts/iosevka-medium.json` are the owner's, and the tests of
+  this section ran against the committed font: the export was copied aside, the
+  committed file checked out, the suite run, and the export copied back.
+  `md5 generated/fonts.js data/fonts/iosevka-medium.json` is
+  `729eb32d3a1695b4fabc5d1f443de2d4` and
+  `a3412b17e6bb13cb579bb77e267e2022` before the section and after it.
+
+Acceptance:
+
+- `npm test` 4611 passing, lint clean, against the committed font. It was 4640:
+  the 17 tests of `test/overrides.js` and the 12 of `test/outlines.js` above.
+- `npm run generate` writes the mappings, the profiles and the PDF417 table
+  unchanged and leaves `generated/fonts.js` and `generated/outlines.js` alone,
+  `git status generated/` shows nothing afterwards but the owner's `fonts.js`.
+- `npm run build` succeeds and the font is in all four bundles. The uncommitted
+  export is what gets bundled, which is why `dist/receipt-printer-renderer.mjs`
+  grew 16 kB: the editor writes its index one key to a line where the generator
+  wrote it on one, and the minified builds are the size they were.
 - Version stays 0.3.0, nothing committed.

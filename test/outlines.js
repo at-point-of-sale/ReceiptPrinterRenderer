@@ -4,66 +4,34 @@ import outlines from '../generated/outlines.js';
 import fonts from '../generated/fonts.js';
 import Font from '../src/font.js';
 import Bitmap from '../src/bitmap.js';
-import Rasterizer, {flatten, fill, isFormat, METRIC_CHARACTERS, SEGMENTS, INK_THRESHOLD, SAMPLES}
-  from '../tools/rasterize.js';
-import {usedCodepoints, REPLACEMENT_CHARACTER} from '../tools/codepoints.js';
-import {BOX_DRAWING} from '../tools/box-drawing.js';
 
 /*
-    The outlines of generated/outlines.js are filled again here, with the
-    flatten and the fill of tools/rasterize.js and the samples and the coverage
-    threshold tools/generate.js rasterizes the bitmap fonts with, and the result
-    is compared with the packed glyph the generator made in the same pass.
+    What generated/outlines.js and generated/fonts.js say about each other.
 
-    The two are not expected to be equal. A path is written in whole tenths of
-    a dot, so a stem lands up to a twentieth of a dot from where the rasterizer
-    had it, and the fill is a coverage threshold, so a dot at the edge of a
-    stroke can fall on the other side of it. The bitmap font is going to be
-    tweaked by hand on the dot grid as well, and will drift from the face on
-    purpose, so this is a report of how well an outline sits on its bitmap and
-    not a proof that the two agree: the bound below is loose enough to say that
-    a glyph is still the glyph, and the totals are printed at the end. What the
-    vector output is judged on is the agreement of a whole receipt, which
-    Section 4 measures with a rasterizer.
+    Both files are made in ReceiptPrinterFontEditor and this repository holds no
+    code that makes or remakes them, see Section 21 of the implementation plan,
+    so what is checked here is what the two files alone can prove: that the
+    outlines cover the glyphs of the packed font, that every path parses with
+    the small parser below, that the box drawing characters are the dots of the
+    rendered cell of the packed font in each of the three cells of the profiles,
+    and where a glyph paints outside its cell, which is reported and not pinned.
+
+    How well a filled outline reproduces its packed glyph is the editor's
+    measurement and not this repository's: an outline is written in whole tenths
+    of a dot and filled with a coverage threshold, and the bitmap is tweaked by
+    hand on the dot grid and drifts from the face on purpose. What the vector
+    output is judged on here is the agreement of a whole receipt, which
+    test/svg.js measures with a rasterizer.
 */
 
-/*
-    The number of dots a filled outline may differ from its packed glyph by.
-    The worst glyph of the two fonts, the four arrows below excepted, is 13 dots
-    of the 288 of a 12 by 24 cell, so this is the round number above it: it
-    catches a glyph that moved, not a dot that changed its mind at the coverage
-    threshold.
-*/
+/* The code points the box drawing and block characters live in, which are drawn
+   on the dot grid and kept in the box set of the outlines rather than in glyphs */
 
-const TOLERANCE = 16;
+const BOX_DRAWING = {first: 0x2500, last: 0x259f};
 
-/*
-    The glyphs whose filled outline is not their bitmap, with the reason.
+/* The character drawn for a code point without a glyph */
 
-    The four vertical arrows of the face are wider than the face, so they are
-    fitted by their own advance, see the fit in tools/rasterize.js. Their stem
-    is 74 of the 1000 units of the em and sits on the middle of it, so in the
-    cell it runs from 5.556 to 6.444 dots: 0.444 of each of the two columns it
-    straddles, which is under the 0.45 the threshold asks for. It is ink all
-    the same, because coverage is measured with samples and not with geometry:
-    of the eight sample columns of a dot, four fall inside the stem, which is
-    0.5. The path, written in whole tenths of a dot, runs from 5.6 to 6.4, and
-    only three of the eight fall inside it, which is 0.375, so the stem is ink
-    in the bitmap and white in the refill: the whole stem, twenty two to thirty
-    four dots of it. It is the knife edge the file above describes, at its
-    worst, and not a glyph that moved; the arrow head, which is what the fit
-    gave these glyphs back, is in both.
-
-    An outline is drawn at any size and a dot is a dot, so the SVG output of
-    these four is a stem like any other. The bound is the round number above
-    the worst of the four, as the tolerance above is for the rest, and it is
-    here so that the four are named and counted rather than hidden under a
-    looser tolerance for all 780.
-*/
-
-const KNIFE_EDGE = [0x2191, 0x2193, 0x2195, 0x21a8];
-
-const KNIFE_EDGE_TOLERANCE = 40;
+const REPLACEMENT_CHARACTER = 0xfffd;
 
 /* The cells of the profiles, with the font a printer draws them with */
 
@@ -73,45 +41,17 @@ const CELLS = [
   {name: '9x24', font: '8x16', width: 9, height: 24},
 ];
 
-/*
-    What lies outside the 12 by 24 cell. A path is not clipped and the bitmap of
-    a glyph is, so a glyph whose ink leaves its cell, an accented capital of a
-    face drawn for a taller cell, paints outside the cell in SVG unless the
-    writer clips it, which is what Section 4 has it do. The numbers are recorded
-    here so that a regeneration that moves them is visible; the list is in the
-    notes of Section 3.
+/* How many straight segments a curve of a path is flattened into to measure
+   where its ink lies */
 
-    They were 93, 41 and 5 before the glyphs that are wider than the face, the
-    em dash and the ellipsis among them, were fitted into the cell instead of
-    clipped by it; 59, 7 and 5 before the combining marks were centred in their
-    cell by their ink, which brought in the five that were wholly outside; and
-    54, 1 and 0 before a glyph whose ink lies outside its own advance was
-    fitted by its ink, which brought in the last one that was more than two
-    dots out, U+0E33.
-
-    What is left is outside the cell at the top and not at the side: the
-    Vietnamese precomposed letters and the horn letters of a face drawn for a
-    taller cell, whose accents rise above it, and U+221A, whose ink is fitted
-    to the cell but still starts half a dot inside its own left edge, so the
-    path ends half a dot past the right edge while the bitmap rounds it away.
-*/
-
-const OUTSIDE_THE_CELL = {
-  total: 43,
-  far: 0,
-  whole: [],
-};
-
-/* Font B is drawn as font A at two thirds, unless it has an outline of its own */
-
-const FONT_B_SCALE = 2 / 3;
+const SEGMENTS = 10;
 
 /* How many numbers every path command takes */
 
 const ARITY = {M: 2, L: 2, Q: 4, C: 6, h: 1, v: 1, Z: 0};
 
 /**
- * Parse SVG path data into contours of the commands flatten() takes, in dots.
+ * Parse SVG path data into contours, in dots.
  *
  * Absolute M, L, Q, C and Z, which the glyph paths are written with, and the
  * relative h and v of the traced box drawing characters. A command letter that
@@ -212,41 +152,47 @@ function parsePath(data, units) {
 }
 
 /**
- * Scale the contours of a path, the way the SVG writer draws font B with the
- * outline of font A
+ * Flatten the contours of a path into polygons, the curves sampled at SEGMENTS
+ * points each, so that the ink of a path can be measured
  *
  * @param  {Array}    contours   Contours as parsePath returned them
- * @param  {number}   scale      Factor to scale them by
- * @return {Array}               The scaled contours
+ * @return {Array}               One array of [x, y] points per contour
  */
-function scaleContours(contours, scale) {
-  return contours.map((contour) => contour.map((command) => {
-    const scaled = {type: command.type};
+function flatten(contours) {
+  return contours.map((contour) => {
+    const points = [];
 
-    for (const key of ['x', 'y', 'x1', 'y1', 'x2', 'y2']) {
-      if (typeof command[key] === 'number') {
-        scaled[key] = command[key] * scale;
+    let x = 0;
+    let y = 0;
+
+    for (const command of contour) {
+      if (command.type === 'M' || command.type === 'L') {
+        points.push([command.x, command.y]);
+      } else {
+        for (let step = 1; step <= SEGMENTS; step++) {
+          const t = step / SEGMENTS;
+          const u = 1 - t;
+
+          if (command.type === 'Q') {
+            points.push([
+              u * u * x + 2 * u * t * command.x1 + t * t * command.x,
+              u * u * y + 2 * u * t * command.y1 + t * t * command.y,
+            ]);
+          } else {
+            points.push([
+              u * u * u * x + 3 * u * u * t * command.x1 + 3 * u * t * t * command.x2 + t * t * t * command.x,
+              u * u * u * y + 3 * u * u * t * command.y1 + 3 * u * t * t * command.y2 + t * t * t * command.y,
+            ]);
+          }
+        }
       }
+
+      x = command.x;
+      y = command.y;
     }
 
-    return scaled;
-  }));
-}
-
-/**
- * Fill a path into a cell, the way the rasterizer filled the glyph
- *
- * @param  {Array}    contours   Contours as parsePath returned them
- * @param  {number}   width      Cell width in dots
- * @param  {number}   height     Cell height in dots
- * @return {object}              The cell as a bitmap
- */
-function fillPath(contours, width, height) {
-  return {
-    width,
-    height,
-    data: fill(flatten(contours, SEGMENTS), width, height, SAMPLES, INK_THRESHOLD),
-  };
+    return points;
+  });
 }
 
 /**
@@ -271,6 +217,37 @@ function difference(one, other) {
 }
 
 /**
+ * Fill a box drawing path into a cell.
+ *
+ * A box path is the rectangles the tracer merged the black runs of a cell into,
+ * in whole dots and all wound the same way, so painting each of them is the
+ * whole of the fill: there is no curve in one and no hole.
+ *
+ * @param  {Array}    contours   Contours of a box path, as parsePath returned them
+ * @param  {number}   width      Cell width in dots
+ * @param  {number}   height     Cell height in dots
+ * @return {object}              The cell as a bitmap
+ */
+function fillRectangles(contours, width, height) {
+  const bitmap = Bitmap.create(width, height);
+
+  for (const contour of contours) {
+    assert.lengthOf(contour, 4, 'a box path that is not a rectangle');
+
+    const xs = contour.map((command) => command.x);
+    const ys = contour.map((command) => command.y);
+
+    for (let y = Math.min(...ys); y < Math.max(...ys); y++) {
+      for (let x = Math.min(...xs); x < Math.max(...xs); x++) {
+        Bitmap.setPixel(bitmap, x, y, 1);
+      }
+    }
+  }
+
+  return bitmap;
+}
+
+/**
  * The box the ink of a set of contours covers, in dots
  *
  * @param  {Array}    contours   Contours as parsePath returned them
@@ -282,7 +259,7 @@ function bounds(contours) {
   let x2 = -Infinity;
   let y2 = -Infinity;
 
-  for (const polygon of flatten(contours, SEGMENTS)) {
+  for (const polygon of flatten(contours)) {
     for (const [x, y] of polygon) {
       x1 = Math.min(x1, x);
       y1 = Math.min(y1, y);
@@ -304,132 +281,16 @@ function name(codepoint) {
   return 'U+' + codepoint.toString(16).toUpperCase().padStart(4, '0');
 }
 
-const codepoints = usedCodepoints();
+/* The code points the packed font holds, which is what the outlines are
+   measured against: the font is the one the editor exported and this file has
+   no other list to compare it with */
+
+const codepoints = Object.keys(fonts['12x24'].index).map(Number).sort((a, b) => a - b);
 const boxed = (codepoint) => codepoint >= BOX_DRAWING.first && codepoint <= BOX_DRAWING.last;
 
-/* What the fill of every outline cost in dots, for the summary at the end */
+/* What was counted along the way, for the summary at the end */
 
 const report = [];
-
-describe('the fitting rule', function() {
-  /* The sources of tools/generate.js, in the order a glyph is looked for */
-
-  const FACE = 'data/fonts/iosevka-medium-subset.ttf';
-  const HEBREW = 'data/fonts/noto-sans-hebrew-medium-subset.ttf';
-
-  const CELL = {width: 12, height: 24, baseline: 18};
-
-  describe('isFormat()', function() {
-    it('should cover the four ranges of the Unicode format characters, and their edges', function() {
-      for (const [first, last] of [[0x200b, 0x200f], [0x2028, 0x202e], [0x2060, 0x2064], [0xfeff, 0xfeff]]) {
-        assert.isTrue(isFormat(first), name(first));
-        assert.isTrue(isFormat(last), name(last));
-        assert.isTrue(isFormat(Math.floor((first + last) / 2)), 'inside the range');
-
-        assert.isFalse(isFormat(first - 1), `${name(first - 1)}, one below the range`);
-        assert.isFalse(isFormat(last + 1), `${name(last + 1)}, one above the range`);
-      }
-    });
-
-    it('should cover nothing else', function() {
-      for (const codepoint of [0x20, 0x41, 0x300, 0x5d0, 0xe01, 0x2500, 0xff71, 0xfffd, 0x10ffff]) {
-        assert.isFalse(isFormat(codepoint), name(codepoint));
-      }
-    });
-  });
-
-  describe('metrics()', function() {
-    it('should measure the face', function() {
-      const fit = new Rasterizer(FACE).metrics(CELL);
-
-      assert.equal(fit.unitsPerEm, 1000);
-      assert.equal(fit.advance, 500);
-      assert.equal(fit.scaleX, CELL.width / 500);
-      assert.isFalse(fit.inherited);
-    });
-
-    it('should refuse a face that lacks any of the thirteen metric characters, and name them', function() {
-      /* A source of a script and no Latin has none of the thirteen. It is a
-         source and never the face, so measuring it is the mistake this
-         catches, and the message says which characters are missing rather than
-         leaving the face fitted to .notdef */
-
-      assert.throws(
-          () => new Rasterizer(HEBREW).metrics(CELL),
-          /has no glyph for .*which the fitting rule measures a face on/,
-      );
-
-      const message = (() => {
-        try {
-          new Rasterizer(HEBREW).metrics(CELL);
-        } catch (error) {
-          return error.message;
-        }
-
-        return '';
-      })();
-
-      for (const character of METRIC_CHARACTERS) {
-        assert.include(message, `'${character}'`, `the message does not name '${character}'`);
-      }
-    });
-  });
-
-  describe('inherit()', function() {
-    const face = new Rasterizer(FACE).metrics(CELL);
-
-    it('should give a source at the em of the face the numbers of the face', function() {
-      const fit = new Rasterizer(HEBREW).inherit(face);
-
-      assert.equal(fit.unitsPerEm, face.unitsPerEm);
-      assert.equal(fit.scaleX, face.scaleX);
-      assert.equal(fit.scaleY, face.scaleY);
-      assert.equal(fit.advance, face.advance);
-      assert.equal(fit.verticalCap, face.verticalCap);
-      assert.isTrue(fit.inherited);
-
-      /* And the extents of the source itself, which are zero for a source
-         without a Latin: they are reported and never used */
-
-      assert.equal(fit.cap, 0);
-      assert.equal(fit.ascender, 0);
-      assert.equal(fit.descender, 0);
-    });
-
-    it('should scale a source at another em by the ratio of the two', function() {
-      const fit = new Rasterizer(HEBREW).inherit({...face, unitsPerEm: 2000, advance: 1000});
-
-      assert.equal(fit.scaleX, face.scaleX * 2);
-      assert.equal(fit.advance, face.advance);
-    });
-
-    it('should refuse a fit that is not the measured fit of a face', function() {
-      const source = new Rasterizer(HEBREW);
-
-      for (const broken of [null, undefined, {}, {...face, scaleX: 0}, {...face, advance: 0},
-        {...face, unitsPerEm: 0}]) {
-        assert.throws(
-            () => source.inherit(broken),
-            /fitted to the metrics of the face/,
-            `for ${JSON.stringify(broken)}`,
-        );
-      }
-    });
-
-    it('should refuse a source whose em is not a number of units', function() {
-      /* No TrueType font says so, which is why the em is read through the
-         getter: the guard is reachable and the font that would trip it is not
-         one opentype.js would parse */
-
-      const source = new Rasterizer(HEBREW);
-
-      Object.defineProperty(source, 'unitsPerEm', {value: 0});
-
-      assert.throws(() => source.inherit(face), /does not say how many units its em holds/);
-    });
-  });
-});
-
 describe('Outlines', function() {
   describe('the file', function() {
     it('should be version 1', function() {
@@ -559,8 +420,7 @@ describe('Outlines', function() {
       /* The carriage return, the space and the no break space, and the four
          Unicode format characters of the set: every one of those is an empty
          cell whatever outline a source has for it, and an empty cell when no
-         source has one at all, see isFormat() of tools/rasterize.js, so their
-         path is empty too. A combining accent is not among them: it has an
+         source has one at all, so their path is empty too. A combining accent is not among them: it has an
          outline, and since the centring it sits in its cell, so both its path
          and its packed glyph carry the mark */
 
@@ -603,90 +463,13 @@ describe('Outlines', function() {
 
       const far = outside.filter(([, over]) => over > 2);
 
+      /* A bitmap cell clips and a path does not, so the SVG writer clips every
+         glyph to its cell, see the notes of Section 3. How many glyphs leave
+         the cell is a property of the font that was exported, not of this
+         repository, so it is counted and printed and nothing is pinned on it */
+
       report.push(`outside the cell: ${outside.length} glyphs, ${far.length} by more than two dots, ` +
         `${whole.length} of them wholly outside`);
-
-      /* A bitmap cell clips and a path does not, so the SVG writer clips every
-         glyph to its cell, see the notes of Section 3. The numbers are pinned
-         so that a regeneration that changes them shows up here */
-
-      assert.equal(outside.length, OUTSIDE_THE_CELL.total, 'glyphs outside the cell');
-      assert.equal(far.length, OUTSIDE_THE_CELL.far, 'glyphs more than two dots outside the cell');
-      assert.deepEqual(whole.map(name), OUTSIDE_THE_CELL.whole, 'glyphs wholly outside the cell');
-    });
-  });
-
-  describe('the glyphs of font A', function() {
-    it('should fill to within a few dots of the packed glyphs of the 12x24 font', function() {
-      const font = Font.get('12x24');
-      const failed = [];
-
-      let total = 0;
-      let worst = 0;
-      let moved = 0;
-
-      for (const [key, path] of Object.entries(outlines.glyphs)) {
-        const codepoint = Number(key);
-        const cell = fillPath(parsePath(path, outlines.units), 12, 24);
-        const dots = difference(cell, font.lookup(codepoint));
-
-        total += dots;
-        worst = Math.max(worst, dots);
-
-        if (dots > 2) {
-          moved++;
-        }
-
-        if (dots > (KNIFE_EDGE.includes(codepoint) ? KNIFE_EDGE_TOLERANCE : TOLERANCE)) {
-          failed.push(`${name(codepoint)} by ${dots} dots`);
-        }
-      }
-
-      report.push(`font A: ${total} dots over ${Object.keys(outlines.glyphs).length} glyphs, ` +
-        `worst ${worst}, ${moved} of them over two dots, ` +
-        `${KNIFE_EDGE.length} of them on the knife edge`);
-
-      assert.deepEqual(failed, []);
-    });
-  });
-
-  describe('the glyphs of font B', function() {
-    it('should fill to within a few dots of the packed glyphs of the 8x16 font', function() {
-      const font = Font.get('8x16');
-      const failed = [];
-
-      let total = 0;
-      let worst = 0;
-      let moved = 0;
-
-      for (const [key, path] of Object.entries(outlines.glyphs)) {
-        const codepoint = Number(key);
-        const own = outlines.glyphsB[codepoint];
-
-        const contours = own === undefined ?
-          scaleContours(parsePath(path, outlines.units), FONT_B_SCALE) :
-          parsePath(own, outlines.units);
-
-        const cell = fillPath(contours, 8, 16);
-        const dots = difference(cell, font.lookup(codepoint));
-
-        total += dots;
-        worst = Math.max(worst, dots);
-
-        if (dots > 2) {
-          moved++;
-        }
-
-        if (dots > TOLERANCE) {
-          failed.push(`${name(codepoint)} by ${dots} dots`);
-        }
-      }
-
-      report.push(`font B: ${total} dots over ${Object.keys(outlines.glyphs).length} glyphs, ` +
-        `worst ${worst}, ${moved} of them over two dots, ` +
-        `${Object.keys(outlines.glyphsB).length} refitted`);
-
-      assert.deepEqual(failed, []);
     });
   });
 
@@ -734,26 +517,6 @@ describe('Outlines', function() {
 
         assert.isAbove(box.x2 - box.x1, outlines.cell.width / 2, name(codepoint));
       }
-    });
-
-    it('should fill to the packed glyphs of both fonts within the tolerance', function() {
-      const a = Font.get('12x24');
-      const b = Font.get('8x16');
-
-      const failed = [];
-
-      for (const codepoint of [...kana, ...wide]) {
-        const contours = parsePath(outlines.glyphs[codepoint], outlines.units);
-
-        const dotsA = difference(fillPath(contours, 12, 24), a.lookup(codepoint));
-        const dotsB = difference(fillPath(scaleContours(contours, FONT_B_SCALE), 8, 16), b.lookup(codepoint));
-
-        if (dotsA > TOLERANCE || dotsB > TOLERANCE) {
-          failed.push(`${name(codepoint)} by ${dotsA} and ${dotsB} dots`);
-        }
-      }
-
-      assert.deepEqual(failed, []);
     });
   });
 
@@ -804,40 +567,14 @@ describe('Outlines', function() {
 
       assert.deepEqual(outside.map(name), []);
     });
-
-    it('should fill to the packed glyphs of both fonts within the tolerance', function() {
-      const a = Font.get('12x24');
-      const b = Font.get('8x16');
-
-      const failed = [];
-
-      for (const codepoint of [...hebrew, ...thai]) {
-        const own = outlines.glyphsB[codepoint];
-
-        const contoursA = parsePath(outlines.glyphs[codepoint], outlines.units);
-
-        const contoursB = own === undefined ?
-          scaleContours(contoursA, FONT_B_SCALE) :
-          parsePath(own, outlines.units);
-
-        const dotsA = difference(fillPath(contoursA, 12, 24), a.lookup(codepoint));
-        const dotsB = difference(fillPath(contoursB, 8, 16), b.lookup(codepoint));
-
-        if (dotsA > TOLERANCE || dotsB > TOLERANCE) {
-          failed.push(`${name(codepoint)} by ${dotsA} and ${dotsB} dots`);
-        }
-      }
-
-      assert.deepEqual(failed, []);
-    });
   });
 
   describe('the combining marks', function() {
     /*
        The glyphs whose advance is zero: Iosevka's five combining accents, the
        sixteen niqqud of Hebrew and the sixteen vowel and tone marks of Thai.
-       They are centred in their cell by their ink, on a dot centre, see the
-       rule of the face in tools/rasterize.js.
+       They are centred in their cell by their ink, on a dot centre, which is
+       the rule of the face of ReceiptPrinterFontEditor.
 
        They are the only glyphs of the file that font B refits. The phase of
        the centring is half a dot past the middle dot of the cell, which is 6.5
@@ -894,10 +631,10 @@ describe('Outlines', function() {
 
   describe('the Unicode format characters', function() {
     /* A format character is an instruction to whatever lays out the text and
-       never a character on the paper, so every source draws one as an empty
-       cell and its path is empty, see isFormat() of tools/rasterize.js. The
-       set holds the two joiners, which Iosevka drew straddling its origin and
-       which printed as a sliver against the left wall of the cell */
+       never a character on the paper, so the font draws one as an empty cell
+       and its path is empty. The set holds the two joiners, which Iosevka drew
+       straddling its origin and which printed as a sliver against the left
+       wall of the cell */
 
     const FORMAT = [0x200c, 0x200d];
 
@@ -932,7 +669,7 @@ describe('Outlines', function() {
             stretch: true,
           });
 
-          const filled = fillPath(parsePath(path, 1), cell.width, cell.height);
+          const filled = fillRectangles(parsePath(path, 1), cell.width, cell.height);
           const dots = difference(filled, bitmap);
 
           if (dots !== 0) {

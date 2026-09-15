@@ -1241,8 +1241,8 @@ const raw = {
       thirteen bytes 0xF1 to 0xFD are 円 年 月 日 時 分 秒 〒 市 区 町 村 人, the
       only characters of either katakana table that are not half width: a
       Japanese face draws them on a full em, and the printer draws them in the
-      same 12 by 24 cell as the rest, so the rasterizer scales them to the cell,
-      see the horizontal fit in tools/rasterize.js.
+      same 12 by 24 cell as the rest, so the font scales them to the cell, by
+      the horizontal fit of the font editor.
 
       This fixture exists in ESC/POS alone, because Star's katakana table has
       none of these thirteen and no other Star page has them either. The second

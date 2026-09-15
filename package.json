@@ -87,7 +87,6 @@
         "jsbarcode": "^3.12.3",
         "jsqr": "^1.4.0",
         "mocha": "^10.2.0",
-        "opentype.js": "^2.0.0",
         "puppeteer-core": "25.10.0",
         "receiptio": "5.0.1",
         "receiptline": "4.0.4",
