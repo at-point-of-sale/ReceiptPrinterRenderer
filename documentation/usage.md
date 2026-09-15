@@ -282,7 +282,7 @@ let paper = stitch(items, { cutMarker: true });
 
 ### Previewing a receipt
 
-Encoding, rendering and drawing the result on a canvas is the whole preview. There is a complete page in [examples/preview.html](../examples/preview.html).
+Encoding, rendering and drawing the result on a canvas is the whole preview.
 
 ```html
 <canvas id="canvas"></canvas>
