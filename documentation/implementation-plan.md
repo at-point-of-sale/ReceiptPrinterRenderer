@@ -1464,6 +1464,29 @@ The owner's export sits uncommitted in `generated/fonts.js`: the section is buil
 
 Effort: half a day.
 
+## Section 23: the human readable text of a barcode, and what an Epson makes of UPC-E
+
+Added on 2026-09-15 from an Epson printout of the escpos-php fixture `barcode`, photographed and measured. Every rule below is a reading of that printout, applied to both languages with the Star half unverified; the exact algorithm of the firmware is not published, and the numbers were taken off photographs at an angle, so a rule is kept simple and a scan can refine it later.
+
+**Where the text goes.** Today every symbology centres its text as one run of cells under the bars. The printer does that for EAN-13 alone.
+
+- **UPC-A and EAN-8 print their digits in two groups**, six and six, four and four, each group centred under the digits it encodes: for UPC-A the left digits are modules 3 to 45 and the right digits 50 to 92, for EAN-8 modules 3 to 31 and 36 to 64, with the centre guard between. On the paper that is `012345 678905` and `0123 4565`. EAN-13 stays one centred run, the printout shows it that way. The number system digit and the check digit of a UPC-A are inside the groups, not beside the bars.
+- **UPC-E prints its six body digits** and nothing else, centred: `123450`, not `01234505`.
+- **Code 39, Codabar, Code 93 and Code 128 spread their characters across the bars**: the width of the bars divided into as many equal slots as there are characters, each character centred in its slot. When the text is wider than the bars it is centred as today. ITF and the GS1 family were not on the printout and keep today's layout, with a note.
+- **Code 39 wraps the text in asterisks**, `* A B C   0 1 2 *` for the data `ABC 012`; data that already carries them, `*TEXT*`, is not wrapped twice. **Code 93 wraps it in the small boxes** of its start and stop characters, drawn as a hollow rectangle a third of the cell high and half of it wide, centred in a cell of its own, since the font has no `U+25A1`; a box is a rectangle operation of the block, not a glyph. Code 128 prints the data without the code set selector and the function characters, as today, and the digits of set C as today.
+
+**What the firmware checks.** The printout shows a UPC-A, an EAN-13 and an EAN-8 with a wrong check digit printed as given, and a UPC-E of twelve digits with a wrong check digit printed as well: **a check digit that is sent is never verified**, it is encoded and printed as it came. Today EAN-8 and UPC-E refuse a wrong one while UPC-A and EAN-13 do not; all four print what they are given now.
+
+**UPC-E.** The printer refused the rows of six, seven and eight digits, `123456`, `0123456` and `01234567`, and printed the eleven and twelve digit rows, `01234567890` and `012345678901`, both as `123450`. So, as this printer reads it: **UPC-E takes eleven or twelve digits, the UPC-A it stands for**; the number system digit must be 0; the UPC-A is compressed by the zero suppression rules when it has such a form, and when it has none the printer takes the five manufacturer digits and the last product digit, which is what `123450` is; the twelfth digit is the check digit and is not verified, the eleventh form computes it. The forms of six to eight digits are refused. That is one printer's firmware and the reference allows those forms on other models; the deviations list says so, and a row that prints a valid eight digit UPC-E on the same printer would settle it.
+
+**A refused barcode prints its data as text.** Each refused UPC-E row printed its digits as a line of text where the barcode would have been: the reference says a `GS k` whose data is out of range is aborted and the data processed as normal data. Today a refused barcode prints nothing. Now the data of a refused `GS k`, both the NUL terminated and the length prefixed form, is handed to the text path, in the current style, and printed. This applies to every symbology that refuses data, since the reference states it for the command and not for a symbology.
+
+Fixtures: the escpos-php `barcode` fixture changes in every row named above and is reviewed row by row against the photographs; any other fixture with human readable text or a refused barcode changes too and is listed with its reason. The barcode symbologies keep their tests; new tests cover the groups, the spread, the wrappers, the unverified check digits, the UPC-E forms and the refused data as text. `commands-esc-pos.md` and `commands-star-prnt.md` say the new rules in their `GS k` rows and the deviations lines.
+
+The owner's export sits uncommitted in `generated/fonts.js`: the work and the fixtures run against the committed font, the export copied aside and restored byte for byte.
+
+Effort: one day.
+
 ## Notes per section
 
 Filled in during implementation.
