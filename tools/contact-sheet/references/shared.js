@@ -41,6 +41,8 @@ import Bitmap from '../../../src/bitmap.js';
  *                                       and the sheet leaves its cell out
  * @property {string}       reason      Why it did not run or did not produce a render
  * @property {string}       [file]      Path of what it wrote, relative to the contact sheet
+ * @property {string[]}     [files]     One path per piece of paper, relative to the contact sheet, when the tool
+ *                                      has pieces to show; the page stacks them and falls back to `file`
  * @property {string}       [kind]      'image' or 'html'
  * @property {Bitmap}       [bitmap]    The render, for the agreement metric
  * @property {string}       [command]   The exact invocation, for the page

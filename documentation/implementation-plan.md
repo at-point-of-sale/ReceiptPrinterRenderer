@@ -5385,3 +5385,65 @@ Acceptance:
 - `npm test` 4659 passing, lint clean, against the committed font.
 - `npm run test:types` passes.
 - Version stays 0.3.0, nothing committed.
+
+### Section 24
+
+The contact sheet shows every render as one image per piece of paper. Only
+`tools/contact-sheet.js` and its reference modules changed; nothing of `src`
+was touched and nothing of the sheet is committed.
+
+What was done:
+
+- `tools/contact-sheet.js` gained `pieces(items)`, which splits the items of a
+  render into the runs between two cuts, and `images(files, alt)`, which writes
+  a `<div class="pieces">` with one `<img>` per piece. `sheet()` stitches every
+  run on its own with the width of the provenance, drops a run of no height,
+  and writes `name.png`, `name.2.png`, `name.3.png` and so on; the first piece
+  keeps the name of the fixture, so the print buttons and anything else that
+  links to it are unaffected. The stitched whole is still what the agreement
+  metric compares and what `render, W by H` in the caption speaks of, with
+  `, N pieces` behind it when there is more than one.
+- `references/svg.js` slices the rasterized bitmap at the rows of the `cut`
+  entries of `renderer.layout(bytes)` and writes `name.svg.png`,
+  `name.svg.2.png` and so on. The `.ours.svg` document stays one page and the
+  whole bitmap stays the one the dot agreement is measured on. A receipt
+  without a cut keeps the PNG resvg itself wrote, greys and all, because our
+  own PNG writer writes one bit per dot and a single piece would otherwise lose
+  the antialiasing the column has always shown.
+- `references/escpost.js` shows the sheets ESCPost already writes,
+  `name.escpost/sheet-001.png` and up, as the pieces, and its note is `N
+  sheets` instead of `N sheets, stacked`. The stacked bitmap and
+  `name.escpost.png` are kept for the metric.
+- `references/thermal.js` and `references/receiptio.js` are one image as
+  before, with `cuts as the tool draws them` in the note when the stream holds
+  a cut. The contact sheet passes that as `cuts` on the fixture object it hands
+  the reference modules.
+- `references/shared.js` documents the new optional `files` of a `Reference`:
+  one path per piece, which the page stacks, falling back to `file`.
+- The style sheet of the page gained `.pieces { display: flex; flex-direction:
+  column; gap: 6px; }`. The images keep their padding and their dotted rules,
+  and `figure > :not(figcaption) { grid-row: 2 }` places the new wrapper the way
+  it placed the image, so the two row grid of the card is unchanged.
+
+The rows line up: the SVG writer's viewBox is dots and its `width` and `height`
+are written in dots, so resvg at `fitTo: original` rasterizes one pixel per dot,
+and for every one of the 105 fixtures with a cut the height of the raster is the
+height of the stitched paper. The slicer still reads the cut rows through the
+ratio of the two heights, so a rasterization at another scale would be sliced at
+its own rows rather than at the wrong ones. No mismatch was found.
+
+Twelve fixtures show more than one piece: `escpos-php/demo`, fourteen pieces,
+the tallest stack on the page; `escpost/cafe-order-voucher`,
+`escpost/text-character-sizes`, `receiptline/kitchen-escpos-48`,
+`receiptline/kitchen-starsbcs-48` and the four `playground/text-*` fixtures,
+two each; `escpost/calibration-job`,
+`escpost/mechanism-full-and-partial-cuts` and
+`escpost/motion-gs-v-function-b-feed`, three each. Their piece heights add up to
+the height of the stitched paper in both our column and the SVG column, and the
+ESCPost column of `cafe-order-voucher` shows its two sheets. Every other fixture
+with a cut cuts at the very end of the stream and stays one image.
+
+Acceptance:
+
+- `npm run contact-sheet` writes the 147 fixtures, `npm run lint` is clean.
+- Nothing of `src` changed, so the mocha suite is untouched.

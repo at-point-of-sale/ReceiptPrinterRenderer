@@ -47,6 +47,7 @@ import {drivers, scripts, styles, header, script} from './contact-sheet/printing
 
 /**
  * @typedef {import('../test/helpers/external.js').Provenance} Provenance
+ * @typedef {import('../src/types.js').RenderItem} RenderItem
  */
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -78,6 +79,44 @@ function percentage(value) {
 }
 
 /**
+ * The items of a render split into the pieces of paper they print, section 24:
+ * a run of items between two cuts, in the order they leave the printer. A
+ * stream without a cut is one run, and a cut at the very end leaves an empty
+ * run, which stitches to nothing and is dropped by the caller.
+ *
+ * @param  {RenderItem[]}            items   The items of a render
+ * @return {Array<RenderItem[]>}             The runs, one per piece of paper
+ */
+function pieces(items) {
+  const runs = [[]];
+
+  for (const item of items || []) {
+    if (item.type === 'cut') {
+      runs.push([]);
+    } else {
+      runs[runs.length - 1].push(item);
+    }
+  }
+
+  return runs;
+}
+
+/**
+ * The images of one figure: the pieces of paper of a render, stacked in the
+ * order they came out, with the gap between them that reads as the cut
+ *
+ * @param  {string[]}   files   Paths of the pieces, relative to the page
+ * @param  {string}     alt     What the render is of
+ * @return {string}             The HTML
+ */
+function images(files, alt) {
+  const list = files.map((file, index) => `<img src="${escape(file)}" alt="${escape(alt)}${
+    files.length > 1 ? `, piece ${index + 1} of ${files.length}` : ''}">`);
+
+  return `<div class="pieces">${list.join('')}</div>`;
+}
+
+/**
  * One reference render as a figure, and its row of the agreement
  * table
  *
@@ -106,7 +145,7 @@ function cell(reference, paper, name) {
     html: `<figure><figcaption>${title}, ${reference.bitmap.width} by ${reference.bitmap.height}${
       reference.note ? `, ${escape(reference.note)}` : ''}${
       reference.flag ? `<br><span class="flag">${escape(reference.flag)}</span>` : ''}</figcaption>
-      <img src="${escape(reference.file)}" alt="${escape(name)} by ${escape(reference.tool)}"></figure>`,
+      ${images(reference.files || [reference.file], `${name} by ${reference.tool}`)}</figure>`,
     row: Object.assign({fixture: name, tool: reference.tool, filtered: Boolean(reference.flag)}, metric),
   };
 }
@@ -127,16 +166,33 @@ async function sheet(library, rows, bytes) {
     const items = new ReceiptPrinterRenderer(options(fixture.provenance)).render(fixture.bytes);
     const paper = stitch(items, {width: fixture.provenance.width});
 
-    const file = path.join(library, `${name}.png`);
-
     fs.mkdirSync(path.join(target, library), {recursive: true});
-    fs.writeFileSync(path.join(target, file), await toPng(paper));
+
+    /* One PNG per piece of paper, section 24: the items are split at every cut
+       and every run stitched on its own, so that a cut is seen as a break
+       between two images. The first piece keeps the name of the fixture, the
+       rest are numbered, and the stitched whole above is what the agreement
+       metric and the caption still speak of */
+
+    const sheets = pieces(items)
+        .map((run) => stitch(run, {width: fixture.provenance.width}))
+        .filter((piece) => piece.height > 0);
+
+    const files = [];
+
+    for (const [index, piece] of (sheets.length ? sheets : [paper]).entries()) {
+      const written = path.join(library, index ? `${name}.${index + 1}.png` : `${name}.png`);
+
+      fs.writeFileSync(path.join(target, written), await toPng(piece));
+      files.push(written);
+    }
 
     const found = await references({
       library,
       name,
       input: path.join(source, library, `${name}.bin`),
       provenance: fixture.provenance,
+      cuts: items.some((item) => item.type === 'cut'),
     }, {
       directory: path.join(target, library),
       prefix: library,
@@ -179,8 +235,9 @@ async function sheet(library, rows, bytes) {
     </div>
   </div>
   <div class="fixture" style="--columns: ${cells.length + 1}">
-    <figure><figcaption>render, ${paper.width} by ${paper.height}</figcaption>
-      <img src="${escape(file)}" alt="${escape(name)}"></figure>
+    <figure><figcaption>render, ${paper.width} by ${paper.height}${
+  files.length > 1 ? `, ${files.length} pieces` : ''}</figcaption>
+      ${images(files, name)}</figure>
     ${cells.map((entry) => entry.html).join('\n    ')}
   </div>
   <details><summary>provenance</summary><table class="provenance">${provenance}</table></details>
@@ -298,6 +355,9 @@ async function main() {
   figcaption { grid-row: 1; align-self: end; color: #888; min-width: 0;
     font-family: var(--font-stack-mono); font-size: 11px; }
   figure > :not(figcaption) { grid-row: 2; min-width: 0; }
+  /* The pieces of paper of one render, stacked with a gap between them, which
+     with the dotted rules of the images reads as a cut, section 24 */
+  .pieces { display: flex; flex-direction: column; gap: 6px; }
   img { display: block; width: 100%; height: auto; background: #fff; padding: 10px;
     border-top: 2px dotted #f2f2f2; border-bottom: 2px dotted #f2f2f2; border-left: none; border-right: none;
     box-sizing: border-box; }

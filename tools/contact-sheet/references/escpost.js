@@ -33,9 +33,10 @@ import {references, root, locate, run, unavailable, outOfScope, fromPng} from '.
     and reports itself unavailable when none of them is there. The exact
     invocation per fixture is on the contact sheet, next to the render.
 
-    ESCPost cuts a stream into sheets and writes one PNG per sheet. The paper of
-    this renderer is one image, so the sheets are stacked in the order of the
-    manifest before they are compared.
+    ESCPost cuts a stream into sheets and writes one PNG per sheet. Those sheets
+    are the pieces of paper the column shows, one image each, section 24; for
+    the agreement metric, which compares one paper with one paper, they are
+    stacked in the order of the manifest into a single bitmap.
 
     ESCPost refuses a stream with a command it does not implement, by design:
     its decision DD-012 says it never guesses where an unknown command ends and
@@ -262,9 +263,10 @@ export async function reference(fixture, target) {
     bitmaps.push(await fromPng(new Uint8Array(fs.readFileSync(path.join(output, sheet)))));
   }
 
-  /* ESCPost writes one sheet per cut; the sheet shows and measures them
-     stacked in order, the way our own render stitches its items, so a receipt
-     with cuts is seen whole and not as its first sheet alone */
+  /* ESCPost writes one sheet per cut. Since section 24 the page shows those
+     sheets as the pieces of paper they are, next to our own render split at
+     its cuts; the stacked bitmap below is what the agreement metric compares,
+     so a receipt with cuts is measured whole and not as its first sheet */
 
   const bitmap = bitmaps.length === 1 ? bitmaps[0] : stack(bitmaps);
   const file = `${fixture.name}.escpost.png`;
@@ -280,7 +282,7 @@ export async function reference(fixture, target) {
     file: path.join(target.prefix, file),
     files: sheets.map((sheet) => path.join(target.prefix, `${fixture.name}.escpost`, sheet)),
     bitmap,
-    note: sheets.length > 1 ? `${sheets.length} sheets, stacked` : '',
+    note: sheets.length > 1 ? `${sheets.length} sheets` : '',
     flag,
     filtered: removed,
     command: `${command}, profile ${profile}`,

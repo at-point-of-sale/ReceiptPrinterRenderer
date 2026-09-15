@@ -33,8 +33,10 @@ import {references, root, locate, run, unavailable, outOfScope, fromPng, crop} f
     and reports itself unavailable when none of them is there.
 
     thermal renders one image for the whole stream, cuts included, so its render
-    needs no stacking. It writes RGB, which the PNG reader of shared.js reduces
-    to ink.
+    needs no stacking, and it has no pieces of paper to show either: where our
+    own render is split at its cuts, section 24, this column stays one image and
+    its caption says that the cuts are whatever thermal draws for them. It
+    writes RGB, which the PNG reader of shared.js reduces to ink.
 
     Its paper is not configurable from outside: Context::default() of
     thermal_parser fixes a 3.2 inch canvas at 203 dots per inch with a margin
@@ -117,7 +119,7 @@ function inkColumns(bitmap) {
 /**
  * What thermal makes of one fixture
  *
- * @param  {object}              fixture   The fixture: library, name, input and provenance
+ * @param  {object}              fixture   The fixture: library, name, input, provenance and whether it cuts
  * @param  {object}              target    Where the render goes: directory and the path in the page
  * @return {Promise<Reference>}            The reference
  */
@@ -179,6 +181,9 @@ export async function reference(fixture, target) {
     note: [
       `cropped to ${columns} of its 50 columns from a ${canvas.width} by ${canvas.height} canvas`,
       cut,
+      /* thermal has no piece boundaries to give: it draws whatever it draws for
+         a cut in the one image, section 24 */
+      fixture.cuts ? 'cuts as the tool draws them' : '',
       errors,
     ].filter(Boolean).join(', '),
     command,

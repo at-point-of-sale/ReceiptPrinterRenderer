@@ -29,6 +29,11 @@ import {unavailable, fromPng, notApplicable} from './shared.js';
     unavailable with the reason when receiptio, puppeteer-core or a browser is
     missing, the way every reference module does.
 
+    It renders the document as one image, cuts included, and has no pieces of
+    paper to give: where our own render is split at its cuts, section 24, this
+    column stays one image whose caption says that the cuts are whatever
+    receiptio draws for them.
+
     One PNG per document and width, not one per fixture: the fixtures of a
     document share its rendering, and a document at 48 columns is captured in up
     to seven of them. Nothing is cached between runs.
@@ -93,7 +98,7 @@ function document(fixture) {
 /**
  * What receiptio makes of the document of one fixture
  *
- * @param  {object}              fixture   The fixture: library, name, input and provenance
+ * @param  {object}              fixture   The fixture: library, name, input, provenance and whether it cuts
  * @param  {object}              target    Where the render goes: directory and the path in the page
  * @return {Promise<Reference>}            The reference
  */
@@ -139,7 +144,8 @@ export async function reference(fixture, target) {
     kind: 'image',
     file: path.join(target.prefix, file),
     bitmap: await fromPng(png),
-    note: 'the document, not the bytes',
+    note: ['the document, not the bytes', fixture.cuts ? 'cuts as the tool draws them' : '']
+        .filter(Boolean).join(', '),
     command,
   };
 }
