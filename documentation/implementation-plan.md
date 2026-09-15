@@ -1487,6 +1487,19 @@ The owner's export sits uncommitted in `generated/fonts.js`: the work and the fi
 
 Effort: one day.
 
+## Section 24: the contact sheet shows the cuts
+
+Added on 2026-09-15 at the owner's request: every column of the contact sheet shows a receipt as one image per piece of paper, so that a cut is seen as a break between images rather than as a dashed line or nothing at all.
+
+- **Our render**: the items of `render()` are split at every cut command, each run of items between two cuts stitched on its own and written as its own PNG, `name.png`, `name.2.png` and so on; a run with no rows, a cut at the very end, writes nothing. The figure holds the pieces stacked with a gap between them; the dotted rules the images already carry read as the torn edges. The stitched whole is still what the agreement metric compares, unchanged.
+- **Our SVG**: rasterized once as today and sliced at the rows of the layout's cut entries into the same pieces, one PNG each; the `.ours.svg` page stays one document.
+- **ESCPost** writes one sheet per cut already: its sheets are shown as the pieces, the stacked bitmap kept for the metric, the "stacked" note dropped.
+- **thermal** and **receiptio** render one image with whatever they draw for a cut, and have no piece boundaries to give; they stay one image, and their captions say "cuts as the tool draws them" when the stream holds a cut.
+
+The card markup gains a wrapper per figure holding the images, so that the grid of captions and images keeps its two rows; the pieces are stacked in the wrapper with a gap of a few pixels. `npm run contact-sheet` rebuilds the sheet; nothing of it is committed.
+
+Effort: a quarter of a day.
+
 ## Notes per section
 
 Filled in during implementation.
