@@ -211,7 +211,8 @@ function table(rows) {
   }
 
   const body = rows.map((row) => `<tr>
-  <td>${escape(row.library)}/${escape(row.fixture)}</td><td>${escape(row.tool)}${row.filtered ? ' <span class="flag" title="rendered after a pre-filter">pre-filtered</span>' : ''}</td>
+  <td>${escape(row.library)}/${escape(row.fixture)}</td><td>${escape(row.tool)}${
+  row.filtered ? ' <span class="flag" title="rendered after a pre-filter">pre-filtered</span>' : ''}</td>
   <td class="number">${row.rows}</td><td class="number">${row.referenceRows}</td>
   <td class="number">${percentage(row.rowDifference)}</td>
   <td class="number">${row.height}</td><td class="number">${row.referenceHeight}</td>
@@ -294,16 +295,19 @@ async function main() {
      display: contents so that its caption and its image are placed separately */
   .fixture { display: grid; grid-template-columns: repeat(var(--columns, 5), 1fr); gap: 4px 24px; align-items: start; }
   figure { display: contents; }
-  figcaption { grid-row: 1; align-self: end; color: #888; font-family: var(--font-stack-mono); font-size: 11px; min-width: 0; }
+  figcaption { grid-row: 1; align-self: end; color: #888; min-width: 0;
+    font-family: var(--font-stack-mono); font-size: 11px; }
   figure > :not(figcaption) { grid-row: 2; min-width: 0; }
   img { display: block; width: 100%; height: auto; background: #fff; border: 1px solid #eee; box-sizing: border-box; }
-  .unavailable { background: #f0f0f0; border-radius: 6px; color: #888; padding: 6px 8px; font-family: var(--font-stack-mono); font-size: 11px; }
+  .unavailable { background: #f0f0f0; border-radius: 6px; color: #888; padding: 6px 8px;
+    font-family: var(--font-stack-mono); font-size: 11px; }
   .unavailable span { color: #aaa; }
   figcaption .flag { color: #b26a00; }
   .title { display: flex; align-items: start; gap: 15px; }
   .title h3 { margin-right: auto; }
   table { border-collapse: collapse; font-size: 0.75rem; }
-  th { text-align: left; padding: 0 12px 2px 0; font-weight: 600; color: #444; vertical-align: top; white-space: nowrap; }
+  th { text-align: left; padding: 0 12px 2px 0; font-weight: 600; color: #444; vertical-align: top;
+    white-space: nowrap; }
   td { padding: 0 0 2px; font-family: var(--font-stack-mono); color: #444; }
   details { margin-top: 12px; color: #888; font-size: 0.75rem; }
   details table { margin-top: 8px; }

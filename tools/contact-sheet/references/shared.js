@@ -37,7 +37,8 @@ import Bitmap from '../../../src/bitmap.js';
  * @property {string}       tool        Name of the tool
  * @property {string}       version     Version or commit of the tool
  * @property {boolean}      available   Whether the tool ran
- * @property {boolean}      [applicable] False when the tool has nothing to say about this fixture at all, and the sheet leaves its cell out
+ * @property {boolean}      [applicable] False when the tool has nothing to say about this fixture at all,
+ *                                       and the sheet leaves its cell out
  * @property {string}       reason      Why it did not run or did not produce a render
  * @property {string}       [file]      Path of what it wrote, relative to the contact sheet
  * @property {string}       [kind]      'image' or 'html'

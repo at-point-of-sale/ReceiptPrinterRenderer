@@ -116,6 +116,12 @@ export function scripts(found) {
  *
  * @return {string}   The CSS
  */
+/* The chevron of the playground's selects, its SVG as a data URI */
+
+const CHEVRON = 'url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHg9IjBweCIgeT0iMH' +
+  'B4IiB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCI+CjxwYXRoIGZpbGw9IiMyMTk2RjMiIGQ9Ik00My' +
+  'AxNy4xTDM5LjkgMTQgMjQgMjkuOSA4LjEgMTQgNSAxNy4xIDI0IDM2eiI+PC9wYXRoPgo8L3N2Zz4=)';
+
 export function styles() {
   return `
   header { position: sticky; z-index: 2; display: flex; box-sizing: border-box;
@@ -124,14 +130,15 @@ export function styles() {
     border: none; border-radius: 6px; height: 32px; margin: 15px 15px 0 0; padding: 0 8px;
     font-family: system-ui; font-weight: 600; font-size: 10pt; background: #fff; }
   header select { appearance: none; padding: 0 28px 0 6px;
-    background-image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHg9IjBweCIgeT0iMHB4IiB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCI+CjxwYXRoIGZpbGw9IiMyMTk2RjMiIGQ9Ik00MyAxNy4xTDM5LjkgMTQgMjQgMjkuOSA4LjEgMTQgNSAxNy4xIDI0IDM2eiI+PC9wYXRoPgo8L3N2Zz4=);
+    background-image: ${CHEVRON};
     background-repeat: no-repeat; background-position: right 6px center; background-size: 16px; }
   header input { width: 6em; }
   header button { cursor: pointer; user-select: none; }
   header button:disabled { cursor: default; opacity: .5; }
   header button[hidden] { display: none; }
   header #connect { background: #bbdefb; color: #1976d2; }
-  header .status { align-self: center; margin: 15px 15px 0 0; font-family: var(--font-stack-mono); font-size: 11px; color: #888; }
+  header .status { align-self: center; margin: 15px 15px 0 0; color: #888;
+    font-family: var(--font-stack-mono); font-size: 11px; }
   header .status.on { color: #1976d2; }
   header .status.error { color: #b71c1c; }
   header .filters { margin-left: auto; display: flex; }

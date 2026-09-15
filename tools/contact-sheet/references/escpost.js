@@ -80,7 +80,11 @@ const FILTERS = [
   {name: 'FS -', bytes: [0x1c, 0x2d], length: 3},
   {name: 'FS !', bytes: [0x1c, 0x21], length: 3},
   {name: 'FS W', bytes: [0x1c, 0x57], length: 3},
-  {name: 'FS ( A', bytes: [0x1c, 0x28, 0x41], length: (bytes, offset) => 5 + bytes[offset + 3] + 256 * bytes[offset + 4]},
+  {
+    name: 'FS ( A',
+    bytes: [0x1c, 0x28, 0x41],
+    length: (bytes, offset) => 5 + bytes[offset + 3] + 256 * bytes[offset + 4],
+  },
 ];
 
 /* How many commands the filter removes from one stream at most */
@@ -89,7 +93,8 @@ const FILTER_LIMIT = 64;
 
 /* The error of ESCPost that names a command and where it is */
 
-const REFUSAL = /unsupported (?:ESC\/POS command (?:ESC|GS) 0x[0-9a-f]{2}|data byte 0x[0-9a-f]{2}) at byte offset (\d+)/;
+const REFUSAL =
+  /unsupported (?:ESC\/POS command (?:ESC|GS) 0x[0-9a-f]{2}|data byte 0x[0-9a-f]{2}) at byte offset (\d+)/;
 
 /**
  * The filter entry of the command at an offset of a stream, or null
