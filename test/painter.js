@@ -1258,6 +1258,255 @@ describe('Painter', function() {
 
       assert.equal(Bitmap.getPixel(bitmap, 3 + 16, 10), 1);
     });
+
+    it('should carry the spacing on the cells of a placeholder as well', function() {
+      const paper = painter();
+
+      paper.collect();
+      paper.spacing(4);
+      paper.text('A');
+      paper.placeholder(2);
+      paper.lineFeed();
+
+      const operations = paper.end().entries[0].operations;
+
+      assert.deepEqual(operations.map((operation) => operation.spacing), [4, 4, 4]);
+      assert.deepEqual(operations.map((operation) => operation.x), [0, 16, 32]);
+      assert.deepEqual(operations.map((operation) => operation.width), [12, 12, 12]);
+    });
+
+    it('should leave the space behind a plain cell white', function() {
+      const paper = painter();
+
+      paper.spacing(4);
+      paper.text('A');
+      paper.lineFeed();
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      for (let y = 0; y < 30; y++) {
+        for (let x = 12; x < 16; x++) {
+          assert.equal(Bitmap.getPixel(bitmap, x, y), 0, `dot ${x}, ${y}`);
+        }
+      }
+    });
+
+    it('should paint the space behind an inverted cell black, the last cell of the line too', function() {
+      const paper = painter();
+
+      paper.spacing(4);
+      paper.style({invert: true});
+      paper.text('A');
+      paper.lineFeed();
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      /* The only cell of the line is its last one, and the four dots behind it
+         are black over the whole height of the cell, which is what the Epson
+         printout of the escpost fixture shows */
+
+      for (let y = 0; y < 24; y++) {
+        for (let x = 12; x < 16; x++) {
+          assert.equal(Bitmap.getPixel(bitmap, x, y), 1, `dot ${x}, ${y}`);
+        }
+      }
+
+      /* The gap of the line spacing below the cell stays white, and so does the
+         paper behind the spacing */
+
+      for (let x = 12; x < 16; x++) {
+        assert.equal(Bitmap.getPixel(bitmap, x, 24), 0, `dot ${x}, 24`);
+      }
+
+      for (let y = 0; y < 30; y++) {
+        assert.equal(Bitmap.getPixel(bitmap, 16, y), 0, `dot 16, ${y}`);
+      }
+    });
+
+    it('should draw the underline through the space behind an underlined cell', function() {
+      const paper = painter();
+
+      paper.spacing(4);
+      paper.style({underline: 2});
+      paper.text('A');
+      paper.lineFeed();
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      /* The two bottom rows of the cell, rows 22 and 23, run on over the four
+         dots of the spacing; the row above them and the row below them do not,
+         and neither does the paper behind the spacing */
+
+      for (let x = 12; x < 16; x++) {
+        assert.equal(Bitmap.getPixel(bitmap, x, 21), 0, `dot ${x}, 21`);
+        assert.equal(Bitmap.getPixel(bitmap, x, 22), 1, `dot ${x}, 22`);
+        assert.equal(Bitmap.getPixel(bitmap, x, 23), 1, `dot ${x}, 23`);
+        assert.equal(Bitmap.getPixel(bitmap, x, 24), 0, `dot ${x}, 24`);
+      }
+
+      assert.equal(Bitmap.getPixel(bitmap, 16, 23), 0);
+    });
+
+    it('should draw the upperline through the space behind an upperlined cell', function() {
+      const paper = painter();
+
+      paper.spacing(4);
+      paper.style({upperline: 1});
+      paper.text('A');
+      paper.lineFeed();
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      for (let x = 12; x < 16; x++) {
+        assert.equal(Bitmap.getPixel(bitmap, x, 0), 1, `dot ${x}, 0`);
+        assert.equal(Bitmap.getPixel(bitmap, x, 1), 0, `dot ${x}, 1`);
+      }
+
+      assert.equal(Bitmap.getPixel(bitmap, 16, 0), 0);
+    });
+
+    it('should draw no line through the space behind an inverted cell', function() {
+      const underlined = painter();
+      const plain = painter();
+
+      const styles = [[underlined, {invert: true, underline: 2, upperline: 1}], [plain, {invert: true}]];
+
+      for (const [paper, style] of styles) {
+        paper.spacing(4);
+        paper.style(style);
+        paper.text('A');
+        paper.lineFeed();
+      }
+
+      assert.deepEqual(underlined.end(), plain.end());
+    });
+
+    it('should draw no line through the space behind a cell turned by ESC V', function() {
+      const underlined = painter();
+      const plain = painter();
+
+      const styles = [[underlined, {rotate: true, underline: 2, upperline: 1}], [plain, {rotate: true}]];
+
+      for (const [paper, style] of styles) {
+        paper.spacing(4);
+        paper.style(style);
+        paper.text('A');
+        paper.lineFeed();
+      }
+
+      assert.deepEqual(underlined.end(), plain.end());
+
+      /* The turned cell is 24 dots wide and 12 tall, and the four dots of the
+         spacing behind it stay white over all of it */
+
+      const bitmap = stitch(plain.end(), {width: WIDTH});
+
+      for (let y = 0; y < 30; y++) {
+        for (let x = 24; x < 28; x++) {
+          assert.equal(Bitmap.getPixel(bitmap, x, y), 0, `dot ${x}, ${y}`);
+        }
+      }
+    });
+
+    it('should paint the space behind a turned cell that is inverted', function() {
+      const paper = painter();
+
+      paper.spacing(4);
+      paper.style({rotate: true, invert: true});
+      paper.text('A');
+      paper.lineFeed();
+
+      const bitmap = stitch(paper.end(), {width: WIDTH});
+
+      for (let y = 0; y < 12; y++) {
+        for (let x = 24; x < 28; x++) {
+          assert.equal(Bitmap.getPixel(bitmap, x, y), 1, `dot ${x}, ${y}`);
+        }
+      }
+
+      for (let x = 24; x < 28; x++) {
+        assert.equal(Bitmap.getPixel(bitmap, x, 12), 0, `dot ${x}, 12`);
+      }
+    });
+
+    it('should cut the spacing of the last cell at the right edge of the print area', function() {
+      const paper = painter({width: 576});
+
+      paper.collect();
+      paper.margins({left: 24, width: 96});
+      paper.align('right');
+      paper.spacing(4);
+      paper.style({invert: true});
+      paper.text('AB');
+      paper.lineFeed();
+
+      /* The area runs from 24 to 120 and a right aligned line ends on its right
+         edge, so the last cell has no room for its four dots and the one in
+         front of it has all four */
+
+      const operations = paper.end().entries[0].operations;
+
+      assert.deepEqual(operations.map((operation) => operation.x), [92, 108]);
+      assert.deepEqual(operations.map((operation) => operation.spacing), [4, 0]);
+    });
+
+    it('should leave the margin beside the print area white under reverse', function() {
+      const paper = painter({width: 576});
+
+      paper.margins({left: 24, width: 96});
+      paper.align('right');
+      paper.spacing(4);
+      paper.style({invert: true});
+      paper.text('AB');
+      paper.lineFeed();
+
+      const bitmap = stitch(paper.end(), {width: 576});
+
+      /* The spacing between the two cells is painted */
+
+      for (let y = 0; y < 24; y++) {
+        for (let x = 104; x < 108; x++) {
+          assert.equal(Bitmap.getPixel(bitmap, x, y), 1, `dot ${x}, ${y}`);
+        }
+      }
+
+      /* And nothing at all is printed to the right of the area */
+
+      for (let y = 0; y < 30; y++) {
+        for (let x = 120; x < 576; x++) {
+          assert.equal(Bitmap.getPixel(bitmap, x, y), 0, `dot ${x}, ${y}`);
+        }
+      }
+    });
+
+    it('should leave the gaps of a tab and of a position white under reverse', function() {
+      const paper = painter({width: 576});
+
+      paper.spacing(4);
+      paper.style({invert: true});
+      paper.text('A');
+      paper.tab();
+      paper.text('B');
+      paper.position(300);
+      paper.text('C');
+      paper.lineFeed();
+
+      const bitmap = stitch(paper.end(), {width: 576});
+
+      /* A stop of the default tabs is eight characters of font A, which is
+         eight cells of twelve dots and eight spacings of four, 128 dots */
+
+      for (const x of [12, 15, 140, 143, 312, 315]) {
+        assert.equal(Bitmap.getPixel(bitmap, x, 10), 1, `dot ${x}, 10`);
+      }
+
+      /* The dots the tab and the position skipped are not spacing and stay
+         white, up to the cell the cursor landed on */
+
+      for (const x of [16, 64, 127, 144, 220, 299, 316, 400]) {
+        assert.equal(Bitmap.getPixel(bitmap, x, 10), 0, `dot ${x}, 10`);
+      }
+    });
   });
 
   describe('position()', function() {

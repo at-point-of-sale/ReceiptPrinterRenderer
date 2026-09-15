@@ -5028,3 +5028,133 @@ Acceptance:
   grew 16 kB: the editor writes its index one key to a line where the generator
   wrote it on one, and the minified builds are the size they were.
 - Version stays 0.3.0, nothing committed.
+
+### Section 22
+
+Choices made where the plan was silent:
+
+- **`spacing` is a field of the text operation and not a box of its own.** The
+  layout already knew the dots, `#place()` was given them and threw them away
+  after moving the cursor; it now writes them onto the operation it places,
+  `cell.fields.spacing`, and the box stays the cell. `#textOperation()` sets the
+  field to `0`, so every text operation carries it whatever made it, and the
+  cells of the human readable text of a barcode, which never go through
+  `#place()`, carry `0`. The field is last in the contract's order, behind
+  `rotation`, because it is not part of the box the fields before it describe.
+  A downloaded multibyte glyph is one cell of two characters and carries two
+  spacings, the dots `placeholder(2)` would have left, which is what `glyph()`
+  already advanced by.
+- **The spacing is painted in the line composition, not in the cell cache.** The
+  cache key is what changes a dot of a cell, and the spacing is not a dot of the
+  cell: two `A`s in one style are still one cached bitmap whatever spacing
+  follows them. `#compose()` blits the cell and then calls `#spacing()`, which
+  fills the dots behind it through `#fill()`, and `#fill()` writes with
+  `Bitmap.setPixel`, so the dots are clipped by the line box exactly the way the
+  blit of a cell is clipped by it, on the paper and in a print area alike.
+- **The rules are the ones of `Font.renderGlyph`, read off the cell.** Inverted
+  wins and covers the whole height of the box; otherwise a turned cell gets
+  nothing, and the underline is the bottom `style.underline` rows of the box and
+  the upperline the top `style.upperline` rows, the thickness in paper dots and
+  not scaled, each clamped to the height of the box. The spacing of the last
+  cell of a line is painted like any other, which is what the Epson printout
+  shows.
+- **A turned cell that is inverted does get its spacing painted.** The plan
+  exempts the turn from the underline only, so the reverse of `GS B` covers the
+  spacing behind a cell of `ESC V` as well. It is the same rectangle, `spacing`
+  dots wide and as tall as the turned box; in the SVG writer it is written in
+  the unturned frame of the cell, where the spacing lies in the five rows
+  *before* the top edge, `y - spacing` and `height + spacing`, because the
+  quarter turn is clockwise. No fixture has one; the rasterized check of
+  `test/svg.js` has a cell of it, and the `ESC SP` rows of both command pages
+  say it, since only the lines are exempt from the turn.
+- **The spacing stops at the right edge of the print area, and the layout is
+  what cuts it.** The dots are dots the printer prints, so a margin of `GS L`
+  and `GS W`, or of Star's `ESC l` and `ESC Q`, ends them the way it ends a
+  cell; a right aligned line ends exactly on that edge, and a centred one can,
+  so without the cut the last cell of such a line would print its spacing into
+  the margin, where a printer prints nothing, and page mode would disagree with
+  line mode because a print area there clips at its own end already. The cut is
+  `min(spacing, right - (x + width))` with `right` the right edge of the print
+  area of the line, and it is made in `#commit()` and not in `#place()`: the
+  alignment offset is only known once the extent of the line is, and in the
+  coordinates of `#place()` a right aligned line still looks as if it had the
+  whole area behind it. The cursor advances by the whole spacing all the same,
+  the way a printer advances it, so nothing of the wrapping or the tab stops
+  moves. Both back-ends draw the field as it stands and so agree dot for dot; a
+  list written by hand that carries more is still clipped by the surface, the
+  line bitmap in the one and the clip path of the line in the other.
+- **The SVG writer draws the spacing as part of the rectangles it already
+  wrote**, not as elements of its own: the ground of an inverted cell becomes
+  `width + spacing` wide and so do the underline and the upperline, so a cell
+  with spacing costs no extra element and the `#rule()` helper draws all three.
+  The glyph clip is untouched, it is still the cell.
+- **A pre-existing lint error was fixed on the way.**
+  `tools/contact-sheet/printing.js` had the JSDoc of `styles()` orphaned above
+  the `CHEVRON` constant since [section 16g](#section-16g)'s line length pass, so
+  `npm run lint` failed with `require-jsdoc` before this section touched
+  anything. The comment was moved back onto the function; nothing else in that
+  file changed.
+
+Fixtures re-rendered, with `node tools/external/rerender.js`, which reads the
+committed `.bin` and writes the `.pbm` and the `.items.json` again:
+
+- **`external/escpost/motion-positioning-and-print-area`**, 384 by 120. Rows 30
+  to 53, columns 29 to 33: white becomes black, 24 by 5 dots, and nothing else
+  in the paper moves. It is the source of the section: the line is an `A` and a
+  reversed space printed with `ESC SP 5`, the reversed space was 12 dots wide
+  and is 17 now, the cell plus its spacing, which is what the Epson printed. The
+  plain `A` in front of it keeps its own five dots of spacing white.
+- **`external/escpost/calibration-job`**, 576 by 1743. Rows 348 to 371, columns
+  29 to 33, the same 24 by 5 dots and the same line: the job embeds the same
+  motion and positioning block. Nothing else of the 1743 rows changed.
+- **No other external fixture changed**, the 82 others of escpost, receiptline,
+  the playground, escpos-php, escpos-net, escpos-tools and python-escpos
+  included. The Star fixtures of receiptline were expected to move and do not:
+  receiptline writes `ESC SP '0'` in the setup of all four of its Star command
+  sets and never anything else, so every Star stream in the suite has no spacing
+  to cover. No stream of the suite combines `ESC SP` with `ESC -`, `ESC _` or
+  `ESC 4`.
+- **Three golden display lists**, `esc-pos/receipt.layout.json`,
+  `esc-pos/hri.layout.json` and `star-prnt/raw/page-mode-directions.layout.json`,
+  regenerated with `node test/tools/make-fixtures.js`. The only change is a
+  `"spacing": 0` behind every `"rotation"`. No `.pbm`, no `.items.json` and no
+  `.svg` golden of the internal fixtures moved, which is the same finding from
+  the other side: nothing the two languages' own fixtures print has spacing
+  under a reverse or an underline.
+
+Tests: 4611 passing before, 4629 after, eighteen new ones.
+`test/layout.js` has the field on the cells of the `spacing` fixture, scaled by
+the width multiplier, on the last cell of a line as well, and absent (`0`) from
+the human readable text of a barcode. `test/painter.js` has the field on the
+cells of `placeholder()`, and the dots: the spacing behind a plain cell white,
+behind an inverted cell black over the height of the cell and not into the gap
+of the line spacing, the two rows of an underline and the row of an upperline
+running through it, an inverted or a turned cell drawing the same items with and
+without a line, a turned and inverted cell painting its spacing, and the gaps of
+`HT` and of `ESC $` staying white between two reversed cells; and, for the cut at
+the print area, a right aligned reversed `AB` in an area of 96 dots at a left
+margin of 24, whose first cell keeps its four dots and whose last carries `0`,
+with the whole of the paper beside the area white. `test/svg.js` has
+the three rectangles in the document and a fourth test that rasterizes a list of
+six cells with spacing with resvg and compares the spacing columns with the dots
+of `rasterize()` of the same list, dot for dot, because no fixture combines the
+two and the agreement of the two back-ends over these dots is the point.
+A fourth resvg case lays that same right aligned line out from a byte stream,
+rather than from a list written out here, because it is the layout that makes the
+cut, and compares the 456 columns beside the area: the two back-ends agree there
+and neither of them prints. `test/rasterize.js` needed nothing: it renders every
+fixture both ways already, the two escpost fixtures among them.
+
+The owner's export was not touched. `generated/fonts.js` in the working tree and
+`data/fonts/iosevka-medium.json` are the owner's; the export was copied aside,
+the committed file checked out, everything of this section built, run and
+re-rendered against it, and the export copied back.
+`md5 generated/fonts.js data/fonts/iosevka-medium.json` is
+`729eb32d3a1695b4fabc5d1f443de2d4` and
+`a3412b17e6bb13cb579bb77e267e2022` before the section and after it.
+
+Acceptance:
+
+- `npm test` 4629 passing, lint clean, against the committed font.
+- `npm run test:types` passes with the new field in the `TextOperation` typedef.
+- Version stays 0.3.0, nothing committed.

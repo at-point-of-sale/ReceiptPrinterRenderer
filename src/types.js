@@ -203,6 +203,7 @@
  * @property {{x: number, y: number}} scale   Size multipliers, 1 to 8
  * @property {TextStyle} style           The style of the cell
  * @property {number} rotation           0, or 90 for the quarter turn of ESC V
+ * @property {number} spacing            Dots of right side character spacing behind the box, scaled, cut to the area
  */
 
 /**

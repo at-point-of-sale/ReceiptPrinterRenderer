@@ -111,17 +111,17 @@ export function scripts(found) {
       .join('\n');
 }
 
-/**
- * The style of the header and of what printing adds to a card
- *
- * @return {string}   The CSS
- */
 /* The chevron of the playground's selects, its SVG as a data URI */
 
 const CHEVRON = 'url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHg9IjBweCIgeT0iMH' +
   'B4IiB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCI+CjxwYXRoIGZpbGw9IiMyMTk2RjMiIGQ9Ik00My' +
   'AxNy4xTDM5LjkgMTQgMjQgMjkuOSA4LjEgMTQgNSAxNy4xIDI0IDM2eiI+PC9wYXRoPgo8L3N2Zz4=)';
 
+/**
+ * The style of the header and of what printing adds to a card
+ *
+ * @return {string}   The CSS
+ */
 export function styles() {
   return `
   header { position: sticky; z-index: 2; display: flex; box-sizing: border-box;

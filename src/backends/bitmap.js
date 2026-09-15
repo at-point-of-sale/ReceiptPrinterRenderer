@@ -294,6 +294,7 @@ class BitmapBackend {
     for (const operation of entry.operations || []) {
       if (operation.type === 'text') {
         Bitmap.blit(this.#cell(operation), bitmap, operation.x, operation.y);
+        this.#spacing(bitmap, operation);
         continue;
       }
 
@@ -314,6 +315,62 @@ class BitmapBackend {
     }
 
     return bitmap;
+  }
+
+  /**
+     * The right side character spacing behind a cell, drawn next to the cell
+     * and not in it: the reverse of the cell covers it and so does the
+     * underline, which is what an Epson prints, while the gaps HT, ESC $ and
+     * ESC \\ skip carry no spacing at all and stay white.
+     *
+     * The cell itself is cached, the spacing is not part of it: two cells of
+     * the same character in the same style are one bitmap whatever spacing
+     * follows them. The rules are the ones of Font.renderGlyph: no line under a
+     * reverse or a turned cell, the thickness in paper dots and not scaled,
+     * along the bottom rows of the box for the underline and the top rows for
+     * the upperline. The dots are clipped by the line the way a cell is,
+     * because they are drawn with setPixel, and the print area of the line,
+     * which is narrower than the paper when a margin is set, was applied by the
+     * layout when it wrote the field.
+     *
+     * @param  {Bitmap}          bitmap      The line box to draw on
+     * @param  {LineOperation}   operation   The text operation
+     */
+  #spacing(bitmap, operation) {
+    const spacing = operation.spacing || 0;
+
+    if (spacing <= 0) {
+      return;
+    }
+
+    const style = operation.style || {};
+    const x = operation.x + operation.width;
+
+    if (style.invert) {
+      this.#fill(bitmap, {x, y: operation.y, width: spacing, height: operation.height});
+      return;
+    }
+
+    if (operation.rotation === 90) {
+      return;
+    }
+
+    const upperline = Math.min(style.upperline || 0, operation.height);
+
+    if (upperline > 0) {
+      this.#fill(bitmap, {x, y: operation.y, width: spacing, height: upperline});
+    }
+
+    const underline = Math.min(style.underline || 0, operation.height);
+
+    if (underline > 0) {
+      this.#fill(bitmap, {
+        x,
+        y: operation.y + operation.height - underline,
+        width: spacing,
+        height: underline,
+      });
+    }
   }
 
   /**

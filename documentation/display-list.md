@@ -63,7 +63,7 @@ Inside a line. `x` is from the left edge of the surface, `y` from the top of the
 
 | Type | Fields | Meaning |
 |---|---|---|
-| `text` | `x`, `y`, `width`, `height`, `codepoint` or `bitmap`, `font`, `cell`, `glyph`, `baseline`, `scale`, `style`, `rotation` | One cell of text. |
+| `text` | `x`, `y`, `width`, `height`, `codepoint` or `bitmap`, `font`, `cell`, `glyph`, `baseline`, `scale`, `style`, `rotation`, `spacing` | One cell of text. |
 | `rect` | `x`, `y`, `width`, `height` | A filled black rectangle: a bar of a barcode, or a run of adjacent black modules of a QR code, a PDF417 symbol or a DataBar. |
 | `image` | `x`, `y`, `width`, `height`, `data` | A 1-bit bitmap in the format of the output contract, one dot on one dot: a strip of a column mode image inside a text line, a raster image, a downloaded or NV image with the scaling of its print command applied, a Star raster mode buffer. `data` is a copy the layout owns, never a view on the stream. |
 
@@ -80,6 +80,7 @@ Inside a line. `x` is from the left edge of the surface, `y` from the top of the
 | `scale` | `{x, y}`, 1 to 8. |
 | `style` | `{bold, underline, upperline, invert}`. `bold` is the glyph a second time one glyph dot to the right, which is `scale.x` paper dots, before the underline and the inversion; `underline` and `upperline` are 0, 1 or 2, the thickness in paper dots of a line along the bottom or the top of the scaled cell over its whole width, never scaled; `invert` is the cell black and the glyph white. A cell that is inverted or turned is not underlined and not upperlined. |
 | `rotation` | 0 or 90: the rotation of `ESC V`, a quarter turn clockwise of the unturned scaled cell about its top left corner, then placed so that the turned box is `x`, `y`, `width`, `height`. |
+| `spacing` | The right side character spacing of `ESC SP` behind the box, in dots, already multiplied by `scale.x` the way a printer scales it, and by the two cells of a downloaded multibyte glyph. It is not part of the box: `x`, `y`, `width` and `height` are the cell, and the next operation starts `width + spacing` further along. The dots are white, except that the reverse of `invert` covers them and, on a cell that is neither inverted nor turned, so do `underline` and `upperline`, each over the same rows of the box it covers there. The gaps `HT`, `ESC $` and `ESC \\` skip are not spacing and carry none: they are the distance between one operation's `x + width + spacing` and the next operation's `x`, and they stay white. A cell that nothing follows carries its spacing all the same, and a printer prints it, up to the right edge of the print area of the line: the layout cuts the field to what fits there, so a right aligned line, which ends on that edge, carries `0` on its last cell. |
 
 No operation is taller than the line box it is on, or reaches below it: the height of a line box is the height of the tallest thing on it. A consumer may rely on that, and the two of this package do, in two different ways: the bitmap back-end composes a line into a bitmap of `height` rows and cuts what does not fit, and the SVG writer clips a line to the width of its surface and to nothing else. A list built by hand that breaks the rule is drawn differently by the two.
 
@@ -128,6 +129,7 @@ The total line of the `receipt` fixture, `test/fixtures/esc-pos/receipt.bin`, is
       scale: {x: 1, y: 1},
       style: {bold: true, underline: 0, upperline: 0, invert: false},
       rotation: 0,
+      spacing: 0,
     },
     // 'otal', then the spaces of the table, then '16.75', the last cell at x 564
   ],

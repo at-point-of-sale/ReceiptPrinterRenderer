@@ -1509,6 +1509,13 @@ class LayoutEngine {
     };
     fields.rotation = rotation;
 
+    /* The right side character spacing of the cell, which place() fills in for
+       a cell that is followed by one: the operations of a barcode's human
+       readable text are never, so the field is always there and defaults to no
+       spacing at all */
+
+    fields.spacing = 0;
+
     return {
       type: 'text',
       width: rotation === 90 ? height : width,
@@ -1947,6 +1954,18 @@ class LayoutEngine {
       this.lineFeed();
     }
 
+    /* The spacing rides along with the cell, because the reverse and the
+       underline of the cell cover it: the box of the operation stays the cell,
+       so nothing of the alignment, the wrapping, the tab stops or the extent of
+       the line moves. commit() cuts it to what fits in the print area, which it
+       can and this cannot, the alignment offset being unknown until the line is
+       whole. The cursor still advances by the whole spacing, the way a printer
+       advances it. */
+
+    if (cell.type === 'text') {
+      cell.fields.spacing = spacing;
+    }
+
     this.#line.items.push({
       type: cell.type,
       fields: cell.fields,
@@ -2025,14 +2044,30 @@ class LayoutEngine {
 
     const offset = left + this.#offset(line.extent, area);
     const baseline = line.height - line.descent;
+    const right = left + area;
 
     const operations = line.items.map((item) => {
       const top = item.ascent === null ? line.height - item.height : baseline - item.ascent;
+      const x = offset + item.x;
 
-      return Object.assign(
-          {type: item.type, x: offset + item.x, y: top, width: item.width, height: item.height},
+      const operation = Object.assign(
+          {type: item.type, x, y: top, width: item.width, height: item.height},
           item.fields,
       );
+
+      /* The character spacing is dots the printer prints, so it stops at the
+         right edge of the print area the way a cell does. A line that ends on
+         that edge, which a right aligned line does and a centred one of an odd
+         width can, has no room behind its last cell and its spacing is cut to
+         what fits. It cannot be cut where the spacing is written, in place():
+         the alignment offset is only known here, once the extent of the line
+         is. The two back-ends draw the field as it stands, so they agree. */
+
+      if (operation.spacing > 0) {
+        operation.spacing = Math.max(0, Math.min(operation.spacing, right - (x + item.width)));
+      }
+
+      return operation;
     });
 
     this.#append({type: 'line', y: 0, height, rotation: this.#rotation(), operations});

@@ -5,7 +5,8 @@ import {fileURLToPath} from 'node:url';
 
 import {assert} from 'chai';
 
-import {EscPosRenderer, StarPrntRenderer} from '../src/receipt-printer-renderer.js';
+import {EscPosRenderer, StarPrntRenderer, rasterize} from '../src/receipt-printer-renderer.js';
+import {stitch} from '../src/formats/stitch.js';
 import toSvgDefault, {toSvg} from '../src/svg.js';
 import {toStoredPng, stored, adler32} from '../src/svg/png.js';
 import {scanlines} from '../src/formats/png.js';
@@ -155,6 +156,7 @@ function cell(fields) {
     scale: {x: 1, y: 1},
     style: {bold: false, underline: 0, upperline: 0, invert: false},
     rotation: 0,
+    spacing: 0,
   }, fields);
 }
 
@@ -828,6 +830,57 @@ describe('toSvg()', function() {
       assert.equal(body(turned)[0].children.filter((child) => child.name === 'rect').length, 0);
     });
 
+    it('runs the ground of an inverted cell over the character spacing behind it', function() {
+      const svg = parse(toSvg(list([
+        cell({x: 12, spacing: 5, style: {bold: false, underline: 0, upperline: 0, invert: true}}),
+      ])));
+
+      const rectangle = body(svg)[0].children[0];
+
+      assert.deepEqual(
+          [rectangle.attributes.x, rectangle.attributes.y,
+            rectangle.attributes.width, rectangle.attributes.height],
+          ['12', '0', '17', '24'],
+          'the twelve dots of the cell and the five of the spacing, over the height of the cell',
+      );
+    });
+
+    it('runs the underline and the upperline over the character spacing behind the cell', function() {
+      const svg = parse(toSvg(list([
+        cell({x: 12, spacing: 5, style: {bold: false, underline: 2, upperline: 1, invert: false}}),
+      ])));
+
+      const rectangles = body(svg)[0].children.filter((child) => child.name === 'rect');
+
+      assert.deepEqual(rectangles.map((rectangle) => [
+        rectangle.attributes.x, rectangle.attributes.y,
+        rectangle.attributes.width, rectangle.attributes.height,
+      ]), [['12', '0', '17', '1'], ['12', '22', '17', '2']]);
+    });
+
+    it('runs the ground of a turned cell over the spacing, which lies before its unturned top', function() {
+      const svg = parse(toSvg(list([
+        cell({x: 100, y: 3, spacing: 5, rotation: 90, width: 24, height: 12,
+          style: {bold: false, underline: 2, upperline: 2, invert: true}}),
+      ])));
+
+      const group = body(svg)[0].children[0];
+      const rectangle = group.children[0];
+
+      /* The pieces of a turned cell are written in its unturned frame, where
+         the spacing is the five rows above the cell, and the quarter turn
+         clockwise puts them to the right of the box on the line */
+
+      assert.deepEqual(
+          [rectangle.attributes.x, rectangle.attributes.y,
+            rectangle.attributes.width, rectangle.attributes.height],
+          ['0', '-5', '12', '29'],
+      );
+
+      assert.deepEqual(apply(group.attributes.transform, [0, -5]), [100 + 24 + 5, 3]);
+      assert.deepEqual(apply(group.attributes.transform, [12, -5]), [100 + 24 + 5, 3 + 12]);
+    });
+
     it('turns a cell of ESC V a quarter turn clockwise about its top left corner', function() {
       const svg = parse(toSvg(list([
         cell({x: 100, y: 3, rotation: 90, width: 24, height: 12,
@@ -1317,6 +1370,81 @@ describe('toSvg()', function() {
         );
       }).timeout(60 * 1000);
     }
+
+    /* No fixture combines the character spacing with a reverse or an underline,
+       the escpost ones that do are external and are not rendered here, so the
+       agreement of the two back-ends over the spacing is checked on a list
+       written out here. The spacing carries no glyph, so the two agree dot for
+       dot rather than to the bound of the outlines */
+
+    it('the character spacing behind a cell agrees with its paper, dot for dot', async function() {
+      const spacing = 5;
+
+      const cells = [
+        cell({x: 0, spacing, style: {bold: false, underline: 0, upperline: 0, invert: true}}),
+        cell({x: 40, spacing, style: {bold: false, underline: 2, upperline: 1, invert: false}}),
+        cell({x: 80, spacing, style: {bold: false, underline: 2, upperline: 1, invert: true}}),
+        cell({x: 120, spacing, rotation: 90, width: 24, height: 12,
+          style: {bold: false, underline: 2, upperline: 0, invert: true}}),
+        cell({x: 160, spacing, rotation: 90, width: 24, height: 12,
+          style: {bold: false, underline: 2, upperline: 0, invert: false}}),
+        cell({x: 200, spacing, style: {bold: false, underline: 0, upperline: 0, invert: false}}),
+      ];
+
+      const layout = list(cells, {height: 30}, {height: 30});
+      const paper = stitch(rasterize(layout), {width: layout.width});
+      const png = new Resvg(toSvg(layout), {fitTo: {mode: 'original'}}).render().asPng();
+      const drawn = await fromPng(new Uint8Array(png));
+
+      let differing = 0;
+
+      for (const one of cells) {
+        for (let x = one.x + one.width; x < one.x + one.width + spacing; x++) {
+          for (let y = 0; y < layout.height; y++) {
+            if (Bitmap.getPixel(paper, x, y) !== Bitmap.getPixel(drawn, x, y)) {
+              differing++;
+            }
+          }
+        }
+      }
+
+      assert.equal(differing, 0, 'the writer and the bitmap back-end paint the spacing the same');
+    }).timeout(60 * 1000);
+
+    /* And the spacing stops at the right edge of the print area, which a right
+       aligned reversed line runs up against. The list is laid out from a stream
+       rather than written out here, because it is the layout that cuts the
+       spacing to what fits, see the notes of section 22 */
+
+    it('the spacing of a right aligned reversed line stops at the print area', async function() {
+      /* ESC @, GS L 24, GS W 96, ESC a 2, ESC SP 4, GS B 1, 'AB', LF */
+
+      const bytes = new Uint8Array([
+        0x1b, 0x40, 0x1d, 0x4c, 24, 0, 0x1d, 0x57, 96, 0,
+        0x1b, 0x61, 2, 0x1b, 0x20, 4, 0x1d, 0x42, 1, 0x41, 0x42, 0x0a,
+      ]);
+
+      const layout = new EscPosRenderer({width: WIDTH, codepageMapping: 'epson'}).layout(bytes);
+      const paper = stitch(rasterize(layout), {width: layout.width});
+      const png = new Resvg(toSvg(layout), {fitTo: {mode: 'original'}}).render().asPng();
+      const drawn = await fromPng(new Uint8Array(png));
+
+      let differing = 0;
+      let inked = 0;
+
+      for (let y = 0; y < layout.height; y++) {
+        for (let x = 24 + 96; x < layout.width; x++) {
+          if (Bitmap.getPixel(paper, x, y) !== Bitmap.getPixel(drawn, x, y)) {
+            differing++;
+          }
+
+          inked += Bitmap.getPixel(paper, x, y) + Bitmap.getPixel(drawn, x, y);
+        }
+      }
+
+      assert.equal(differing, 0, 'the two back-ends agree beside the area');
+      assert.equal(inked, 0, 'and neither of them prints there');
+    }).timeout(60 * 1000);
 
     after(function() {
       if (measured.length === 0) {

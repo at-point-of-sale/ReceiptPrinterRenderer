@@ -345,6 +345,7 @@ describe('the display list', function() {
         scale: {x: 1, y: 1},
         style: {bold: false, underline: 0, upperline: 0, invert: false},
         rotation: 0,
+        spacing: 0,
       });
 
       /* The cells follow each other by the width of the cell, and the gap of
@@ -675,6 +676,45 @@ describe('the display list', function() {
 
       assert.deepEqual(list.entries[2].operations.slice(0, 4).map((operation) => operation.x), [0, 32, 64, 96]);
       assert.equal(list.entries[2].operations[0].width, 24);
+    });
+
+    it('should carry the spacing on the cell, scaled by the width multiplier', function() {
+      const list = layout('esc-pos/raw', 'spacing');
+
+      /* The first line has no spacing at all, the second four dots behind a
+         cell of one width and the third eight behind a cell of two, and the
+         box of every one of them is the cell */
+
+      assert.deepEqual(
+          list.entries[0].operations.map((operation) => operation.spacing),
+          new Array(list.entries[0].operations.length).fill(0),
+      );
+
+      assert.deepEqual(list.entries[1].operations.slice(0, 4).map((operation) => operation.spacing), [4, 4, 4, 4]);
+      assert.deepEqual(list.entries[1].operations.slice(0, 4).map((operation) => operation.width), [12, 12, 12, 12]);
+
+      assert.deepEqual(list.entries[2].operations.slice(0, 4).map((operation) => operation.spacing), [8, 8, 8, 8]);
+      assert.deepEqual(list.entries[2].operations.slice(0, 4).map((operation) => operation.width), [24, 24, 24, 24]);
+
+      /* The last cell of a line carries its spacing too, there being room for
+         it on this line. That the spacing is not part of the extent the
+         alignment is counted on is checked in test/painter.js, and so is the
+         cut at the right edge of the print area */
+
+      const last = list.entries[1].operations[list.entries[1].operations.length - 1];
+
+      assert.equal(last.spacing, 4);
+    });
+
+    it('should carry no spacing on the human readable text of a barcode', function() {
+      const list = layout('esc-pos', 'hri');
+
+      const cells = list.entries
+          .flatMap((entry) => entry.operations || [])
+          .filter((operation) => operation.type === 'text');
+
+      assert.isAbove(cells.length, 0);
+      assert.deepEqual([...new Set(cells.map((operation) => operation.spacing))], [0]);
     });
   });
 

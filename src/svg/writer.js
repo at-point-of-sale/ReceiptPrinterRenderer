@@ -45,6 +45,11 @@ import {toStoredPng} from './png.js';
     style while no line is drawn on it, and a glyph whose path is the empty
     string, the space, the carriage return and the no break space, draws nothing
     while its cell is still inverted and underlined.
+
+    And one that is a field but is not a box: the right side character spacing
+    of a cell lies behind its box, and the reverse ground and the lines of the
+    cell run over it, the way the bitmap back-end paints them. It is drawn as it
+    stands, the layout having cut it to the print area of its line already.
 */
 
 /* The version of the display list this writer draws */
@@ -386,7 +391,8 @@ class SvgWriter {
 
   /**
      * One cell of text: the inversion, the glyph, the bold overstrike and the
-     * lines above and below it.
+     * lines above and below it, each of them over the character spacing behind
+     * the cell as well.
      *
      * A cell that is not turned is written in the coordinates of the line, one
      * element per piece and no group at all; a cell that is turned by ESC V is
@@ -404,6 +410,13 @@ class SvgWriter {
     const width = operation.cell.width * scale.x;
     const height = operation.cell.height * scale.y;
 
+    /* The right side character spacing behind the cell, which the reverse and
+       the underline of the cell cover, the way the bitmap back-end paints it.
+       The pieces of a turned cell are drawn in its unturned frame, where the
+       spacing lies before the top edge, because the turn is clockwise */
+
+    const spacing = operation.spacing || 0;
+
     /* The pieces of a turned cell are placed in its unturned frame and the
        group turns the lot, the quarter turn clockwise about the top left corner
        of the unturned cell that the format describes */
@@ -419,10 +432,9 @@ class SvgWriter {
        line differs from the paper; see the notes of the section */
 
     if (style.invert) {
-      parts.push(
-          `<rect x="${num(x)}" y="${num(y)}" width="${num(width)}" height="${num(height)}"` +
-          ' shape-rendering="crispEdges"/>',
-      );
+      parts.push(rotated ?
+        this.#rule(x, y - spacing, width, height + spacing) :
+        this.#rule(x, y, width + spacing, height));
     }
 
     const paint = style.invert ? ` fill="${escape(this.#options.background || '#fff')}"` : '';
@@ -434,13 +446,13 @@ class SvgWriter {
 
     if (!style.invert && !rotated) {
       if (style.upperline > 0) {
-        parts.push(this.#rule(x, y, width, Math.min(style.upperline, height)));
+        parts.push(this.#rule(x, y, width + spacing, Math.min(style.upperline, height)));
       }
 
       if (style.underline > 0) {
         const thickness = Math.min(style.underline, height);
 
-        parts.push(this.#rule(x, y + height - thickness, width, thickness));
+        parts.push(this.#rule(x, y + height - thickness, width + spacing, thickness));
       }
     }
 
@@ -460,13 +472,15 @@ class SvgWriter {
   }
 
   /**
-     * An underline or an upperline, a rectangle across the whole cell of the
-     * thickness of the style, which is in paper dots and does not scale
+     * A black rectangle of a cell: the ground of an inverted one, or an
+     * underline or an upperline across the whole cell and the character spacing
+     * behind it, of the thickness of the style, which is in paper dots and does
+     * not scale
      *
      * @param  {number}   x        Left edge of the cell
-     * @param  {number}   y        Top of the line
-     * @param  {number}   width    Width of the scaled cell
-     * @param  {number}   height   Thickness in dots
+     * @param  {number}   y        Top of the rectangle
+     * @param  {number}   width    Width of the scaled cell, with the spacing
+     * @param  {number}   height   Height in dots
      * @return {string}            The element
      */
   #rule(x, y, width, height) {
