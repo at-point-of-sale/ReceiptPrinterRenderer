@@ -576,12 +576,15 @@ describe('Outlines', function() {
        They are centred in their cell by their ink, on a dot centre, which is
        the rule of the face of ReceiptPrinterFontEditor.
 
-       They are the only glyphs of the file that font B refits. The phase of
-       the centring is half a dot past the middle dot of the cell, which is 6.5
-       dots in the 12 dot cell and 4.5 in the 8 dot one, and 4.5 is not two
-       thirds of 6.5: a centred mark is therefore in a different place in the
-       two cells by design, and `glyphsB` is where it says so. Every other
-       glyph of font B is still font A at two thirds exactly.
+       Font B refits every one of them. The phase of the centring is half a
+       dot past the middle dot of the cell, which is 6.5 dots in the 12 dot
+       cell and 4.5 in the 8 dot one, and 4.5 is not two thirds of 6.5: a
+       centred mark is therefore in a different place in the two cells by
+       design, and `glyphsB` is where it says so. They were the only glyphs
+       font B refitted while both faces squeezed a tall glyph by itself; the
+       font of today squeezes in font B and not in font A, so the tall glyphs
+       are refitted as well, and how many depends on the project the font was
+       exported from. The test asks for the marks and reports the rest.
     */
 
     const MARKS = [
@@ -592,8 +595,18 @@ describe('Outlines', function() {
       0xe47, 0xe48, 0xe49, 0xe4a, 0xe4b, 0xe4c, 0xe4d, 0xe4e,
     ];
 
-    it('should be the glyphs font B refits, and no others', function() {
-      assert.deepEqual(Object.keys(outlines.glyphsB).map(Number).sort((a, b) => a - b), MARKS);
+    it('should be among the glyphs font B refits, all of which are glyphs of the font', function() {
+      const refitted = Object.keys(outlines.glyphsB).map(Number);
+
+      for (const codepoint of MARKS) {
+        assert.include(refitted, codepoint, `${name(codepoint)} is not refitted`);
+      }
+
+      for (const codepoint of refitted) {
+        assert.property(outlines.glyphs, String(codepoint), `${name(codepoint)} is refitted but has no outline`);
+      }
+
+      console.log(`      font B refits ${refitted.length} glyphs, ${MARKS.length} of them the combining marks`);
     });
 
     it('should draw the ink of every one of them inside the cell', function() {
