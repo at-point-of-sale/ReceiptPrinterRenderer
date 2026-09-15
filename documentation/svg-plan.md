@@ -1,7 +1,7 @@
 # SVG output: analysis and plan
 
 Date: 2026-09-13
-Companion to [design.md](design.md) and [implementation-plan.md](implementation-plan.md). This document replaces Sections 17, 18 and 19 of the implementation plan: the display list stays, the SVG writer becomes an output of this package instead of a package of its own, and the PDF writer is dropped from the plan. Section 20, receipt markup, is not touched by it. The working method, the code style and the rules at the top of the implementation plan apply to every section below.
+Companion to [design.md](design.md). This document replaced the display list, SVG and PDF sections of the implementation plan of the time, which has since been removed from the repository: the display list stays, the SVG writer becomes an output of this package instead of a package of its own, and the PDF writer is dropped from the plan. Section 20, receipt markup, is not touched by it. The working method, the code style and the rules at the top of the implementation plan apply to every section below.
 
 The first part is the analysis: what the painter does today, where it can be cut, what has changed since Section 17 was written, and what it means to keep the SVG writer inside the package. The second part is the plan, in four sections that run through the usual orchestration.
 
