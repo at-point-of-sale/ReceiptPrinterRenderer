@@ -1451,6 +1451,19 @@ The owner's own export already sits in the working tree as `generated/fonts.js`,
 
 Effort: half a day.
 
+## Section 22: the character spacing under reverse and underline
+
+Added on 2026-09-15 from an Epson printout of the escpost fixture `motion-positioning-and-print-area`: the reversed space behind an `A` printed with `ESC SP 5` is 17 dots wide on the paper and 12 here. **White/black reverse covers the right-side character spacing of `ESC SP`, and so does the underline**; neither covers the gaps skipped by `HT`, `ESC $` and `ESC \`. The reverse rule is the printout's; the underline rule is the Epson reference of `ESC -`, quoted by the ESC-POS-.NET command list, "when underline mode is turned on, the right side character spacing is underlined". Star's `ESC -` and `ESC 4` are not verified: the rule is applied to both languages, since Star's ESC/POS mode follows Epson here, and the Star half joins the deviations list as unverified.
+
+- The text operation of the display list carries `spacing`, the dots of right-side character spacing behind the cell, scaled by the width multiplier as the layout scales it; the box of the operation stays the cell, so alignment, wrapping, the tab stops and the line extent do not move. `placeholder()` cells carry it like text cells.
+- The bitmap back-end paints the spacing black when the cell is inverted, and draws the underline through it when the cell is underlined and not inverted or rotated, the rule of the cell itself; an upperline of Star's `ESC _` runs through it the same way. The spacing of the last cell on a line is painted too, which is what the printout shows. The SVG writer draws the same: the inverted spacing as part of the cell's rectangle and the underline as part of the cell's line, so that the rasterized check of `test/svg.js` still agrees.
+- `documentation/display-list.md` documents the field; the `GS B`, `ESC -` and `ESC SP` rows of `commands-esc-pos.md` and the `ESC 4`, `ESC -`, `ESC _` and `ESC SP` rows of `commands-star-prnt.md` say what the spacing does under each; the Star deviations line gains the unverified half.
+- Tests in `test/layout.js` and `test/painter.js` for the field and for the dots: an inverted cell with spacing paints the spacing, an underlined one underlines it, a plain one leaves it white, a rotated or inverted one gets no underline through it, and `HT`/`ESC $` gaps stay white under reverse. The fixtures that change are re-rendered and reviewed by eye: `motion-positioning-and-print-area` and `calibration-job` of escpost, and whichever Star fixtures of receiptline combine spacing with underline.
+
+The owner's export sits uncommitted in `generated/fonts.js`: the section is built and its fixtures are re-rendered against the committed font, the export copied aside and restored byte for byte.
+
+Effort: half a day.
+
 ## Notes per section
 
 Filled in during implementation.
