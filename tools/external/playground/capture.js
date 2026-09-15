@@ -9,7 +9,7 @@ import {decodePng} from '../../contact-sheet/references/shared.js';
 import {write, report, today} from '../shared.js';
 
 /*
-    ReceiptPrinterPlayground, https://github.com/NielsLeenheer/ReceiptPrinterPlayground
+    ReceiptPrinterPlayground, https://github.com/at-point-of-sale/ReceiptPrinterPlayground
 
     The sample scripts behind the playground's "New..." menu are what a person
     prints when they try a printer for the first time, so they are the streams
@@ -41,7 +41,7 @@ import {write, report, today} from '../shared.js';
 
 const LIBRARY = 'playground';
 
-const SOURCE = 'https://github.com/NielsLeenheer/ReceiptPrinterPlayground';
+const SOURCE = 'https://github.com/at-point-of-sale/ReceiptPrinterPlayground';
 
 /* Where the sample scripts live inside the checkout */
 

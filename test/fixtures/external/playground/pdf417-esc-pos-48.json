@@ -1,5 +1,5 @@
 {
-  "source": "https://github.com/NielsLeenheer/ReceiptPrinterPlayground",
+  "source": "https://github.com/at-point-of-sale/ReceiptPrinterPlayground",
   "file": "src/assets/templates/pdf417.js",
   "commit": "1c27d83484b1ca1d318bc70e4e7ce9a2efc762ed",
   "licence": "MIT",

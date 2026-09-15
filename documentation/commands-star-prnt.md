@@ -2,7 +2,7 @@
 
 <br>
 
-Render the ESC/POS and StarPRNT commands created by [ReceiptPrinterEncoder](https://github.com/NielsLeenheer/ReceiptPrinterEncoder) to 1-bit images, for receipt printers that only support graphics.
+Render the ESC/POS and StarPRNT commands created by [ReceiptPrinterEncoder](https://github.com/at-point-of-sale/ReceiptPrinterEncoder) to 1-bit images, for receipt printers that only support graphics.
 
 - [About ReceiptPrinterRenderer](../README.md)
 - [Usage and installation](usage.md)
@@ -271,7 +271,7 @@ A symbol never holds fewer than three data codewords: one codeword of data and t
 
 ### Raster mode
 
-Raster mode is a second way to print, and the only one a TSP100 has: rows of dots go into an image buffer and an execute command prints the buffer, feeds and cuts. The renderer reads it, so a job that a driver built from the items of this renderer with [StarGraphicsPrinterEncoder](https://github.com/NielsLeenheer/StarGraphicsPrinterEncoder) renders back to the receipt it was made from. That protocol is a language of the unified renderer of its own, `star-graphics`, which is the name a driver resolves from the profile of a TSP100; it is this command set with the raster mode in it, so `StarPrntRenderer` renders it, see [Usage](usage.md#the-language-of-the-commands).
+Raster mode is a second way to print, and the only one a TSP100 has: rows of dots go into an image buffer and an execute command prints the buffer, feeds and cuts. The renderer reads it, so a job that a driver built from the items of this renderer with [StarGraphicsPrinterEncoder](https://github.com/at-point-of-sale/StarGraphicsPrinterEncoder) renders back to the receipt it was made from. That protocol is a language of the unified renderer of its own, `star-graphics`, which is the name a driver resolves from the profile of a TSP100; it is this command set with the raster mode in it, so `StarPrntRenderer` renders it, see [Usage](usage.md#the-language-of-the-commands).
 
 Two rules of the mode shape the parsing. A setting is ignored while data is in the image buffer, so a job stores the mode of a cut before it sends the rows of that segment. And an execute command on an empty buffer does nothing at all, so a job that has to cut without rows sends one blank row first.
 

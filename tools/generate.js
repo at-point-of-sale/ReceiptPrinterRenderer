@@ -12,7 +12,7 @@ import {stringify} from 'javascript-stringify';
 
     generated/fonts.js and generated/outlines.js are not written here and never
     by this tool: they are the Renderer export of
-    ReceiptPrinterFontEditor (https://github.com/NielsLeenheer/ReceiptPrinterFontEditor),
+    ReceiptPrinterFontEditor (https://github.com/at-point-of-sale/ReceiptPrinterFontEditor),
     which is where the bitmap font of this renderer is made. Their formats are
     documented in the Bitmap font section of documentation/design.md.
 

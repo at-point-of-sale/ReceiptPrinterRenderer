@@ -2,7 +2,7 @@
 
 The bitmap fonts of the renderer, `generated/fonts.js` and `generated/outlines.js`,
 are made in
-[ReceiptPrinterFontEditor](https://github.com/NielsLeenheer/ReceiptPrinterFontEditor)
+[ReceiptPrinterFontEditor](https://github.com/at-point-of-sale/ReceiptPrinterFontEditor)
 and exported from it. Nothing in this repository makes or remakes them, and no
 outline font is needed to build it.
 
