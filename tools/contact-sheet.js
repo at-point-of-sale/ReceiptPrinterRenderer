@@ -104,9 +104,10 @@ function cell(reference, paper, name) {
 
   return {
     html: `<figure><figcaption>${title}, ${reference.bitmap.width} by ${reference.bitmap.height}${
-      reference.note ? `, ${escape(reference.note)}` : ''}</figcaption>
+      reference.note ? `, ${escape(reference.note)}` : ''}${
+      reference.flag ? `<br><span class="flag">${escape(reference.flag)}</span>` : ''}</figcaption>
       <img src="${escape(reference.file)}" alt="${escape(name)} by ${escape(reference.tool)}"></figure>`,
-    row: Object.assign({fixture: name, tool: reference.tool}, metric),
+    row: Object.assign({fixture: name, tool: reference.tool, filtered: Boolean(reference.flag)}, metric),
   };
 }
 
@@ -210,7 +211,7 @@ function table(rows) {
   }
 
   const body = rows.map((row) => `<tr>
-  <td>${escape(row.library)}/${escape(row.fixture)}</td><td>${escape(row.tool)}</td>
+  <td>${escape(row.library)}/${escape(row.fixture)}</td><td>${escape(row.tool)}${row.filtered ? ' <span class="flag" title="rendered after a pre-filter">pre-filtered</span>' : ''}</td>
   <td class="number">${row.rows}</td><td class="number">${row.referenceRows}</td>
   <td class="number">${percentage(row.rowDifference)}</td>
   <td class="number">${row.height}</td><td class="number">${row.referenceHeight}</td>
@@ -298,6 +299,7 @@ async function main() {
   img { display: block; width: 100%; height: auto; background: #fff; border: 1px solid #eee; box-sizing: border-box; }
   .unavailable { background: #f0f0f0; border-radius: 6px; color: #888; padding: 6px 8px; font-family: var(--font-stack-mono); font-size: 11px; }
   .unavailable span { color: #aaa; }
+  figcaption .flag { color: #b26a00; }
   .title { display: flex; align-items: start; gap: 15px; }
   .title h3 { margin-right: auto; }
   table { border-collapse: collapse; font-size: 0.75rem; }
@@ -313,6 +315,7 @@ async function main() {
   .agreement thead th:first-child { border-radius: 8px 0 0 0; }
   .agreement thead th:last-child { border-radius: 0 8px 0 0; }
   .number { text-align: right; }
+  .agreement .flag { color: #b26a00; font-size: 0.7rem; }
   ul { color: #444; }
 ${styles()}
 </style>

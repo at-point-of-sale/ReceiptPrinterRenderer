@@ -43,6 +43,8 @@ import Bitmap from '../../../src/bitmap.js';
  * @property {string}       [kind]      'image' or 'html'
  * @property {Bitmap}       [bitmap]    The render, for the agreement metric
  * @property {string}       [command]   The exact invocation, for the page
+ * @property {string}       [flag]      A warning the sheet shows with the render, such as a pre-filter that was needed
+ * @property {string[]}     [filtered]  The commands a pre-filter removed before the tool would render
  */
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
