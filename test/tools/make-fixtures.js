@@ -488,9 +488,16 @@ const receipts = {
       .barcode('123456789012', 'upca', {height: 60, width: 2, text: true})
       .align('left'),
 
+  /* UPC-E takes the eleven or twelve digits of the UPC-A it stands for, and
+     nothing shorter: an Epson TM-T70 refuses the six, seven and eight digit
+     forms, see section 23 of the implementation plan. `012345000065` is the
+     UPC-A of the symbol `01234565` this fixture used to send in its short form,
+     so the bars of the fixture are the same ones they always were and only the
+     text below them changed */
+
   'upce': (encoder) => encoder
       .align('center')
-      .barcode('01234565', 'upce', {height: 60, width: 2, text: true})
+      .barcode('012345000065', 'upce', {height: 60, width: 2, text: true})
       .align('left'),
 
   'code39': (encoder) => encoder

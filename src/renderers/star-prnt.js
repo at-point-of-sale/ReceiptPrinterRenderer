@@ -604,6 +604,7 @@ class StarPrntRenderer {
   #pulse;
   #text;
   #qrcode;
+  #refusing;
   #pdf417;
   #leftColumn;
   #rightColumn;
@@ -749,6 +750,7 @@ class StarPrntRenderer {
   #initialize() {
     this.#painter.reset();
     this.#text = [];
+    this.#refusing = false;
     this.#characterSet = noCharacterSet();
     this.#leftColumn = 0;
     this.#rightColumn = 0;
@@ -1026,6 +1028,12 @@ class StarPrntRenderer {
   /**
      * ESC b n1 n2 n3 n4 d.. RS, a barcode.
      *
+     * Data the symbology refuses draws no bars: the bytes are fed back into the
+     * parser at the position the command stood, the way `GS k` of ESC/POS does
+     * it, which is the Epson reference applied to StarPRNT and unverified on
+     * Star hardware. Refused data that is itself a refused barcode goes to the
+     * text path instead of being parsed again, which bounds the recursion.
+     *
      * @param  {Uint8Array}   args       The arguments of the command
      * @param  {Uint8Array}   consumed   The whole command, for the unknown item
      */
@@ -1037,16 +1045,35 @@ class StarPrntRenderer {
       return;
     }
 
+    const data = args.subarray(4, args.length - 1);
+
     /* n2 is 1 for a barcode without text and 2 for one with the text below it,
        which a Star printer draws in font A */
 
-    this.#painter.barcode({
+    const drawn = this.#painter.barcode({
       symbology,
-      data: this.#ascii(args.subarray(4, args.length - 1)),
+      data: this.#ascii(data),
       moduleWidth: MODULE_WIDTHS[args[2]] || MODULE_WIDTHS[1],
       height: args[3] || 1,
       hri: {position: args[1] === 2 || args[1] === 0x32 ? 'below' : 'none', font: 'A'},
     });
+
+    if (drawn) {
+      return;
+    }
+
+    if (this.#refusing) {
+      this.#painter.text(this.#decode(data));
+      return;
+    }
+
+    this.#refusing = true;
+
+    try {
+      this.#parse(data);
+    } finally {
+      this.#refusing = false;
+    }
   }
 
   /**
@@ -1972,8 +1999,8 @@ class StarPrntRenderer {
   /**
      * Decode bytes with the current codepage
      *
-     * @param  {number[]}   bytes   The bytes to decode
-     * @return {string}             The text
+     * @param  {number[]|Uint8Array}   bytes   The bytes to decode
+     * @return {string}                        The text
      */
   #decode(bytes) {
     let result = '';

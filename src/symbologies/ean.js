@@ -62,8 +62,10 @@ export function checkDigit(digits) {
 }
 
 /**
- * Complete a number with its check digit, or validate the one it has. Printer
- * firmware computes a missing check digit and refuses a wrong one.
+ * Complete a number with its check digit, or keep the one it has. Printer
+ * firmware computes a missing check digit; a check digit that is sent is
+ * never verified, it is encoded and printed as it came, which is what an Epson
+ * TM-T70 does with a wrong one on paper.
  *
  * @param  {string}        digits   The digits of the barcode
  * @param  {number}        length   Length of the number including the check digit
@@ -74,7 +76,7 @@ export function withCheckDigit(digits, length) {
     return digits + checkDigit(digits);
   }
 
-  if (isDigits(digits, length) && Number(digits[length - 1]) === checkDigit(digits.slice(0, -1))) {
+  if (isDigits(digits, length)) {
     return digits;
   }
 
@@ -142,7 +144,19 @@ export function ean8(data) {
 
   pattern += GUARD;
 
-  return {bars: toBars(pattern), text: digits};
+  /* The four digits on each side are printed under the modules that encode
+     them, not as one run: the left guard is three modules and a digit is
+     seven, so the left four sit on modules 3 to 31 and the right four, behind
+     the five module centre guard, on 36 to 64 */
+
+  return {
+    bars: toBars(pattern),
+    text: digits,
+    groups: [
+      {start: 3, end: 31, text: digits.slice(0, 4)},
+      {start: 36, end: 64, text: digits.slice(4)},
+    ],
+  };
 }
 
 export {LEFT_ODD, LEFT_EVEN, GUARD};

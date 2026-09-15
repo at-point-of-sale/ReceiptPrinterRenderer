@@ -61,7 +61,7 @@ export function codabar(data) {
     pattern += (index ? '0' : '') + ENCODINGS[value[index]];
   }
 
-  return {bars: toBars(pattern), text: value};
+  return {bars: toBars(pattern), text: value, spread: true};
 }
 
 export default codabar;

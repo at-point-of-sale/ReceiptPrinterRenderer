@@ -857,11 +857,40 @@ describe('StarPrntRenderer', function() {
       assert.equal(with_.height, 68);
     });
 
-    it('should print nothing for data that is not valid for the symbology', function() {
-      const items = render(stream(ESC, '@', 'A', ESC, 'b', [3, 2, 2, 40], '400638133393X', [RS], 'B', LF));
+    it('should print the data as text for data that is not valid for the symbology', function() {
+      /* The Epson reading of a refused barcode, applied to StarPRNT and
+         unverified on Star hardware, see section 23 of the implementation plan:
+         a UPC-E of six digits draws no bars and prints its digits */
+
+      const refused = render(stream(ESC, '@', ESC, 'b', [0, 2, 2, 40], '123456', [RS], LF));
+      const printed = render(stream(ESC, '@', '123456', LF));
+
+      assert.equal(dots(stitch(refused, {width: WIDTH})), dots(stitch(printed, {width: WIDTH})));
+    });
+
+    it('should print the refused data in the style that is current', function() {
+      const bold = render(stream(ESC, '@', ESC, 'E', ESC, 'b', [0, 2, 2, 40], '123456', [RS], LF));
+      const plain = render(stream(ESC, '@', ESC, 'b', [0, 2, 2, 40], '123456', [RS], LF));
+
+      assert.notEqual(dots(stitch(bold, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+      assert.equal(
+          dots(stitch(bold, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', ESC, 'E', '123456', LF)), {width: WIDTH})),
+      );
+    });
+
+    it('should run the refused data through the parser, so a line feed in it ends the line', function() {
+      const refused = render(stream(ESC, '@', ESC, 'b', [0, 2, 2, 40], 'AB', [LF], 'CD', [RS]));
+      const printed = render(stream(ESC, '@', 'AB', LF, 'CD'));
+
+      assert.equal(dots(stitch(refused, {width: WIDTH})), dots(stitch(printed, {width: WIDTH})));
+    });
+
+    it('should print no text at all for a barcode the symbology accepts', function() {
+      const items = render(stream(ESC, '@', ESC, 'b', [3, 1, 2, 40], '4006381333931', [RS]));
 
       assert.equal(items.length, 1);
-      assert.equal(items[0].height, 32);
+      assert.equal(items[0].height, 40);
     });
 
     it('should print nothing for a barcode that is wider than the print area', function() {
@@ -877,13 +906,18 @@ describe('StarPrntRenderer', function() {
       assert.equal(items[0].height, 32);
     });
 
-    it('should print nothing for a byte the code sets of Code 128 cannot carry', function() {
-      const code128 = render(stream(ESC, '@', 'A', ESC, 'b', [6, 1, 2, 40], 'AB', [0xe9], [RS], 'B', LF));
-      const gs1 = render(stream(ESC, '@', 'A', ESC, 'b', [9, 1, 2, 40], '01', [0xe9], [RS], 'B', LF));
-      const known = render(stream(ESC, '@', 'AB', LF));
+    it('should print the data as text for a byte the code sets of Code 128 cannot carry', function() {
+      const code128 = render(stream(ESC, '@', ESC, 'b', [6, 1, 2, 40], 'AB', [0xe9], [RS], LF));
+      const gs1 = render(stream(ESC, '@', ESC, 'b', [9, 1, 2, 40], '01', [0xe9], [RS], LF));
 
-      assert.equal(dots(stitch(code128, {width: WIDTH})), dots(stitch(known, {width: WIDTH})));
-      assert.equal(dots(stitch(gs1, {width: WIDTH})), dots(stitch(known, {width: WIDTH})));
+      assert.equal(
+          dots(stitch(code128, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'AB', [0xe9], LF)), {width: WIDTH})),
+      );
+      assert.equal(
+          dots(stitch(gs1, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', '01', [0xe9], LF)), {width: WIDTH})),
+      );
     });
 
     /* The GS1 DataBar family, symbologies 10 to 13. The heights of the

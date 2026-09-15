@@ -458,9 +458,10 @@ class Painter {
      * above it, below it, or not at all
      *
      * @param  {BarcodeRequest}   request   The barcode to draw
+     * @return {boolean}                    False when the data is not valid for the symbology
      */
   barcode(request) {
-    this.#engine.barcode(request);
+    return this.#engine.barcode(request);
   }
 
   /**

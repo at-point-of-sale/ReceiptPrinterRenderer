@@ -382,7 +382,7 @@ export function code128(data) {
 
   const result = encode(items);
 
-  return result === null ? null : {bars: bars(result.codes), text: result.text};
+  return result === null ? null : {bars: bars(result.codes), text: result.text, spread: true};
 }
 
 /**
@@ -400,7 +400,7 @@ export function code128auto(data) {
 
   const result = encode(select(value));
 
-  return result === null ? null : {bars: bars(result.codes), text: value};
+  return result === null ? null : {bars: bars(result.codes), text: value, spread: true};
 }
 
 /**

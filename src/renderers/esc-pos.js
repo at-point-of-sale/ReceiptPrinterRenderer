@@ -595,6 +595,7 @@ class EscPosRenderer {
   #text;
   #graphics;
   #barcode;
+  #refusing;
   #qrcode;
   #pdf417;
 
@@ -738,6 +739,7 @@ class EscPosRenderer {
 
     this.#graphics = [];
     this.#barcode = Object.assign({}, BARCODE_DEFAULTS);
+    this.#refusing = false;
     this.#qrcode = Object.assign({data: new Uint8Array(0)}, QRCODE_DEFAULTS);
     this.#pdf417 = Object.assign({data: new Uint8Array(0)}, PDF417_DEFAULTS);
     this.#selectCodepage(null);
@@ -1802,6 +1804,20 @@ class EscPosRenderer {
      * GS k m .., a barcode. Function A, for m below 65, ends its data at a NUL
      * byte, function B carries the length of the data.
      *
+     * Data the symbology refuses draws no bars. The reference says that a
+     * `GS k` whose data is out of range is aborted and its data processed as
+     * normal data, so the bytes are fed back into the parser at the position
+     * the command stood: printable bytes become text in the codepage and the
+     * style that are current, and a control byte does what it does anywhere
+     * else, so a line feed inside refused data ends the line. An Epson TM-T70
+     * does exactly that with the UPC-E rows of six to eight digits of the
+     * escpos-php `barcode` fixture. Both functions behave the same way.
+     *
+     * Refused data that is itself a refused barcode goes to the text path
+     * instead of being parsed again, which bounds the recursion at one level.
+     * No stream in the wild nests them, and the alternative is a stream that
+     * costs one stack frame per three bytes.
+     *
      * @param  {Uint8Array}   args       The arguments of the command
      * @param  {Uint8Array}   consumed   The whole command, for the unknown item
      */
@@ -1815,13 +1831,30 @@ class EscPosRenderer {
 
     const data = args[0] >= 65 ? args.subarray(2, 2 + args[1]) : args.subarray(1, args.length - 1);
 
-    this.#painter.barcode({
+    const drawn = this.#painter.barcode({
       symbology,
       data: this.#ascii(data),
       moduleWidth: this.#barcode.moduleWidth,
       height: this.#barcode.height,
       hri: {position: this.#barcode.position, font: this.#barcode.font},
     });
+
+    if (drawn) {
+      return;
+    }
+
+    if (this.#refusing) {
+      this.#painter.text(this.#decode(data));
+      return;
+    }
+
+    this.#refusing = true;
+
+    try {
+      this.#parse(data);
+    } finally {
+      this.#refusing = false;
+    }
   }
 
   /**
@@ -2407,8 +2440,8 @@ class EscPosRenderer {
      * character set over it: that set replaces twelve code points of the
      * codepage and nothing else, which is what the printer does with it.
      *
-     * @param  {number[]}   bytes   The bytes to decode
-     * @return {string}             The text
+     * @param  {number[]|Uint8Array}   bytes   The bytes to decode
+     * @return {string}                        The text
      */
   #decode(bytes) {
     let result = '';

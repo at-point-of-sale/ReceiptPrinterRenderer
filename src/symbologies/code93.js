@@ -65,6 +65,10 @@ function checksum(values, maxWeight) {
  * ASCII variant is not implemented: printer firmware encodes the 43 characters
  * of the basic set and refuses the rest.
  *
+ * The human readable text is the data as it was sent, lower case included,
+ * between the boxes of the start and the stop character and spread over the
+ * bars, the way a TM-T70 prints it.
+ *
  * @param  {string}         data   The value of the barcode
  * @return {Barcode|null}          The barcode, or null when the data is not valid
  */
@@ -98,7 +102,15 @@ export function code93(data) {
 
   pattern += GUARD + '1';
 
-  return {bars: toBars(pattern), text: value};
+  /* The start and the stop character are printed as a small hollow box on each
+     side of the text, which is what an Epson TM-T70 draws where the font has no
+     glyph for them.
+
+     The text is the data as it was sent, lower case included: the TM-T70 drew
+     `012abcd` under the bars of that row of the escpos-php `barcode` fixture
+     while the bars encode the upper case of the basic set */
+
+  return {bars: toBars(pattern), text: String(data), spread: true, boxed: true};
 }
 
 export default code93;

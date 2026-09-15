@@ -1472,8 +1472,8 @@ Added on 2026-09-15 from an Epson printout of the escpos-php fixture `barcode`, 
 
 - **UPC-A and EAN-8 print their digits in two groups**, six and six, four and four, each group centred under the digits it encodes: for UPC-A the left digits are modules 3 to 45 and the right digits 50 to 92, for EAN-8 modules 3 to 31 and 36 to 64, with the centre guard between. On the paper that is `012345 678905` and `0123 4565`. EAN-13 stays one centred run, the printout shows it that way. The number system digit and the check digit of a UPC-A are inside the groups, not beside the bars.
 - **UPC-E prints its six body digits** and nothing else, centred: `123450`, not `01234505`.
-- **Code 39, Codabar, Code 93 and Code 128 spread their characters across the bars**: the width of the bars divided into as many equal slots as there are characters, each character centred in its slot. When the text is wider than the bars it is centred as today. ITF and the GS1 family were not on the printout and keep today's layout, with a note.
-- **Code 39 wraps the text in asterisks**, `* A B C   0 1 2 *` for the data `ABC 012`; data that already carries them, `*TEXT*`, is not wrapped twice. **Code 93 wraps it in the small boxes** of its start and stop characters, drawn as a hollow rectangle a third of the cell high and half of it wide, centred in a cell of its own, since the font has no `U+25A1`; a box is a rectangle operation of the block, not a glyph. Code 128 prints the data without the code set selector and the function characters, as today, and the digits of set C as today.
+- **Code 39, Codabar, Code 93 and Code 128 spread their characters across the bars**: the width of the bars divided into one interval more than there are characters, each character centred on one of the interior division points, so that a margin of a whole interval is left at each end of the run. Measured pixel by pixel, the character to character pitch is `barsWidth / (count + 1)` in all five spread rows of the printout: Codabar of eight characters 0.1113 of the bar width against `1/9 = 0.1111`, Code 39 of nine 0.0997 against 0.1000, Code 93 of nine 0.1033 against 0.1000, Code 39 of six 0.1452 against `1/7 = 0.1429` and Code 128 of eleven 0.0837 against `1/12 = 0.0833`. When the text is wider than the bars it is centred as today. ITF and the GS1 family were not on the printout and keep today's layout, with a note.
+- **Code 39 wraps the text in asterisks**, `* A B C   0 1 2 *` for the data `ABC 012`; data that already carries them, `*TEXT*`, is not wrapped twice. **Code 93 wraps it in the small boxes** of its start and stop characters, drawn as a hollow rectangle a third of the cell high and half of it wide, in the middle of a cell of its own horizontally and on the middle of a digit vertically, the middle between the top of the cell and the baseline row of the font, since the font has no `U+25A1`; on the paper the box spans about 20 to 70 percent of the digit height, which centring in the whole cell would miss by three dots, the cell having room for a descender the box does not use. A box is a rectangle operation of the block, not a glyph. Code 93 also prints its text as it was sent, `012abcd` and not `012ABCD`, while its bars encode the upper case of the basic set. Code 128 prints the data without the code set selector and the function characters, as today, and the digits of set C as today.
 
 **What the firmware checks.** The printout shows a UPC-A, an EAN-13 and an EAN-8 with a wrong check digit printed as given, and a UPC-E of twelve digits with a wrong check digit printed as well: **a check digit that is sent is never verified**, it is encoded and printed as it came. Today EAN-8 and UPC-E refuse a wrong one while UPC-A and EAN-13 do not; all four print what they are given now.
 
@@ -5180,4 +5180,195 @@ Acceptance:
 
 - `npm test` 4629 passing, lint clean, against the committed font.
 - `npm run test:types` passes with the new field in the `TextOperation` typedef.
+- Version stays 0.3.0, nothing committed.
+
+### Section 23
+
+The printout the rules were read from came out of an **Epson TM-T70**, and the
+model is named wherever a rule of this section is stated: the deviations lines
+of both command pages, the `GS k` and `ESC b` rows that cite the printout, and
+the code comments of the symbologies and the layout.
+
+What was done:
+
+- `src/symbologies/pattern.js` gained a `BarcodeGroup` typedef and three
+  optional fields on `Barcode`: `groups`, module ranges with the text of each
+  group, `spread`, and `boxed`. A symbology says what its text does; the layout
+  draws it. Nothing else of the contract changed.
+- `src/symbologies/ean.js`: `withCheckDigit()` keeps a check digit that is there
+  instead of verifying it, which is EAN-13, EAN-8 and, through `ean13()`,
+  UPC-A. `ean8()` returns its two groups, modules 3 to 31 and 36 to 64.
+- `src/symbologies/upc.js`: `upca()` returns its two groups, modules 3 to 45 and
+  50 to 92. `upce()` was rewritten: eleven or twelve digits only, number system
+  `0` only, the check digit taken as given for twelve and computed for eleven
+  and never verified, the UPC-A compressed when it has a zero suppressed form
+  and otherwise reduced to the five manufacturer digits plus the last product
+  digit, and the text is the six body digits.
+- `src/symbologies/code39.js`: data wrapped in asterisks is encoded once instead
+  of refused, the text is always wrapped in them, and `spread` is set.
+  `code93.js` sets `spread` and `boxed`, `codabar.js` and both Code 128
+  generators set `spread`. `gs1128()` and the DataBar family set neither.
+- `src/layout.js`: `barcode()` builds the cells of the text, asks the new
+  `#hriPositions()` where they go, and returns a boolean. `#textCells()` takes
+  the cells with their own `x` and draws a `null` cell as the rectangles of
+  `hriBox()`, a new module level helper. `HriCell` is a new typedef.
+- `src/painter.js` passes the boolean through. Both parsers print the data bytes
+  of a refused barcode through the text path, decoded with the current codepage,
+  in the current style: `#drawBarcode()` of `esc-pos.js` for both `GS k` forms
+  and of `star-prnt.js` for `ESC b`.
+
+The integer rules chosen, both documented in the code and on both command pages:
+
+- **A group** starts at `floor(start * moduleWidth + (range - group) / 2)`,
+  where `range` is `(end - start) * moduleWidth` and `group` is the number of
+  characters times the cell width. Rounded down, as the plan gives it.
+- **A spread cell** starts at `round(index * pitch + (pitch - cellWidth) / 2)`,
+  where `pitch` is `barsWidth / count` and is not rounded itself, so the slots
+  never drift: only the left edge of a cell is an integer. Rounded to the
+  nearest dot, which is the plan's `round(...)`.
+- **The box of a Code 93** is `cell.width >> 1` wide and `floor(cell.height / 3)`
+  high, at `x + ((cell.width - width) >> 1)` and `y + ((cell.height - height) >> 1)`:
+  six by eight dots in the middle of the 12 by 24 cell of font A, four by five in
+  the 9 by 17 cell of font B, drawn as four rectangles of one dot.
+
+Choices the plan did not spell out:
+
+- **Only number system `0`.** The plan says `0` and the TM-T70 printout only ever
+  showed `0`, so `1` is refused, where the reference gives it a zero suppressed
+  form too. Both deviations lists say so, as one printer's firmware.
+- **`*TEXT*` draws bars.** The plan's wrapping rule presumes a Code 39 whose data
+  already carries the asterisks draws a symbol, and the TM-T70 printout shows one,
+  while the renderer refused such data before. Code 39 now strips a leading and
+  a trailing asterisk and encodes what is between them; an asterisk anywhere
+  else is still refused, and `*`, `**` and `*A*B*` are refused.
+- **The "GS1 family" that keeps the centred run is GS1-128 and the four GS1
+  DataBar variants.** `code128` and `code128-auto` spread, because the printout
+  shows Code 128 spread and those two are the same symbology reached by another
+  selector; `gs1-128` does not, because the plan puts the GS1 family beside ITF.
+  No fixture of `gs1-128` changed, which is the check on that reading.
+- **The groups and the spread fall back to the centred run together.** The plan
+  gives the fallback for the spread alone; the same guard, the cells being wider
+  than the bars, is applied to the groups, because two groups that do not fit
+  would overlap each other and hang off the left edge of the bars. A UPC-A at a
+  module width of one is such a case.
+- **A refused barcode prints as text; a barcode that is too wide does not.**
+  `barcode()` returns `false` only when the symbology refuses the data, and
+  `true` when the bars are wider than the print area: the reference says the
+  data of a `GS k` is processed as normal data when it is *out of range*, the
+  TM-T70 printout confirms that for the UPC-E rows alone, and the paper of a symbol that does not
+  fit stays empty as it always did.
+- **The block grows rather than clipping.** A group or a spread cell whose left
+  edge is negative, or whose right edge is past the bars, widens the block on
+  that side, so `x` of an operation is never negative, which the display list
+  requires. The centred case keeps the old arithmetic to the dot, which is why
+  `ean13`, `itf`, `gs1-128`, `hri` and `receipt` did not change.
+- **Code 93 prints its text as it was sent, lower case included.** The TM-T70
+  printout shows `012abcd` under the bars of that row while the bars encode
+  `012ABCD`, the basic 43 character set having no lower case. The encoding is
+  unchanged and only `text` changed, from the folded value to `String(data)`, so
+  the bars of every Code 93 are the ones they were.
+- **Refused data goes back through the parser, not straight to the text path.**
+  "Processed as normal data" means the bytes reach the interpreter, so a line
+  feed inside refused data ends the line and a command inside it is obeyed;
+  `#drawBarcode()` calls `#parse()` on the data bytes, which both parsers allow
+  because `#parse()` holds nothing but its own index. A refused barcode *inside*
+  refused data goes to the plain text path instead, a `#refusing` flag, which
+  bounds the recursion at one level: nothing in the wild nests them and the
+  alternative is a stream that costs a stack frame per three bytes. No fixture
+  changed by this, the refused data in all of them being plain digits and
+  letters.
+
+Test counts: `npm test` was **4629 passing** before the section and is **4659
+passing** after it, lint clean, `npm run test:types` clean. The UPC-E describe
+block of `test/symbologies.js` was rewritten around the new forms, a describe of
+the human readable text was added there together with the Code 93 row that
+prints its lower case, the placement rules are covered in `test/painter.js` off
+the display list, the spread by its pitch and by the equal margins at both ends
+and the box by the rows it covers, and both parser test files cover a refused
+barcode printing its data, a valid one printing none, and refused data whose
+line feed ends the line and whose command is obeyed.
+
+Every fixture that was re-rendered, and why:
+
+| Fixture | Why |
+|---|---|
+| `esc-pos/upca`, `star-prnt/upca` | The twelve digits are now two groups of six under modules 3–45 and 50–92. |
+| `esc-pos/ean8`, `star-prnt/ean8` | The eight digits are now two groups of four under modules 3–31 and 36–64. |
+| `esc-pos/upce`, `star-prnt/upce` | The fixture sent `01234565`, eight digits, which the section refuses. The data of the fixture is now `042100005264`, the twelve digit UPC-A of the same symbol, so the `.bin` changed too; the text below the bars is the six body digits `425261`. |
+| `esc-pos/code39`, `star-prnt/code39` | `*ABC-123*`, spread across the bars. |
+| `esc-pos/codabar`, `star-prnt/codabar` | `A12345A` spread across the bars. |
+| `esc-pos/code93`, `star-prnt/code93` | `TEST93` spread between the two boxes of the start and stop character. |
+| `esc-pos/code128`, `star-prnt/code128` | `ABC-123` and, on ESC/POS, `00031234` of code set C, spread across the bars. |
+| `esc-pos/code128-auto`, `star-prnt/code128-auto` | `ABC12345678` spread across the bars. |
+| `esc-pos/code128.svg` | The golden SVG of the same fixture, the cells moved with the paper. |
+| `esc-pos/raw/page-mode-coupon` | The Code 39 `CORNER20` inside the page is now `* C O R N E R 2 0 *`. |
+| `external/escpos-php/barcode` | Reviewed row by row against the photographs, below. |
+| `external/escpos-php/demo` | The Code 39 `9876` of the demo receipt is now `* 9 8 7 6 *`. |
+| `external/python-escpos/barcodes` | The Code 39 `123456` is now `* 1 2 3 4 5 6 *`. `software_barcode` did not change: python-escpos draws that one itself and sends it as an image. |
+| `external/playground/barcodes-esc-pos-32`, `-48`, `barcodes-star-prnt-32`, `-48` | Two rows each. `GS1 Databar Expanded: 0130012345678906` is not an element string, the symbology refuses it, and the data is now printed as text where nothing was printed before. `Invalid checksum:` is an EAN-13 `1234567890124`, which now draws its bars with the check digit it was given. These four fixtures ask for no human readable text, so nothing else in them moved. |
+
+The escpos-php `barcode` fixture, row by row against the TM-T70 photographs
+(`592485c9`, `7b7844b3`, `cd5ed07e`, `6b82fd85`, `8ee846a2`), 6081 rows before
+and 6285 after:
+
+| Row of the fixture | Before | After | The paper |
+|---|---|---|---|
+| UPC-A, 12 char, `012345678901` (wrong check) | nothing | bars, `012345 678901` | matches |
+| UPC-A, 11 char, `01234567890` | bars, `012345678905` centred | bars, `012345 678905` | matches |
+| UPC-E, 6 char, `123456` | bars, `01234565` | no bars, `123456` as text | matches |
+| UPC-E, 7 char, `0123456` | bars, `01234565` | no bars, `0123456` as text | matches |
+| UPC-E, 8 char, `01234567` | nothing | no bars, `01234567` as text | matches |
+| UPC-E, 11 char, `01234567890` | nothing | bars, `123450` | matches |
+| UPC-E, 12 char, `012345678901` | nothing | bars, `123450` | matches |
+| EAN-13, 12 char, `012345678901` | unchanged | `0123456789012` centred | matches |
+| EAN-13, 13 char, `0123456789012` | unchanged | `0123456789012` centred | matches |
+| EAN-8, 7 char, `0123456` | `01234565` centred | `0123 4565` | matches |
+| EAN-8, 8 char, `01234567` (wrong check) | nothing | bars, `0123 4567` | matches |
+| Code 39, `ABC 012` | `ABC 012` centred | `* A B C   0 1 2 *` | matches |
+| Code 39, `$%+-./` | `$%+-./` centred | `* $ % + - . / *` | matches |
+| Code 39, `*TEXT*` | nothing | bars, `* T E X T *` | matches |
+| ITF, `0123456789` | unchanged | `0123456789` centred | not on the printout, kept |
+| Codabar, `A012345A` | centred | `A 0 1 2 3 4 5 A` | matches |
+| Codabar, `A012$+-./:A` | centred | `A 0 1 2 $ + - . / : A` | matches |
+| Code 93, `012abcd` | `012ABCD` centred | `□ 0 1 2 a b c d □` | matches |
+| Code 128, `{A012ABCD` | `012ABCD` centred | `0 1 2 A B C D` | matches |
+| Code 128, `{B012ABCDabcd` | centred | `0 1 2 A B C D a b c d` | matches |
+| Code 128, `{C` chr(21) chr(32) chr(43) | `213243` centred | `2 1 3 2 4 3` | matches |
+
+Every spread row above leaves a margin of a whole interval at each end of the
+run, which is the corrected rule; the first round of this section divided the
+bars into as many slots as there are characters and left half a slot at each
+end, which the photographs do not show.
+
+No fixture changed for a reason this section does not name. The before and after
+crops are in `build/section-23/`.
+
+Open observations of the printout, not acted on here, for a later section with a
+scan rather than photographs:
+
+- **The HRI cells of the TM-T70 measure about 13 dots, not 12.** The thirteen
+  digit run of an EAN-13 spans about 165 dots on the paper where this renderer
+  draws 156, 13 cells of the 12 dot font A. Whether the firmware uses a font of
+  its own for the human readable text, or spaces the cells of font A, the
+  photographs cannot say. It is pre-existing, it is not part of this section,
+  and it moves every centred run and every group by a dot or two.
+- **The wide element of its Code 39 looks like 2.5 to 1, not 3 to 1.** At the
+  module width of the printout the wide bars measure about two and a half narrow
+  elements where this renderer draws three, which would make every Code 39 on
+  the paper narrower than the one here. Also pre-existing, also unsettled: the
+  angle of the photographs is enough to move a ratio that far, so it wants a
+  scan before anything changes.
+
+The owner's export was not touched. `generated/fonts.js` in the working tree and
+`data/fonts/iosevka-medium.json` are the owner's; the export was copied aside,
+the committed file checked out, everything of this section built, run and
+re-rendered against it, and the export copied back.
+`md5 generated/fonts.js data/fonts/iosevka-medium.json` is
+`729eb32d3a1695b4fabc5d1f443de2d4` and
+`a3412b17e6bb13cb579bb77e267e2022` before the section and after it.
+
+Acceptance:
+
+- `npm test` 4659 passing, lint clean, against the committed font.
+- `npm run test:types` passes.
 - Version stays 0.3.0, nothing committed.

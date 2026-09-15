@@ -48,6 +48,15 @@ import {pdf417 as encodePdf417} from './symbologies/pdf417.js';
  */
 
 /**
+ * One cell of the human readable text of a barcode, at the place the layout
+ * gave it
+ *
+ * @typedef {object} HriCell
+ * @property {string|null} value   The character, or null for a box of Code 93
+ * @property {number} x            Left edge of the cell, in dots
+ */
+
+/**
  * A barcode, as a parser asks the engine to lay it out
  *
  * @typedef {object} BarcodeRequest
@@ -227,6 +236,46 @@ const HRI_GAP = 4;
  */
 function cellBaseline(height) {
   return Math.floor(height * BASELINE);
+}
+
+/**
+ * The rectangles of the hollow box a Code 93 prints for its start and its stop
+ * character: half a cell wide, a third of a cell high, drawn in lines of one
+ * dot. The font has no glyph for it, so it is rectangles of the block, the way
+ * the bars are.
+ *
+ * It sits in the middle of the cell horizontally and on the middle of a digit
+ * vertically, which is the middle between the top of the cell and the baseline
+ * row of the font: rows 5 to 12 of the 24 row cell of font A, where centring in
+ * the whole cell would put it three dots lower than the paper of an Epson
+ * TM-T70 shows it, the cell having room for a descender the box does not use.
+ *
+ * @param  {number}     x      Left edge of the cell, in the block
+ * @param  {number}     y      Top of the cell, in the block
+ * @param  {CellSize}   size   Size of a cell of the font
+ * @return {object[]}          The rectangles: four of them, or two when the cell is too small for the sides
+ */
+function hriBox(x, y, size) {
+  const width = Math.max(1, size.width >> 1);
+  const height = Math.max(1, Math.floor(size.height / 3));
+
+  const left = x + ((size.width - width) >> 1);
+  const top = y + Math.round((cellBaseline(size.height) - height) / 2);
+
+  const rectangles = [{type: 'rect', x: left, y: top, width, height: 1}];
+
+  if (height > 1) {
+    rectangles.push({type: 'rect', x: left, y: top + height - 1, width, height: 1});
+  }
+
+  if (height > 2 && width > 1) {
+    rectangles.push(
+        {type: 'rect', x: left, y: top + 1, width: 1, height: height - 2},
+        {type: 'rect', x: left + width - 1, y: top + 1, width: 1, height: height - 2},
+    );
+  }
+
+  return rectangles;
 }
 
 /**
@@ -1170,18 +1219,28 @@ class LayoutEngine {
      *
      * Data that is not valid for the symbology prints nothing, which is what
      * printer firmware does: the barcode is skipped and the paper does not
-     * advance. Bars that are wider than the print area are skipped for the same
-     * reason, an Epson prints nothing at all rather than a barcode no reader
-     * can read. The human readable text is not part of that rule, it is centred
-     * under the bars and clipped when it is wider than the paper.
+     * advance. The caller is told so, because the reference of `GS k` says that
+     * a command whose data is out of range is aborted and its data processed as
+     * normal data, which is what an Epson TM-T70 does with the UPC-E rows of
+     * six to eight digits. Bars that are wider than the print area are skipped
+     * as well, an Epson prints nothing at all rather than a barcode no reader
+     * can read, but the data was valid there and is not printed as text.
+     *
+     * The human readable text is one run of cells centred under the bars,
+     * except where a symbology asks for something else: UPC-A and EAN-8 carry
+     * groups, which are centred under the modules that encode them, and the
+     * four symbologies that carry `spread` put one character in each of as many
+     * equal slots as there are characters. It is clipped when it is wider than
+     * the paper.
      *
      * @param  {BarcodeRequest}   request   The barcode to draw
+     * @return {boolean}                    False when the data is not valid for the symbology
      */
   barcode(request) {
     const code = encodeBarcode(request.symbology, request.data);
 
     if (code === null || code.bars.length === 0) {
-      return;
+      return false;
     }
 
     const moduleWidth = Math.max(1, request.moduleWidth || 1);
@@ -1204,7 +1263,7 @@ class LayoutEngine {
     const barsWidth = code.bars.reduce((total, width) => total + width, 0) * moduleWidth;
 
     if (barsWidth > this.#surface()) {
-      return;
+      return true;
     }
 
     const position = (request.hri && request.hri.position) || 'none';
@@ -1229,42 +1288,127 @@ class LayoutEngine {
 
     if (position === 'none') {
       this.#blockLine(barsWidth, height, bars);
-      return;
+      return true;
     }
 
     const requested = (request.hri && request.hri.font) || 'A';
     const name = this.#cells[requested] ? requested : 'A';
     const size = this.#cells[name];
 
-    const characters = Array.from(code.text);
-    const textWidth = Math.max(0, characters.length * size.width);
+    /* One entry per cell of the text: a character, or null for a box of the
+       start and the stop character of Code 93, which the font has no glyph
+       for. A box is as wide as a cell and counts as a character everywhere */
+
+    const cells = code.boxed ?
+      [null, ...Array.from(code.text), null] :
+      Array.from(code.text);
+
+    const textWidth = Math.max(0, cells.length * size.width);
+
+    /* Where every cell goes, measured from the left edge of the bars, which is
+       negative for a cell that hangs off that edge. Null is one centred run */
+
+    const placed = textWidth <= barsWidth ?
+      this.#hriPositions(code, cells, size.width, barsWidth, moduleWidth) :
+      null;
+
+    let left = 0;
+    let right = barsWidth;
+
+    if (placed) {
+      for (const cell of placed) {
+        left = Math.min(left, cell.x);
+        right = Math.max(right, cell.x + size.width);
+      }
+    }
 
     const above = position === 'above' || position === 'both';
     const below = position === 'below' || position === 'both';
 
     const margin = size.height + HRI_GAP;
 
-    const width = Math.max(barsWidth, textWidth);
+    const width = placed ? right - left : Math.max(barsWidth, textWidth);
+    const barsOffset = placed ? -left : (width - barsWidth) >> 1;
     const blockHeight = height + (above ? margin : 0) + (below ? margin : 0);
+
+    const text = placed ?
+      placed.map((cell) => ({value: cell.value, x: cell.x - left})) :
+      cells.map((value, index) => ({value, x: ((width - textWidth) >> 1) + index * size.width}));
 
     const operations = [];
 
     if (above) {
-      operations.push(...this.#textCells(characters, name, (width - textWidth) >> 1, 0));
+      operations.push(...this.#textCells(text, name, 0));
     }
 
     for (const bar of bars) {
       operations.push(Object.assign({}, bar, {
-        x: bar.x + ((width - barsWidth) >> 1),
+        x: bar.x + barsOffset,
         y: above ? margin : 0,
       }));
     }
 
     if (below) {
-      operations.push(...this.#textCells(characters, name, (width - textWidth) >> 1, blockHeight - size.height));
+      operations.push(...this.#textCells(text, name, blockHeight - size.height));
     }
 
     this.#blockLine(width, blockHeight, operations);
+
+    return true;
+  }
+
+  /**
+     * Where the cells of the human readable text of a barcode go, measured in
+     * dots from the left edge of the bars, or null when the text is one run
+     * centred under them, which is what every symbology without `groups` and
+     * without `spread` asks for.
+     *
+     * A group is centred under the range of modules that encodes it: its left
+     * edge is the start of the range plus half of what the group leaves over of
+     * it, rounded down.
+     *
+     * A spread symbology divides the width of the bars into one interval more
+     * than it has cells and centres a cell on each interior division point, so
+     * that the margin on each side of the run is a whole interval: the pitch is
+     * `barsWidth / (count + 1)`, a fraction of a dot, and the left edge of a
+     * cell is its division point less half a cell, rounded to the nearest dot.
+     * That is what the photographs of an Epson TM-T70 measure, pixel by pixel,
+     * in all five of their spread rows.
+     *
+     * Both are the simplest rule that draws what the paper shows.
+     *
+     * @param  {Barcode}              code         The barcode of the symbology
+     * @param  {Array<string|null>}   cells        One entry per cell, null for a box
+     * @param  {number}               cellWidth    Width of a cell in dots
+     * @param  {number}               barsWidth    Width of the bars in dots
+     * @param  {number}               moduleWidth  Width of a module in dots
+     * @return {HriCell[]|null}            The cells, or null for one centred run
+     */
+  #hriPositions(code, cells, cellWidth, barsWidth, moduleWidth) {
+    if (Array.isArray(code.groups) && code.groups.length > 0) {
+      const positions = [];
+
+      for (const group of code.groups) {
+        const characters = Array.from(group.text);
+        const range = (group.end - group.start) * moduleWidth;
+        const start = Math.floor(group.start * moduleWidth + (range - characters.length * cellWidth) / 2);
+
+        characters.forEach((value, index) => positions.push({value, x: start + index * cellWidth}));
+      }
+
+      return positions;
+    }
+
+    if (code.spread !== true || cells.length === 0) {
+      return null;
+    }
+
+    const pitch = barsWidth / (cells.length + 1);
+
+    return cells.map((value, index) => ({
+      value,
+      x: Math.round((index + 1) * pitch - cellWidth / 2),
+    }));
   }
 
   /**
@@ -1540,30 +1684,35 @@ class LayoutEngine {
   }
 
   /**
-     * The cells of a line of text in one font and without any style, which is
-     * how a printer draws the human readable text of a barcode
+     * The cells of the human readable text of a barcode, in one font and
+     * without any style, each at the left edge the layout gave it.
      *
-     * @param  {string[]}   characters   The characters to draw
-     * @param  {string}     name         Font of the text, 'A' or 'B'
-     * @param  {number}     x            Left edge of the text, in the block
-     * @param  {number}     y            Top of the text, in the block
-     * @return {object[]}                The operations, one cell per character
+     * A cell whose value is null is the start or the stop character of a Code
+     * 93, which the font has no glyph for: it is drawn as a hollow rectangle of
+     * one dot lines instead, as a printer does, and that is rectangle
+     * operations of the block and not a glyph.
+     *
+     * @param  {HriCell[]}  cells  The cells and their left edges
+     * @param  {string}     name   Font of the text, 'A' or 'B'
+     * @param  {number}     y      Top of the text, in the block
+     * @return {object[]}          The operations, one cell per character
      */
-  #textCells(characters, name, x, y) {
+  #textCells(cells, name, y) {
     const size = this.#cells[name];
     const operations = [];
 
-    let left = x;
+    for (const {value, x} of cells) {
+      if (value === null) {
+        operations.push(...hriBox(x, y, size));
+        continue;
+      }
 
-    for (const character of characters) {
-      const cell = this.#cell(character.codePointAt(0), name, PLAIN);
+      const cell = this.#cell(value.codePointAt(0), name, PLAIN);
 
       operations.push(Object.assign(
-          {type: 'text', x: left, y, width: cell.width, height: cell.height},
+          {type: 'text', x, y, width: cell.width, height: cell.height},
           cell.fields,
       ));
-
-      left += size.width;
     }
 
     return operations;

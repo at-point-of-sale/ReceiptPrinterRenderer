@@ -798,7 +798,7 @@ describe('the display list', function() {
         {name: 'ean13', symbology: 'ean13', data: '4006381333931', module: 3, height: 60},
         {name: 'ean8', symbology: 'ean8', data: '96385074', module: 3, height: 60},
         {name: 'upca', symbology: 'upca', data: '123456789012', module: 3, height: 60},
-        {name: 'upce', symbology: 'upce', data: '01234565', module: 3, height: 60},
+        {name: 'upce', symbology: 'upce', data: '012345000065', module: 3, height: 60},
         {name: 'code39', symbology: 'code39', data: 'ABC-123', module: 3, height: 60},
         {name: 'itf', symbology: 'itf', data: '12345670', module: 2, height: 60},
         {name: 'codabar', symbology: 'codabar', data: 'A12345A', module: 3, height: 60},

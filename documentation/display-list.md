@@ -64,7 +64,7 @@ Inside a line. `x` is from the left edge of the surface, `y` from the top of the
 | Type | Fields | Meaning |
 |---|---|---|
 | `text` | `x`, `y`, `width`, `height`, `codepoint` or `bitmap`, `font`, `cell`, `glyph`, `baseline`, `scale`, `style`, `rotation`, `spacing` | One cell of text. |
-| `rect` | `x`, `y`, `width`, `height` | A filled black rectangle: a bar of a barcode, or a run of adjacent black modules of a QR code, a PDF417 symbol or a DataBar. |
+| `rect` | `x`, `y`, `width`, `height` | A filled black rectangle: a bar of a barcode, a run of adjacent black modules of a QR code, a PDF417 symbol or a DataBar, or one line of the hollow box a Code 93 prints for its start and stop character, which the font has no glyph for and which is therefore rectangles of the barcode block instead of a text cell: four of them, one per side, or two when the cell is too small for the sides to have any height. |
 | `image` | `x`, `y`, `width`, `height`, `data` | A 1-bit bitmap in the format of the output contract, one dot on one dot: a strip of a column mode image inside a text line, a raster image, a downloaded or NV image with the scaling of its print command applied, a Star raster mode buffer. `data` is a copy the layout owns, never a view on the stream. |
 
 ### Text
@@ -84,7 +84,7 @@ Inside a line. `x` is from the left edge of the surface, `y` from the top of the
 
 No operation is taller than the line box it is on, or reaches below it: the height of a line box is the height of the tallest thing on it. A consumer may rely on that, and the two of this package do, in two different ways: the bitmap back-end composes a line into a bitmap of `height` rows and cuts what does not fit, and the SVG writer clips a line to the width of its surface and to nothing else. A list built by hand that breaks the rule is drawn differently by the two.
 
-An operation can start inside the surface and end past its right edge: the human readable text of a barcode is centred under the bars and is not shortened when it is wider than the paper, and a cell that a position command put near the edge is not moved back. A consumer clips a line to the width of its surface, the width of the paper for a line of the paper and the logical width of an area for a line of a page, which is what the line bitmap of the renderer does. Nothing is ever clipped at the left, `x` is never negative.
+An operation can start inside the surface and end past its right edge: the human readable text of a barcode is not shortened when it is wider than the paper, and a cell that a position command put near the edge is not moved back. A consumer clips a line to the width of its surface, the width of the paper for a line of the paper and the logical width of an area for a line of a page, which is what the line bitmap of the renderer does. Nothing is ever clipped at the left, `x` is never negative.
 
 `width` and `height` are the box of the operation on the line: the scaled cell, or the scaled cell with its sides swapped when `rotation` is 90. The code points U+2500 to U+259F are stretched to the edges of the cell, as the bitmap font stretches them. Every text operation carries its whole style; there are no state changes in the list.
 

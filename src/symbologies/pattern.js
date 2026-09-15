@@ -11,11 +11,25 @@
  */
 
 /**
+ * One group of the human readable text of a barcode, centred under the modules
+ * that encode it. UPC-A and EAN-8 print their digits in two of these, the rest
+ * of the symbologies have none.
+ *
+ * @typedef {object} BarcodeGroup
+ * @property {number} start   First module of the range, counted from the first module of the symbol
+ * @property {number} end     One past the last module of the range
+ * @property {string} text    The characters of the group
+ */
+
+/**
  * A barcode, as the symbology generators return it
  *
  * @typedef {object} Barcode
  * @property {number[]} bars           Module widths, alternating bar and space, starting with a bar
  * @property {string} text             The human readable text of this barcode, as it is printed
+ * @property {BarcodeGroup[]} [groups] The groups the text is printed in, when it is not one centred run
+ * @property {boolean} [spread]        True when the characters are spread over equal slots across the bars
+ * @property {boolean} [boxed]         True when the text is wrapped in the start and stop boxes of Code 93
  * @property {BarcodeHeight} [height]  The height the specification of the symbology gives the symbol
  */
 

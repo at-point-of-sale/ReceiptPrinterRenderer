@@ -39,7 +39,26 @@ export function upca(data) {
 
   const barcode = ean13('0' + data);
 
-  return barcode === null ? null : {bars: barcode.bars, text: barcode.text.slice(1)};
+  if (barcode === null) {
+    return null;
+  }
+
+  const text = barcode.text.slice(1);
+
+  /* The twelve digits are printed in two groups of six, each under the modules
+     that encode it: the left guard is three modules and a digit is seven, so
+     the left six sit on modules 3 to 45 and the right six, behind the five
+     module centre guard, on 50 to 92. The number system digit and the check
+     digit are inside those groups, not beside the bars */
+
+  return {
+    bars: barcode.bars,
+    text,
+    groups: [
+      {start: 3, end: 45, text: text.slice(0, 6)},
+      {start: 50, end: 92, text: text.slice(6)},
+    ],
+  };
 }
 
 /**
@@ -98,44 +117,46 @@ function compress(digits) {
 /**
  * Encode a UPC-E.
  *
- * The data is the six digits of the symbol, optionally with the number system
- * in front of them and the check digit behind them. It can also be the eleven
- * or twelve digits of the UPC-A the symbol stands for, which is compressed when
- * it has a zero suppressed form and refused when it has none. What is missing
- * is computed, what is there is validated, the way printer firmware does it.
+ * The data is the eleven or twelve digits of the UPC-A the symbol stands for,
+ * whose number system digit must be a zero. It is compressed by the zero
+ * suppression rules when it has such a form, and when it has none the printer
+ * takes the five manufacturer digits and the last product digit instead, so
+ * that `01234567890` becomes `123450` rather than nothing. The twelfth digit
+ * is the check digit and is not verified, the eleven digit form computes it.
  *
- * @param  {string}         data   6, 7 or 8 digits, or the 11 or 12 of a UPC-A
+ * The forms of six, seven and eight digits are refused: an Epson TM-T70
+ * printed those rows of the escpos-php `barcode` fixture as text and drew no
+ * bars, and the reference allows them on newer firmware, which the deviations
+ * lists of both command pages say.
+ *
+ * @param  {string}         data   The 11 or 12 digits of a UPC-A
  * @return {Barcode|null}          The barcode, or null when the data is not valid
  */
 export function upce(data) {
-  if (!isDigits(data) || data.length < 6 || data.length > 12 || (data.length > 8 && data.length < 11)) {
+  if (!isDigits(data) || (data.length !== 11 && data.length !== 12)) {
     return null;
   }
 
-  const long = data.length > 8;
-  const system = data.length === 6 ? '0' : data[0];
+  const system = data[0];
 
-  /* Only the two number systems that have a zero suppressed form exist */
+  /* The printout only settled number system 0, and the reference gives the
+     zero suppressed form to 0 and 1; this renderer follows the printout */
 
-  if (system !== '0' && system !== '1') {
+  if (system !== '0') {
     return null;
   }
 
-  if (long && data.length === 12 && Number(data[11]) !== checkDigit(data.slice(0, 11))) {
-    return null;
-  }
+  const digits = data.slice(0, 11);
 
-  const body = long ? compress(data.slice(0, 11)) : (data.length === 6 ? data : data.slice(1, 7));
+  /* The check digit that is sent is never verified, the shorter form computes
+     the one it has not got */
 
-  if (body === null) {
-    return null;
-  }
+  const check = data.length === 12 ? Number(data[11]) : checkDigit(digits);
 
-  const check = checkDigit(expand(system, body));
+  /* A UPC-A without a zero suppressed form is not refused: the printer keeps
+     the five manufacturer digits and the last product digit */
 
-  if (data.length === 8 && Number(data[7]) !== check) {
-    return null;
-  }
+  const body = compress(digits) || `${digits.slice(1, 6)}${digits[10]}`;
 
   const parity = PARITY[check];
 
@@ -143,12 +164,14 @@ export function upce(data) {
 
   for (let index = 0; index < 6; index++) {
     const value = Number(body[index]);
-    const even = system === '0' ? parity[index] === 'E' : parity[index] === 'O';
 
-    pattern += even ? LEFT_EVEN[value] : LEFT_ODD[value];
+    pattern += parity[index] === 'E' ? LEFT_EVEN[value] : LEFT_ODD[value];
   }
 
   pattern += END;
 
-  return {bars: toBars(pattern), text: `${system}${body}${check}`};
+  /* The six digits of the body are the whole of the human readable text: the
+     number system and the check digit are not printed */
+
+  return {bars: toBars(pattern), text: body};
 }

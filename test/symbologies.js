@@ -112,8 +112,20 @@ describe('symbologies', function() {
       assert.equal(barcode('ean13', '400638133393').text, '4006381333931');
     });
 
-    it('should refuse a check digit that is wrong', function() {
-      assert.isNull(barcode('ean13', '4006381333930'));
+    it('should never verify a check digit that is there', function() {
+      /* An Epson TM-T70 printed the thirteen digit row of the escpos-php
+         `barcode` fixture with a wrong check digit as it came */
+
+      const wrong = barcode('ean13', '4006381333930');
+
+      assert.isNotNull(wrong);
+      assert.equal(wrong.text, '4006381333930');
+      assert.notEqual(toPattern(wrong.bars), toPattern(barcode('ean13', '4006381333931').bars));
+    });
+
+    it('should print its digits as one centred run, not in groups', function() {
+      assert.isUndefined(barcode('ean13', '4006381333931').groups);
+      assert.isUndefined(barcode('ean13', '4006381333931').spread);
     });
 
     it('should refuse anything that is not twelve or thirteen digits', function() {
@@ -134,8 +146,18 @@ describe('symbologies', function() {
       assert.equal(barcode('ean8', '9638507').text, '96385074');
     });
 
-    it('should refuse a check digit that is wrong', function() {
-      assert.isNull(barcode('ean8', '96385075'));
+    it('should never verify a check digit that is there', function() {
+      const wrong = barcode('ean8', '96385075');
+
+      assert.isNotNull(wrong);
+      assert.equal(wrong.text, '96385075');
+    });
+
+    it('should print its digits in two groups of four, under the modules that encode them', function() {
+      assert.deepEqual(barcode('ean8', '96385074').groups, [
+        {start: 3, end: 31, text: '9638'},
+        {start: 36, end: 64, text: '5074'},
+      ]);
     });
   });
 
@@ -154,53 +176,88 @@ describe('symbologies', function() {
       assert.equal(barcode('upca', '123456789012').text.length, 12);
     });
 
-    it('should refuse a check digit that is wrong', function() {
-      assert.isNull(barcode('upca', '123456789013'));
+    it('should never verify a check digit that is there', function() {
+      const wrong = barcode('upca', '123456789013');
+
+      assert.isNotNull(wrong);
+      assert.equal(wrong.text, '123456789013');
+    });
+
+    it('should print its digits in two groups of six, under the modules that encode them', function() {
+      assert.deepEqual(barcode('upca', '123456789012').groups, [
+        {start: 3, end: 45, text: '123456'},
+        {start: 50, end: 92, text: '789012'},
+      ]);
     });
   });
 
   describe('UPC-E', function() {
     it('should encode the same modules as the reference', function() {
-      assert.equal(pattern('upce', '01234565'), reference('UPCE', '01234565'));
-      assert.equal(pattern('upce', '04252614'), reference('UPCE', '04252614'));
+      assert.equal(pattern('upce', '042100005264'), reference('UPCE', '04252614'));
+      assert.equal(pattern('upce', '04210000526'), reference('UPCE', '04252614'));
     });
 
-    it('should take six digits, seven with the number system, or all eight', function() {
-      assert.equal(pattern('upce', '123456'), reference('UPCE', '01234565'));
-      assert.equal(pattern('upce', '0123456'), reference('UPCE', '01234565'));
+    it('should take the eleven or twelve digits of a UPC-A and nothing else', function() {
+      /* An Epson TM-T70 refused the six, seven and eight digit rows of the
+         escpos-php `barcode` fixture and printed their digits as text */
 
-      assert.equal(barcode('upce', '123456').text, '01234565');
-      assert.equal(barcode('upce', '0123456').text, '01234565');
+      assert.isNull(barcode('upce', '123456'));
+      assert.isNull(barcode('upce', '0123456'));
+      assert.isNull(barcode('upce', '01234565'));
+      assert.isNull(barcode('upce', '0123456789'));
+      assert.isNull(barcode('upce', '0123456789012'));
+      assert.isNull(barcode('upce', '0123456789X'));
     });
 
-    it('should encode the number system in the parity of the digits', function() {
-      assert.notEqual(pattern('upce', '1123456'), pattern('upce', '0123456'));
+    it('should refuse a number system that is not zero', function() {
+      /* The printout only ever showed number system 0, so that is the only one
+         this renderer takes, where the reference gives 1 a form as well */
+
+      assert.isNull(barcode('upce', '11234567890'));
+      assert.isNull(barcode('upce', '21234567890'));
     });
 
     it('should compress a UPC-A that has a zero suppressed form', function() {
-      /* Hand checked pairs: the eleven or twelve digits of the UPC-A, the six
-         digits of the symbol, and the eight the printer puts below the bars */
+      /* Hand checked pairs: the eleven or twelve digits of the UPC-A and the
+         six digits of the symbol, which are the whole of its text */
 
-      for (const [upca, upce, text] of [
-        ['042100005264', '425261', '04252614'],
-        ['04210000526', '425261', '04252614'],
-        ['012000003035', '123030', '01230305'],
-        ['023456000073', '234567', '02345673'],
+      for (const [upca, body] of [
+        ['042100005264', '425261'],
+        ['04210000526', '425261'],
+        ['012000003035', '123030'],
+        ['023456000073', '234567'],
       ]) {
-        assert.equal(pattern('upce', upca), pattern('upce', upce), upca);
-        assert.equal(barcode('upce', upca).text, text, upca);
+        assert.equal(barcode('upce', upca).text, body, upca);
       }
     });
 
-    it('should refuse a UPC-A that has no zero suppressed form', function() {
-      assert.isNull(barcode('upce', '012345678905'));
-      assert.isNull(barcode('upce', '123456789012'));
+    it('should keep the manufacturer digits and the last product digit when it has no such form', function() {
+      /* `01234567890` has no zero suppressed form and the TM-T70 printed
+         `123450` under its bars: the five manufacturer digits and the last
+         product digit */
+
+      assert.equal(barcode('upce', '01234567890').text, '123450');
+      assert.equal(barcode('upce', '012345678901').text, '123450');
     });
 
-    it('should refuse a check digit that is wrong and a number system that does not exist', function() {
-      assert.isNull(barcode('upce', '01234566'));
-      assert.isNull(barcode('upce', '2123456'));
-      assert.isNull(barcode('upce', '12345'));
+    it('should never verify the check digit it is given', function() {
+      /* The twelfth digit is the check digit, and the parity of the six digits
+         carries it: a wrong one draws other bars and is not refused */
+
+      const given = barcode('upce', '012345678901');
+      const computed = barcode('upce', '01234567890');
+
+      assert.isNotNull(given);
+      assert.equal(given.text, computed.text);
+      assert.notEqual(toPattern(given.bars), toPattern(computed.bars));
+    });
+
+    it('should print the six body digits and nothing else', function() {
+      const code = barcode('upce', '042100005264');
+
+      assert.equal(code.text, '425261');
+      assert.isUndefined(code.groups);
+      assert.isUndefined(code.spread);
     });
   });
 
@@ -213,12 +270,27 @@ describe('symbologies', function() {
 
     it('should print lower case in upper case, as the symbology has no lower case', function() {
       assert.equal(pattern('code39', 'abc'), reference('CODE39', 'ABC'));
-      assert.equal(barcode('code39', 'abc').text, 'ABC');
+      assert.equal(barcode('code39', 'abc').text, '*ABC*');
+    });
+
+    it('should wrap its text in the asterisks of its start and stop character', function() {
+      /* An Epson TM-T70 printed `* A B C   0 1 2 *` under the bars of `ABC 012` */
+
+      assert.equal(barcode('code39', 'ABC 012').text, '*ABC 012*');
+      assert.isTrue(barcode('code39', 'ABC 012').spread);
+    });
+
+    it('should not wrap data that already carries them, and encode it once', function() {
+      assert.equal(barcode('code39', '*TEXT*').text, '*TEXT*');
+      assert.equal(pattern('code39', '*TEXT*'), reference('CODE39', 'TEXT'));
     });
 
     it('should refuse a character the symbology does not have', function() {
       assert.isNull(barcode('code39', 'ABC#123'));
       assert.isNull(barcode('code39', 'A*B'));
+      assert.isNull(barcode('code39', '*A*B*'));
+      assert.isNull(barcode('code39', '**'));
+      assert.isNull(barcode('code39', '*'));
       assert.isNull(barcode('code39', ''));
     });
   });
@@ -249,6 +321,7 @@ describe('symbologies', function() {
 
     it('should print the start and stop character, which the reference hides', function() {
       assert.equal(barcode('codabar', 'A12345A').text, 'A12345A');
+      assert.isTrue(barcode('codabar', 'A12345A').spread);
     });
 
     it('should refuse a start without a stop and a letter in the middle', function() {
@@ -302,6 +375,17 @@ describe('symbologies', function() {
 
       assert.equal(pattern('code93', 'F'), symbols.join(''));
       assert.equal(pattern('code93', 'F'), reference('CODE93', 'F'));
+    });
+
+    it('should print its text as it was sent, lower case included', function() {
+      /* An Epson TM-T70 drew `012abcd` under the bars of that row of the
+         escpos-php `barcode` fixture, while the bars encode the upper case of
+         the basic set, which has no lower case */
+
+      const code = barcode('code93', '012abcd');
+
+      assert.equal(code.text, '012abcd');
+      assert.equal(pattern('code93', '012abcd'), pattern('code93', '012ABCD'));
     });
 
     it('should encode every value as nine modules per symbol and nothing else', function() {
@@ -469,6 +553,46 @@ describe('symbologies', function() {
 
     it('should refuse an empty value', function() {
       assert.isNull(barcode('gs1-128', ''));
+    });
+  });
+
+  describe('the human readable text', function() {
+    it('should spread the four symbologies an Epson TM-T70 spreads', function() {
+      for (const [symbology, data] of [
+        ['code39', 'ABC 012'],
+        ['codabar', 'A012345A'],
+        ['code93', '012ABCD'],
+        ['code128', '{A012ABCD'],
+        ['code128-auto', 'ABC12345678'],
+      ]) {
+        assert.isTrue(barcode(symbology, data).spread, symbology);
+      }
+    });
+
+    it('should leave ITF and the GS1 family as one centred run, which the printout never showed', function() {
+      for (const [symbology, data] of [
+        ['itf', '12345670'],
+        ['gs1-128', '0103453120000011'],
+        ['gs1-databar-omni', '0952123454321'],
+        ['gs1-databar-expanded', '(01)90614141000015'],
+      ]) {
+        const code = barcode(symbology, data);
+
+        assert.isUndefined(code.spread, symbology);
+        assert.isUndefined(code.groups, symbology);
+      }
+    });
+
+    it('should wrap a Code 93 in the boxes of its start and stop character', function() {
+      const code = barcode('code93', '012abcd');
+
+      assert.isTrue(code.boxed);
+      assert.equal(code.text, '012abcd');
+    });
+
+    it('should not box anything else', function() {
+      assert.isUndefined(barcode('code39', 'ABC').boxed);
+      assert.isUndefined(barcode('code128', '{BABC').boxed);
     });
   });
 

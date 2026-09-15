@@ -817,17 +817,29 @@ describe('Painter', function() {
       assert.deepEqual(paper.end(), []);
     });
 
-    it('should draw nothing for data the symbology cannot carry', function() {
+    it('should draw nothing for data the symbology cannot carry, and say so', function() {
       const paper = painter();
 
       paper.text('Hi');
-      paper.barcode({symbology: 'ean13', data: 'nonsense', moduleWidth: 2, height: 40});
+
+      assert.isFalse(paper.barcode({symbology: 'ean13', data: 'nonsense', moduleWidth: 2, height: 40}));
+
       paper.lineFeed();
 
       const items = paper.end();
 
       assert.equal(items.length, 1);
       assert.equal(items[0].height, 30);
+    });
+
+    it('should say a barcode was drawn, and say so for one that does not fit either', function() {
+      const paper = painter();
+
+      /* The data is valid in both, the second is refused for its width alone,
+         which is not a reason to print the data as text */
+
+      assert.isTrue(paper.barcode({symbology: 'ean13', data: '4006381333931', moduleWidth: 1, height: 40}));
+      assert.isTrue(paper.barcode({symbology: 'ean13', data: '4006381333931', moduleWidth: 2, height: 40}));
     });
 
     it('should draw nothing for a symbology it does not know', function() {
@@ -854,6 +866,215 @@ describe('Painter', function() {
       /* The bars, the four dot gap and one line of font A cells */
 
       assert.equal(items[0].height, 40 + 4 + 24);
+    });
+
+    /*
+        Where the human readable text goes, read off the display list of a wide
+        painter: section 23 of the implementation plan, measured on an Epson
+        TM-T70. A cell of font A is twelve dots wide in the Epson profile.
+    */
+
+    const CELL = 12;
+
+    /**
+     * The operations of the one block a barcode lays out
+     *
+     * @param  {object}   request   The barcode to draw
+     * @return {object[]}           The operations of the block
+     */
+    function block(request) {
+      const paper = new Painter({width: 576, profile: profiles.epson});
+
+      paper.collect();
+      paper.barcode(request);
+
+      const list = paper.end();
+
+      assert.equal(list.entries.length, 1, 'the barcode is one block');
+
+      return list.entries[0].operations;
+    }
+
+    /**
+     * The left edge of every text cell of a block, in the order they were laid
+     * out, relative to the left edge of the leftmost operation of the block
+     *
+     * @param  {object[]}   operations   The operations of the block
+     * @return {number[]}                The positions
+     */
+    function cells(operations) {
+      const left = Math.min(...operations.map((operation) => operation.x));
+
+      return operations
+          .filter((operation) => operation.type === 'text')
+          .map((operation) => operation.x - left);
+    }
+
+    it('should put the digits of a UPC-A in two groups under the modules that encode them', function() {
+      const operations = block({
+        symbology: 'upca', data: '012345678901', moduleWidth: 3, height: 40,
+        hri: {position: 'below', font: 'A'},
+      });
+
+      /* A group of six cells is 72 dots and a range of 42 modules is 126, so a
+         group starts 27 dots into its range: at 3 * 3 + 27 and at 50 * 3 + 27 */
+
+      const starts = [0, 6].map((index) => cells(operations)[index]);
+
+      assert.deepEqual(starts, [36, 177]);
+      assert.equal(cells(operations).length, 12);
+    });
+
+    it('should put the digits of an EAN-8 in two groups of four', function() {
+      const operations = block({
+        symbology: 'ean8', data: '96385074', moduleWidth: 3, height: 40,
+        hri: {position: 'below', font: 'A'},
+      });
+
+      /* Four cells are 48 dots and a range of 28 modules is 84, so a group
+         starts 18 dots into its range: at 3 * 3 + 18 and at 36 * 3 + 18 */
+
+      const starts = [0, 4].map((index) => cells(operations)[index]);
+
+      assert.deepEqual(starts, [27, 126]);
+    });
+
+    it('should leave an EAN-13 as one centred run', function() {
+      const operations = block({
+        symbology: 'ean13', data: '4006381333931', moduleWidth: 3, height: 40,
+        hri: {position: 'below', font: 'A'},
+      });
+
+      const positions = cells(operations);
+
+      /* Thirteen cells, every one a cell width behind the one before it */
+
+      assert.equal(positions.length, 13);
+      assert.deepEqual(
+          positions.map((x, index) => x - positions[0]),
+          positions.map((x, index) => index * CELL),
+      );
+    });
+
+    it('should spread the characters of a Code 39 over the bars, a whole interval at each end', function() {
+      const operations = block({
+        symbology: 'code39', data: 'ABC 012', moduleWidth: 3, height: 40,
+        hri: {position: 'below', font: 'A'},
+      });
+
+      /* `*ABC 012*` is nine cells, and the bars are 9 * 16 - 1 = 143 modules of
+         three dots, 429. The bars are divided into ten intervals of 42.9 dots
+         and a character is centred on each of the nine interior points */
+
+      const positions = cells(operations);
+      const pitch = 429 / 10;
+
+      assert.equal(positions.length, 9);
+      assert.deepEqual(
+          positions,
+          positions.map((x, index) => Math.round((index + 1) * pitch - CELL / 2)),
+      );
+
+      /* Which leaves the same margin on both sides, a whole interval wide */
+
+      assert.closeTo(positions[0] + CELL / 2, pitch, 0.5);
+      assert.closeTo(429 - (positions[8] + CELL / 2), pitch, 0.5);
+    });
+
+    it('should centre the run of a spread symbology when the text is wider than the bars', function() {
+      /* A Codabar of seven characters is 71 modules, 71 dots at a module width
+         of one, and seven cells of font A are 84: the spread has no room and
+         the text falls back to the centred run of every other symbology */
+
+      const operations = block({
+        symbology: 'codabar', data: 'A12345A', moduleWidth: 1, height: 40,
+        hri: {position: 'below', font: 'A'},
+      });
+
+      const positions = cells(operations);
+
+      assert.equal(positions.length, 7);
+      assert.deepEqual(
+          positions.map((x) => x - positions[0]),
+          positions.map((x, index) => index * CELL),
+      );
+    });
+
+    it('should draw the start and the stop character of a Code 93 as a hollow box', function() {
+      const operations = block({
+        symbology: 'code93', data: 'TEST93', moduleWidth: 3, height: 40,
+        hri: {position: 'below', font: 'A'},
+      });
+
+      /* Six characters between two boxes, so six text cells and, on top of the
+         bars, the four rectangles of each box */
+
+      assert.equal(cells(operations).length, 6);
+
+      const boxes = operations.filter((operation) => operation.type === 'rect' && operation.y >= 40);
+
+      assert.equal(boxes.length, 8);
+
+      /* Half a cell wide and a third of a cell high, in lines of one dot: six
+         by eight dots for the 12 by 24 cell of font A */
+
+      const first = boxes.slice(0, 4);
+
+      assert.deepEqual(first.map((rectangle) => rectangle.width), [6, 6, 1, 1]);
+      assert.deepEqual(first.map((rectangle) => rectangle.height), [1, 1, 6, 6]);
+      assert.equal(first[1].y - first[0].y, 7);
+      assert.equal(first[3].x - first[0].x, 5);
+    });
+
+    it('should put the box on the middle of a digit, not on the middle of the cell', function() {
+      const operations = block({
+        symbology: 'code93', data: 'TEST93', moduleWidth: 3, height: 40,
+        hri: {position: 'below', font: 'A'},
+      });
+
+      /* The cell of font A is 24 rows with its baseline on row 18, so the
+         middle of a digit is row 9 and an eight dot box covers rows 5 to 12 of
+         the cell. The cells start at the top of the text line, which is the
+         height of the bars plus the four dot gap */
+
+      const top = 40 + 4;
+      const boxes = operations.filter((operation) => operation.type === 'rect' && operation.y >= 40);
+
+      assert.equal(boxes[0].y - top, 5);
+      assert.equal(boxes[1].y - top, 12);
+    });
+
+    it('should count the boxes of a Code 93 as characters of the spread', function() {
+      const operations = block({
+        symbology: 'code93', data: 'TEST93', moduleWidth: 3, height: 40,
+        hri: {position: 'below', font: 'A'},
+      });
+
+      /* Eight cells over 91 modules of three dots: nine intervals of 273 / 9
+         dots, and the first box is centred on the first interior point */
+
+      const left = Math.min(...operations.map((operation) => operation.x));
+      const pitch = 273 / 9;
+      const first = operations.filter((operation) => operation.type === 'rect' && operation.y >= 40)[0];
+
+      /* The box is centred in its cell, three dots in for a six dot box */
+
+      assert.equal(first.x - left - 3, Math.round(pitch - CELL / 2));
+      assert.equal(cells(operations)[0], Math.round(2 * pitch - CELL / 2));
+    });
+
+    it('should print the text of a Code 93 as it was sent, lower case included', function() {
+      const operations = block({
+        symbology: 'code93', data: '012abcd', moduleWidth: 3, height: 40,
+        hri: {position: 'below', font: 'A'},
+      });
+
+      const text = operations
+          .filter((operation) => operation.type === 'text')
+          .map((operation) => String.fromCodePoint(operation.fields ? operation.fields.codepoint : operation.codepoint))
+          .join('');
+
+      assert.equal(text, '012abcd');
     });
 
     it('should draw a QR code as a block of its own', function() {

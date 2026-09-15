@@ -734,18 +734,77 @@ describe('EscPosRenderer', function() {
       assert.equal(dots(b), dots(a));
     });
 
-    it('should compute a check digit that is missing and validate one that is there', function() {
+    it('should compute a check digit that is missing', function() {
       const complete = stitch(render(barcode(GS, 'k', 2, '4006381333931', [0])), {width: WIDTH});
       const computed = stitch(render(barcode(GS, 'k', 2, '400638133393', [0])), {width: WIDTH});
 
       assert.equal(dots(computed), dots(complete));
     });
 
-    it('should print nothing for data that is not valid for the symbology', function() {
-      const items = render(stream(ESC, '@', 'A', GS, 'h', 60, GS, 'w', 3, GS, 'k', 2, '4006381333930', [0], 'B', LF));
+    it('should never verify a check digit that is there', function() {
+      /* An Epson TM-T70 printed the rows of the escpos-php `barcode` fixture
+         that carry a wrong check digit, bars and digits as they came */
+
+      const items = render(stream(ESC, '@', GS, 'h', 60, GS, 'w', 3, GS, 'k', 2, '4006381333930', [0]));
 
       assert.equal(items.length, 1);
-      assert.equal(items[0].height, 30);
+      assert.equal(items[0].height, 60);
+    });
+
+    it('should print the data as text for data that is not valid for the symbology', function() {
+      /* The reference aborts a GS k whose data is out of range and processes
+         the data as normal data, which is what the TM-T70 did with the UPC-E
+         rows of six, seven and eight digits */
+
+      const refused = render(stream(ESC, '@', GS, 'h', 60, GS, 'w', 3, GS, 'k', 1, '123456', [0], LF));
+      const printed = render(stream(ESC, '@', '123456', LF));
+
+      assert.equal(dots(stitch(refused, {width: WIDTH})), dots(stitch(printed, {width: WIDTH})));
+    });
+
+    it('should print the data of a refused function B barcode as text as well', function() {
+      const refused = render(stream(ESC, '@', GS, 'h', 60, GS, 'w', 3, GS, 'k', 66, 6, '123456', LF));
+      const printed = render(stream(ESC, '@', '123456', LF));
+
+      assert.equal(dots(stitch(refused, {width: WIDTH})), dots(stitch(printed, {width: WIDTH})));
+    });
+
+    it('should print the refused data in the style and the codepage that are current', function() {
+      const bold = render(stream(ESC, '@', ESC, 'E', 1, GS, 'k', 1, '123456', [0], LF));
+      const plain = render(stream(ESC, '@', GS, 'k', 1, '123456', [0], LF));
+
+      assert.notEqual(dots(stitch(bold, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+      assert.equal(dots(stitch(bold, {width: WIDTH})), dots(stitch(render(stream(
+          ESC, '@', ESC, 'E', 1, '123456', LF,
+      )), {width: WIDTH})));
+    });
+
+    it('should run the refused data through the parser, so a line feed in it ends the line', function() {
+      /* The reference processes the data of a refused GS k as normal data, and
+         normal data goes through the interpreter: an LF is a line feed and not
+         a glyph */
+
+      const refused = render(stream(ESC, '@', GS, 'k', 1, 'AB', [LF], 'CD', [0]));
+      const printed = render(stream(ESC, '@', 'AB', LF, 'CD'));
+
+      assert.equal(dots(stitch(refused, {width: WIDTH})), dots(stitch(printed, {width: WIDTH})));
+    });
+
+    it('should honour a command inside the refused data as well', function() {
+      const refused = render(stream(ESC, '@', GS, 'k', 66, 5, 'A', ESC, 'E', 1, 'B', LF));
+      const printed = render(stream(ESC, '@', 'A', ESC, 'E', 1, 'B', LF));
+
+      assert.equal(dots(stitch(refused, {width: WIDTH})), dots(stitch(printed, {width: WIDTH})));
+    });
+
+    it('should print no text at all for a barcode the symbology accepts', function() {
+      const items = render(stream(ESC, '@', GS, 'h', 60, GS, 'w', 3, GS, 'k', 2, '4006381333931', [0]));
+
+      /* The block of bars and nothing else: a line of text would add the
+         height of a cell to the paper */
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].height, 60);
     });
 
     it('should take the module width from GS w', function() {
@@ -828,26 +887,26 @@ describe('EscPosRenderer', function() {
       assert.equal(fits[0].height, 60);
     });
 
-    it('should print nothing for a byte the code sets of Code 128 cannot carry', function() {
-      const items = render(stream(
-          ESC, '@', 'A', GS, 'h', 60, GS, 'w', 3, GS, 'k', 79, 4, 'AB', [0xe9], 'C', 'B', LF,
+    it('should print the data as text for a byte the code sets of Code 128 cannot carry', function() {
+      const refused = render(stream(
+          ESC, '@', GS, 'h', 60, GS, 'w', 3, GS, 'k', 79, 4, 'AB', [0xe9], 'C', LF,
       ));
 
-      assert.equal(items.length, 1);
-      assert.equal(items[0].height, 30);
       assert.equal(
-          dots(stitch(items, {width: WIDTH})),
-          dots(stitch(render(stream(ESC, '@', 'AB', LF)), {width: WIDTH})),
+          dots(stitch(refused, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', 'AB', [0xe9], 'C', LF)), {width: WIDTH})),
       );
     });
 
-    it('should print nothing for a GS1-128 with such a byte either', function() {
-      const items = render(stream(
-          ESC, '@', 'A', GS, 'h', 60, GS, 'w', 3, GS, 'k', 74, 3, '01', [0xe9], 'B', LF,
+    it('should print the data of a GS1-128 with such a byte as text as well', function() {
+      const refused = render(stream(
+          ESC, '@', GS, 'h', 60, GS, 'w', 3, GS, 'k', 74, 3, '01', [0xe9], LF,
       ));
 
-      assert.equal(items.length, 1);
-      assert.equal(items[0].height, 30);
+      assert.equal(
+          dots(stitch(refused, {width: WIDTH})),
+          dots(stitch(render(stream(ESC, '@', '01', [0xe9], LF)), {width: WIDTH})),
+      );
     });
 
     /* The GS1 DataBar family, symbologies 75 to 78. The heights of the
