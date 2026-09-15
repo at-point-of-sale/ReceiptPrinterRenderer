@@ -1,6 +1,7 @@
 {
   "ignorePatterns": [
     "build/",
+    "data/fonts/*.js",
     "dist/",
     "generated/",
     "node_modules/",

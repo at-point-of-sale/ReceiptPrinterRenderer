@@ -1,12 +1,12 @@
 import {assert} from 'chai';
 
-import outlines from '../generated/outlines.js';
-import fonts from '../generated/fonts.js';
+import outlines from '../data/fonts/outlines.js';
+import fonts from '../data/fonts/fonts.js';
 import Font from '../src/font.js';
 import Bitmap from '../src/bitmap.js';
 
 /*
-    What generated/outlines.js and generated/fonts.js say about each other.
+    What data/fonts/outlines.js and data/fonts/fonts.js say about each other.
 
     Both files are made in ReceiptPrinterFontEditor and this repository holds no
     code that makes or remakes them, see Section 21 of the implementation plan,

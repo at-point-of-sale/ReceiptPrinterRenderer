@@ -1,5 +1,5 @@
 import Bitmap from './bitmap.js';
-import fonts from '../generated/fonts.js';
+import fonts from '../data/fonts/fonts.js';
 
 /**
  * @typedef {import('./types.js').Bitmap} Bitmap

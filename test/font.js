@@ -1,6 +1,6 @@
 import CodepageEncoder from '@point-of-sale/codepage-encoder';
 
-import fonts from '../generated/fonts.js';
+import fonts from '../data/fonts/fonts.js';
 import Font from '../src/font.js';
 import Bitmap from '../src/bitmap.js';
 import {toAscii, fromAscii} from './helpers/ascii.js';

@@ -1,4 +1,4 @@
-import outlines from '../../generated/outlines.js';
+import outlines from '../../data/fonts/outlines.js';
 import Bitmap from '../bitmap.js';
 import Font from '../font.js';
 import {trace} from './trace.js';
@@ -17,7 +17,7 @@ import {toStoredPng} from './png.js';
 /*
     The SVG writer.
 
-    It turns a display list into one document: the glyphs of generated/outlines.js
+    It turns a display list into one document: the glyphs of data/fonts/outlines.js
     as paths in a <defs>, one <g> per line and per page, a <use> per text cell,
     one <path> per run of rectangles and an <image> with an embedded PNG per
     image. It draws what the bitmap back-end draws, with outlines in the place of

@@ -106,7 +106,7 @@ bytes ──▶ parser ──▶ layout engine ──▶ sink ──▶ items
 - **Sink.** Where the boxes go, attached per stream. `src/backends/bitmap.js` draws them: the cells from the packed font with a cache, the rectangles filled, the images blitted, the line turned when it is upside down, the rows accumulated and cut into image items on the rules below. `src/backends/collector.js` keeps them instead and returns the display list of `layout()`. The sink interface is internal: `line(entry)`, `page(entry)`, `feed(entry)`, `command(entry)`, `end()` and `discard()`.
 - **Painter.** `src/painter.js` is the wiring of the two: it owns an engine with a bitmap back-end and is the interface both parsers talk to, so the split changed nothing they see.
 - **Items.** The output stream, see [Output contract](#output-contract). The other output is the [display list](#the-display-list).
-- **SVG.** `src/svg.js` is a sub-entry of the package, `@point-of-sale/receipt-printer-renderer/svg`, and a third consumer of the display list next to the two back-ends: `toSvg(layout, options)` writes one SVG document of a list, see [SVG output](#svg-output). It is an entry of its own because it carries the glyph outlines of `generated/outlines.js`, which nothing else imports.
+- **SVG.** `src/svg.js` is a sub-entry of the package, `@point-of-sale/receipt-printer-renderer/svg`, and a third consumer of the display list next to the two back-ends: `toSvg(layout, options)` writes one SVG document of a list, see [SVG output](#svg-output). It is an entry of its own because it carries the glyph outlines of `data/fonts/outlines.js`, which nothing else imports.
 
 Repository layout, mirroring ReceiptPrinterEncoder:
 
@@ -138,12 +138,12 @@ src/
     png.js                      a PNG of stored deflate blocks, so that the writer stays synchronous
     trace.js                    a 1-bit bitmap as the rectangles of a path, for the glyphs a stream downloads to the SVG output
 data/
-  fonts/                        the licences of the faces the bitmap fonts are derived from, and the
-                                project file the font editor makes them from
+  fonts/                        the packed fonts and the glyph outlines, exported by ReceiptPrinterFontEditor,
+                                the licences of the faces they are derived from, and the project file
+                                the font editor makes them from
   mappings/                     codepage mappings per language, copied from ReceiptPrinterEncoder
   profiles/                     defaults per printer family
-generated/                      mappings, profiles and the PDF417 table, built by tools/generate.js,
-                                and the packed fonts and glyph outlines, exported by ReceiptPrinterFontEditor
+generated/                      mappings, profiles and the PDF417 table, built by tools/generate.js
 tools/generate.js               writes the mappings, the profiles and the PDF417 table of generated/
 test/
   fixtures/                     byte streams from the encoder with expected PBM images
@@ -245,7 +245,7 @@ The document is a `<defs>` that holds one `<path>` per distinct glyph of the rec
 
 - **A line** is `translate(0 y)`, or `translate(W y+h) rotate(180)` when it was printed upside down, clipped to the paper by one `clipPath` that every line shares, because an operation may run past the right edge of its surface and the line bitmap of the renderer clips it.
 - **A text cell** is a `<use>` of the glyph at the position of the scaled glyph box in the cell, with a second one a glyph dot to the right for bold, a `<rect>` of the cell before it when it is inverted and the glyph in the colour of the paper, and a `<rect>` for an underline or an upperline, which neither an inverted nor a turned cell gets. Every glyph is clipped to its scaled cell, the overstrike included: a path is not clipped by anything and 43 of the 919 glyphs of the fonts paint outside the 12 by 24 cell, so an unclipped glyph puts ink where the printer has none. The clip is written in the coordinate system of the element, where it is the same rectangle whatever size the cell is drawn at, so a handful of clip paths serve a whole document. A cell turned by `ESC V` is a group of `translate(x+h0 y) rotate(90)` around the same pieces.
-- **The glyphs** are the outlines of `generated/outlines.js`, in tenths of a dot, placed with a `scale(.1)` on the definition: font A directly, font B as the same path at two thirds unless the generator gave the glyph an entry of its own, a box drawing character from the box set of its cell in whole dots, a glyph the stream downloaded as the rectangles its bitmap traces into, written where it is used, and a box drawing character in a cell the outlines have no set for traced at write time from the bitmap font, which is the only thing the writer needs a font for.
+- **The glyphs** are the outlines of `data/fonts/outlines.js`, in tenths of a dot, placed with a `scale(.1)` on the definition: font A directly, font B as the same path at two thirds unless the generator gave the glyph an entry of its own, a box drawing character from the box set of its cell in whole dots, a glyph the stream downloaded as the rectangles its bitmap traces into, written where it is used, and a box drawing character in a cell the outlines have no set for traced at write time from the bitmap font, which is the only thing the writer needs a font for.
 - **The rectangles** of a line, the bars of a barcode and the modules of a symbol, are one `<path>` with `shape-rendering="crispEdges"` per run of them.
 - **An image** is an `<image>` of a PNG with `image-rendering="pixelated"`, one dot on one dot. The PNG is written by `src/svg/png.js` with stored deflate blocks, which shares its scanlines, its chunks and its CRC with `src/formats/png.js` and needs no `CompressionStream`, so the writer is synchronous. It is black on white and takes neither the ink colour nor a transparent background.
 - **A page** is a group per print area, clipped to the intersection of the area and the page, since an area can be larger than the page it stands on, and turned by the print direction of the area: `translate(ax ay)`, `translate(ax ay+ah) rotate(-90)`, `translate(ax+aw ay+ah) rotate(180)` and `translate(ax+aw ay) rotate(90)` for the directions 0 to 3, which is the mapping of the display list.
@@ -565,13 +565,13 @@ The rules below are the printer's, and they live in two files since the display 
 
 ### Bitmap font
 
-A fixed-cell bitmap font, stored as packed glyph arrays in `generated/fonts.js`, with the outlines of the same glyphs in `generated/outlines.js` for the SVG output. **Neither file is made in this repository.** Both are the Renderer export of [ReceiptPrinterFontEditor](https://github.com/at-point-of-sale/ReceiptPrinterFontEditor), which holds the outline fonts, the rules that fit them into a cell and the glyphs that are drawn by hand, and which keeps the font of this renderer as a project file, `data/fonts/<project>.json` beside the licences here. This repository holds the two exported files, the tests that read them and nothing that makes or remakes them; `tools/generate.js` writes the codepage mappings, the profiles and the PDF417 table and never touches the font. The formats below are documented here so that another font can be converted.
+A fixed-cell bitmap font, stored as packed glyph arrays in `data/fonts/fonts.js`, with the outlines of the same glyphs in `data/fonts/outlines.js` for the SVG output. **Neither file is made in this repository.** Both are the Renderer export of [ReceiptPrinterFontEditor](https://github.com/at-point-of-sale/ReceiptPrinterFontEditor), which holds the outline fonts, the rules that fit them into a cell and the glyphs that are drawn by hand, and which keeps the font of this renderer as a project file, `data/fonts/<project>.json` beside the two exported files and the licences here. This repository holds the two exported files, the tests that read them and nothing that makes or remakes them; `tools/generate.js` writes the codepage mappings, the profiles and the PDF417 table and never touches the font. The formats below are documented here so that another font can be converted.
 
 The font is drawn from an ordered list of four sources, and a glyph comes from the first one that has the code point. The face is [Iosevka](https://github.com/be5invis/Iosevka) Medium 34.8.1, under the SIL Open Font License 1.1, a monospaced face drawn for a narrow fixed cell. Behind it stand three faces for the scripts it has no glyph for, each under the same licence: [Sarasa Gothic](https://github.com/be5invis/Sarasa-Gothic) Mono J SemiBold 1.0.41 for the half width katakana, which is Iosevka's Latin joined with Source Han Sans and puts its kana on the metrics of the face to the second decimal; [Noto Sans Hebrew](https://github.com/notofonts/hebrew) Medium 3.001 for the Hebrew of cp862, of Windows-1255 and of the Hebrew pages of Bixolon, Xprinter and the POS-8360; and [Noto Sans Thai](https://github.com/notofonts/thai) Medium 2.002 for the Thai of cp874, of Star's own cp874 and of the three Thai pages of Epson's table, thai42, thai11 and thai13, of the six the ESC/POS mappings carry between them. Every one of those pages printed nothing but the fallback box before its source was added. The provenance of all four, with their versions and their copyright lines, is in `data/fonts/README.md`, and their licence files sit beside it, because the bitmaps are a derivative of those faces. Nothing of the outline fonts reaches the published package: only the two generated files are bundled.
 
 **The rules of the fit are the editor's.** The first source is the face and is measured; every source behind it is fitted to it by the ratio of the two ems, which is what lets a source hold a script and no Latin. The fit itself is the advance width, the advance of one character is exactly one cell, so the em lands on 24 and 16 dots with no vertical squeeze and the baseline on row 18 of font A and row 12 of font B; a glyph wider than the face is fitted by its own advance, a glyph whose ink lies outside its own advance by its ink, a combining mark of no advance is centred in its cell on a dot centre, a Unicode format character is an empty cell, and the box drawing and block characters, U+2500 to U+259F, are drawn on the dot grid rather than taken from a face, because they have to leave a cell at exactly the dot the next cell expects. The glyphs the rules get wrong are drawn by hand over the rasterized ones. All of that, with its reasons and its measurements, is in the editor's `documentation/design.md` and `src/lib/rasterize.js`; what this repository asks of a font is the two formats below.
 
-The packed font format, `generated/fonts.js`:
+The packed font format, `data/fonts/fonts.js`:
 
 ```
 {
@@ -591,7 +591,7 @@ A glyph is `height` rows of `Math.ceil(width / 8)` bytes. The most significant b
 
 Only glyphs that can ever be printed are included: every code point that occurs in a codepage table of the codepage encoder, plus ASCII 0x20 to 0x7E. The fallback glyph is U+FFFD when the font has it, and a hollow box when it has not. A code point the font has no glyph for is simply absent from the index, and the painter draws the fallback for it.
 
-The outline format, `generated/outlines.js`:
+The outline format, `data/fonts/outlines.js`:
 
 ```
 {

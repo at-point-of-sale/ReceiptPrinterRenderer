@@ -11,7 +11,7 @@ import toSvgDefault, {toSvg} from '../src/svg.js';
 import {toStoredPng, stored, adler32} from '../src/svg/png.js';
 import {scanlines} from '../src/formats/png.js';
 import Bitmap from '../src/bitmap.js';
-import outlines from '../generated/outlines.js';
+import outlines from '../data/fonts/outlines.js';
 import {names, fromPbm} from './helpers/fixtures.js';
 import {dotAgreement, fromPng} from '../tools/contact-sheet/references/shared.js';
 

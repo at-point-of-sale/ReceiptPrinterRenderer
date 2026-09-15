@@ -1,7 +1,7 @@
 # Fonts
 
-The bitmap fonts of the renderer, `generated/fonts.js` and `generated/outlines.js`,
-are made in
+The bitmap fonts of the renderer, `fonts.js` and `outlines.js` beside this
+README, are made in
 [ReceiptPrinterFontEditor](https://github.com/at-point-of-sale/ReceiptPrinterFontEditor)
 and exported from it. Nothing in this repository makes or remakes them, and no
 outline font is needed to build it.
@@ -9,20 +9,22 @@ outline font is needed to build it.
 The editor works from a project file, `<project>.json` beside this README, which
 holds the font as the editor keeps it: the faces it is rasterized from, the rules
 of the fit and the glyphs that were drawn by hand. That file is the owner's,
-`iosevka-medium.json`, the project the two generated files are exported from,
+`iosevka-medium.json`, the project the two exported files are exported from,
 and the owner commits it with the fonts.
 
 | File | What it is |
 |---|---|
-| `iosevka-medium.json` | The font editor's project file, the source of the two generated fonts |
+| `fonts.js` | The packed bitmap glyphs of both fonts, written into this folder by the editor's Renderer export together with `outlines.js`, from the `iosevka-medium.json` project beside them |
+| `outlines.js` | The glyph outlines of the same fonts as SVG path data, for the SVG output, written into this folder by the same Renderer export together with `fonts.js`, from the `iosevka-medium.json` project beside them |
+| `iosevka-medium.json` | The font editor's project file, the source the two exported fonts are made from |
 | `LICENSE-Iosevka.md` | The SIL Open Font License 1.1 of Iosevka |
 | `LICENSE-Sarasa.md` | The SIL Open Font License 1.1 of Sarasa Gothic |
 | `LICENSE-Noto.md` | The SIL Open Font License 1.1 of both Noto faces, with the copyright line of each |
 
 **The licence files stay here even though the outline fonts do not.** The packed
-glyphs and the glyph outlines of `generated/` are a derivative of these four
-faces, and the SIL Open Font License asks the copyright notices and the licence
-to travel with a derivative. The sections below are the provenance of the four:
+glyphs of `fonts.js` and the glyph outlines of `outlines.js` are a derivative of
+these four faces, and the SIL Open Font License asks the copyright notices and
+the licence to travel with a derivative. The sections below are the provenance of the four:
 which release was rasterized, and under which copyright line.
 
 The rule of the face, the subsetting of the sources, the fit of a glyph in its

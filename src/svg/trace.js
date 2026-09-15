@@ -1,7 +1,7 @@
 /*
     Turn a 1-bit bitmap into SVG path data, for the glyphs a stream downloads,
     which the SVG writer traces with it. The box drawing glyphs of
-    generated/outlines.js were traced with a copy of this in
+    data/fonts/outlines.js were traced with a copy of this in
     ReceiptPrinterFontEditor, which makes that file.
 
     A dot could be a rectangle of its own, but a box drawing glyph is a handful
