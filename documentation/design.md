@@ -253,7 +253,7 @@ The document is a `<defs>` that holds one `<path>` per distinct glyph of the rec
 
 Two things in the document paint white where a printer only ever adds ink, and both of them need a reverse feed to reach: an inverted cell writes its glyph in the colour of the paper, and an image writes its white dots as white, so an inverted cell or a raster image that a later entry puts over a printed line erases what is under it in the document and overprints it on the paper. Nothing a stream does short of that reaches it, and a list a renderer produced has it nowhere.
 
-The text is the outlines of the same face the bitmap fonts were rasterized from, so the vector output and the paper differ at the edges of a stroke and nowhere else: `test/svg.js` renders every fixture with resvg, a dev dependency, and asserts that the rectangles and the images agree dot for dot and that the whole paper agrees to at least 0.98. The contact sheet shows the vector output of every external fixture next to the render with the same number.
+The text is the outlines of the same face the bitmap fonts were rasterized from, and the bitmaps are tweaked by hand on the dot grid on top of that, so the vector output and the paper differ along the edges of a stroke and nowhere else: `test/svg.js` renders every fixture with resvg, a dev dependency, and asserts that the rectangles and the images agree dot for dot and that the whole paper agrees to at least 0.96. The contact sheet shows the vector output of every external fixture next to the render with the same number.
 
 <br>
 

@@ -313,9 +313,19 @@ describe('EscPosRenderer', function() {
       const normal = stitch(render(stream(ESC, '@', 'H', LF)), {width: WIDTH});
 
       assert.equal(wide.height, normal.height);
-      assert.equal(Bitmap.getPixel(wide, 6, 10), 1);
-      assert.equal(Bitmap.getPixel(wide, 7, 10), 1);
-      assert.equal(Bitmap.getPixel(normal, 6, 10), 0);
+
+      /* The cell is twice as wide and every dot of it is repeated, so a column
+         of the wide cell is the column half as far into the normal one */
+
+      for (let x = 0; x < 24; x++) {
+        for (let y = 0; y < 24; y++) {
+          assert.equal(
+              Bitmap.getPixel(wide, x, y),
+              Bitmap.getPixel(normal, x >> 1, y),
+              `dot ${x},${y}`,
+          );
+        }
+      }
     });
 
     it('should put the single size cells of a mixed line on the baseline', function() {
@@ -1770,12 +1780,14 @@ describe('EscPosRenderer', function() {
       )), {width: WIDTH});
 
       /* The two bytes are one character of two cells, so the A behind them
-         starts three cells from the left */
+         starts three cells from the left. The placeholder of the character
+         reaches both edges of its cell, so its two cells are one run of ink
+         between the two letters */
 
       const starts = columnsOf(paper, 0, 24).map((run) => run.start);
 
-      assert.equal(starts.length, 4);
-      assert.equal(starts[3] - starts[0], 36);
+      assert.equal(starts.length, 3);
+      assert.equal(starts[starts.length - 1] - starts[0], 36);
     });
 
     it('should draw the placeholder of the fallback glyph', function() {
@@ -1803,12 +1815,15 @@ describe('EscPosRenderer', function() {
       )), {width: WIDTH});
 
       /* Two characters of two cells each, and nothing of the four bytes is
-         printed as a character of its own */
+         printed as a character of its own, so the line is one character wider
+         than the same line with only the first pair of bytes on it */
 
-      const runs = columnsOf(paper, 0, 24);
+      const single = stitch(render(stream(
+          ESC, '@', FS, '&', FS, 'C', 0, [0x30, 0x21], LF,
+      )), {width: WIDTH});
 
-      assert.equal(runs.length, 4);
-      assert.equal(runs[3].end - runs[0].start + 1, 48 - 2);
+      assert.equal(ink(paper, 0, 24).min, ink(single, 0, 24).min);
+      assert.equal(ink(paper, 0, 24).max, ink(single, 0, 24).max + 24);
     });
 
     it('should print single byte characters again after FS .', function() {
@@ -2917,10 +2932,16 @@ describe('EscPosRenderer', function() {
       ));
 
       const paper = stitch(items, {width: WIDTH});
+      const plain = stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH});
+
+      /* The area starts at 120, 60, so the line of the area stands 120 dots
+         further to the right than the same line of a page without one, and
+         the sixty rows above it are white */
 
       assert.equal(paper.height, 120);
-      assert.equal(Bitmap.getPixel(paper, 123, 70), 1);
-      assert.equal(Bitmap.getPixel(paper, 3, 10), 0);
+      assert.equal(ink(paper, 60, 84).min, ink(plain, 0, 24).min + 120);
+      assert.equal(ink(paper, 60, 84).max, ink(plain, 0, 24).max + 120);
+      assert.equal(ink(paper, 0, 60).min, -1);
     });
 
     it('should compose several print areas into one page', function() {
@@ -2954,8 +2975,17 @@ describe('EscPosRenderer', function() {
           FF,
       ));
 
-      assert.equal(dots(stitch(absolute, {width: WIDTH})), dots(stitch(moved, {width: WIDTH})));
-      assert.equal(Bitmap.getPixel(stitch(absolute, {width: WIDTH}), 3, 70), 1);
+      const paper = stitch(absolute, {width: WIDTH});
+
+      /* Both moves land on row 60, where the line stands as it stands on the
+         top of a page of its own, with the rows above it white */
+
+      assert.equal(dots(paper), dots(stitch(moved, {width: WIDTH})));
+      assert.equal(
+          dots(Bitmap.extractRows(paper, 60, 30)),
+          dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+      );
+      assert.equal(dots(Bitmap.extractRows(paper, 0, 60)), dots(Bitmap.create(WIDTH, 60)));
     });
 
     it('should read a relative move above 32767 as a move back', function() {
@@ -2966,7 +2996,13 @@ describe('EscPosRenderer', function() {
           FF,
       ));
 
-      assert.equal(Bitmap.getPixel(stitch(items, {width: WIDTH}), 3, 10), 1);
+      /* The move back lands on the top of the area again, so the line stands
+         where it stands without either move */
+
+      assert.equal(
+          dots(Bitmap.extractRows(stitch(items, {width: WIDTH}), 0, 30)),
+          dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+      );
     });
 
     it('should ignore GS $ and GS \\ in standard mode', function() {

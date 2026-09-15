@@ -383,9 +383,18 @@ describe('StarPrntRenderer', function() {
       const wide = stitch(render(stream(ESC, '@', ESC, 'i', 0, 1, 'H', LF)), {width: WIDTH});
       const normal = stitch(render(stream(ESC, '@', 'H', LF)), {width: WIDTH});
 
-      assert.equal(Bitmap.getPixel(wide, 6, 10), 1);
-      assert.equal(Bitmap.getPixel(wide, 7, 10), 1);
-      assert.equal(Bitmap.getPixel(normal, 6, 10), 0);
+      /* The cell is twice as wide and every dot of it is repeated, so a column
+         of the wide cell is the column half as far into the normal one */
+
+      for (let x = 0; x < 24; x++) {
+        for (let y = 0; y < 24; y++) {
+          assert.equal(
+              Bitmap.getPixel(wide, x, y),
+              Bitmap.getPixel(normal, x >> 1, y),
+              `dot ${x},${y}`,
+          );
+        }
+      }
     });
 
     it('should go up to six times the size', function() {
@@ -608,9 +617,16 @@ describe('StarPrntRenderer', function() {
       const positioned = page(area(0, 0, WIDTH, 128), [ESC, GS, 0x50, 0x34, ...word(64)], 'Hi', LF);
       const relative = page(area(0, 0, WIDTH, 128), [ESC, GS, 0x50, 0x35, ...word(64)], 'Hi', LF);
 
+      /* The 64 of both moves is 64 dots down the page, where the line stands as
+         it stands on the top of an area of its own, with the rows above it
+         white */
+
+      const top = page(area(0, 0, WIDTH, 128), 'Hi', LF);
+
       assert.equal(positioned.height, 128);
       assert.equal(dots(positioned), dots(relative));
-      assert.equal(Bitmap.getPixel(positioned, 3, 74), 1);
+      assert.equal(dots(Bitmap.extractRows(positioned, 64, 32)), dots(Bitmap.extractRows(top, 0, 32)));
+      assert.equal(dots(Bitmap.extractRows(positioned, 0, 64)), dots(Bitmap.create(WIDTH, 64)));
     });
 
     it('should compose several print areas into one page', function() {

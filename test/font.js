@@ -396,38 +396,38 @@ describe('Font', function() {
          cap, where the Latin is 17.6 */
 
       assert.deepEqual(toAscii(Font.get('12x24').lookup(0x5d0)).slice(4, 18), [
-        '.###.....##.',
-        '..###....##.',
+        '..##.....##.',
+        '..##.....##.',
         '...##....##.',
         '...###...##.',
         '...###..###.',
         '..#####.##..',
         '..##.#####..',
         '..##..###...',
-        '.##...###...',
+        '.##...##....',
         '.##....##...',
-        '.##....###..',
+        '.##....##...',
         '.##.....##..',
-        '.##.....###.',
+        '.##......##.',
         '.##......##.',
       ]);
 
       /* And ก of the fourth, the same way */
 
       assert.deepEqual(toAscii(Font.get('12x24').lookup(0xe01)).slice(5, 18), [
-        '...######...',
-        '..########..',
-        '.###....##..',
-        '.###....##..',
-        '..###...###.',
-        '...##...###.',
-        '..##....###.',
-        '.###....###.',
-        '.###....###.',
-        '.###....###.',
-        '.###....###.',
-        '.###....###.',
-        '.###....###.',
+        '...#####....',
+        '..#######...',
+        '.##.....##..',
+        '.##.....##..',
+        '..###...##..',
+        '...##...##..',
+        '..##....##..',
+        '.##.....##..',
+        '.##.....##..',
+        '.##.....##..',
+        '.##.....##..',
+        '.##.....##..',
+        '.##.....##..',
       ]);
     });
 
@@ -502,8 +502,9 @@ describe('Font', function() {
     it('should draw the kanji of the katakana table the way it was reviewed', function() {
       /* 日 of the 12 by 24 font, as the golden fixture of the katakana kanji
          was reviewed by eye: the frame of the character with its middle bar,
-         two dots of every stroke vertically and one horizontally, which is
-         what fitting a full em into half of one does */
+         two dots of every horizontal stroke and one of every vertical one,
+         three for the middle bar, which is what fitting a full em into half
+         of one does */
 
       assert.deepEqual(toAscii(Font.get('12x24').lookup(0x65e5)), [
         '..########..',
@@ -513,7 +514,7 @@ describe('Font', function() {
         '..#......#..',
         '..#......#..',
         '..#......#..',
-        '..#......#..',
+        '..########..',
         '..########..',
         '..########..',
         '..#......#..',
@@ -591,11 +592,13 @@ describe('Font', function() {
     it('should draw the fallback glyph as the replacement character of the font', function() {
       const art = toAscii(font.fallback);
 
-      /* U+FFFD of Iosevka, a question mark in a diamond */
+      /* U+FFFD of Iosevka, a question mark in a diamond: the tip of the
+         diamond on row 3, its widest rows across the whole cell around the
+         bowl of the question mark, and the bottom tip on row 15 */
 
-      assert.deepEqual(art[2], '.....##.....');
-      assert.deepEqual(art[11], '..########..');
-      assert.deepEqual(art[17], '.....##.....');
+      assert.deepEqual(art[3], '.....##.....');
+      assert.deepEqual(art[9], '#####..#####');
+      assert.deepEqual(art[15], '.....##.....');
     });
   });
 
@@ -642,22 +645,22 @@ describe('Font', function() {
     it('should look like an A', function() {
       assert.deepEqual(toAscii(cell), [
         '.....##.....',
+        '.....##.....',
         '....####....',
         '....####....',
         '....####....',
         '....####....',
-        '....####....',
-        '...######...',
         '...##..##...',
         '...##..##...',
         '...##..##...',
         '...##..##...',
-        '..###..###..',
+        '...##..##...',
+        '..##....##..',
         '..########..',
         '..########..',
         '..##....##..',
-        '.###....###.',
-        '.###....###.',
+        '.##......##.',
+        '.##......##.',
         '.##......##.',
         '............',
         '............',
@@ -679,7 +682,7 @@ describe('Font', function() {
       assert.equal(cell.width, 9);
       assert.equal(cell.height, 17);
 
-      assert.deepEqual(toAscii(cell)[2], '...##....');
+      assert.deepEqual(toAscii(cell)[2], '..#..#...');
       assert.deepEqual(toAscii(cell)[8], '.######..');
       assert.deepEqual(toAscii(cell)[16], '.........');
     });

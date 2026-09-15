@@ -58,6 +58,22 @@ function crop(bitmap, x, y, width, height) {
   return result;
 }
 
+/**
+ * The cell of a character on a line of its own, so that a test can look for
+ * that character somewhere on the paper without pinning the shape of the font
+ *
+ * @param  {string}   character   The character to draw
+ * @return {object}               The 12 by 24 cell of font A
+ */
+function cellOf(character) {
+  const paper = painter();
+
+  paper.text(character);
+  paper.lineFeed();
+
+  return crop(stitch(paper.end(), {width: WIDTH}), 0, 0, 12, 24);
+}
+
 describe('Painter', function() {
   describe('options', function() {
     it('should report the width', function() {
@@ -2196,9 +2212,12 @@ describe('Painter', function() {
 
       const bitmap = stitch(paper.end(), {width: WIDTH});
 
+      /* The A stands at the origin of the first area and the B at the origin
+         of the second, which is 48 dots along and 30 rows down */
+
       assert.equal(bitmap.height, 60);
-      assert.equal(Bitmap.getPixel(bitmap, 3, 10), 1);
-      assert.equal(Bitmap.getPixel(bitmap, 51, 40), 1);
+      assert.deepEqual(toAscii(crop(bitmap, 0, 0, 12, 24)), toAscii(cellOf('A')));
+      assert.deepEqual(toAscii(crop(bitmap, 48, 30, 12, 24)), toAscii(cellOf('B')));
     });
 
     it('should move the position with pageVertical()', function() {
@@ -2262,8 +2281,11 @@ describe('Painter', function() {
 
       const bitmap = stitch(paper.end(), {width: WIDTH});
 
-      assert.equal(Bitmap.getPixel(bitmap, 3, 10), 1);
-      assert.equal(Bitmap.getPixel(bitmap, 15, 58), 1);
+      /* The A is on the line the move left behind, the B on the line 48 dots
+         down, in the second cell, where the move left the position */
+
+      assert.deepEqual(toAscii(crop(bitmap, 0, 0, 12, 24)), toAscii(cellOf('A')));
+      assert.deepEqual(toAscii(crop(bitmap, 12, 48, 12, 24)), toAscii(cellOf('B')));
     });
 
     it('should keep the page on printPage({keep: true})', function() {
@@ -2689,8 +2711,11 @@ describe('Painter', function() {
 
       const bitmap = stitch(paper.end(), {width: WIDTH});
 
-      assert.equal(Bitmap.getPixel(bitmap, 3, 10), 1);
-      assert.equal(Bitmap.getPixel(bitmap, 15, 10), 1);
+      /* The reverse feed puts the B back on the line of the A, in the second
+         cell */
+
+      assert.deepEqual(toAscii(crop(bitmap, 0, 0, 12, 24)), toAscii(cellOf('A')));
+      assert.deepEqual(toAscii(crop(bitmap, 12, 0, 12, 24)), toAscii(cellOf('B')));
     });
   });
   describe('the sink', function() {

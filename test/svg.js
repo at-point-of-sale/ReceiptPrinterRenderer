@@ -78,9 +78,13 @@ const GOLDEN = [
 /* How far the vector output and the dots of a fixture may differ, over the
    whole paper. An outline filled by a rasterizer and a bitmap filled with the
    0.45 coverage rule the font was rasterized with disagree at the edges of a
-   stroke, and nowhere else, see the notes of section 3 */
+   stroke, and nowhere else, see the notes of section 3. The bound was 0.98
+   while the bitmaps were the face rasterized; the built in font is tweaked by
+   hand on the dot grid now and drifts from the curves of the face on purpose,
+   which the Decisions list of the plan asks for, so the edges of a stroke are
+   a dot further apart and the bound is 0.96, see the notes of section 4 */
 
-const AGREEMENT = 0.98;
+const AGREEMENT = 0.96;
 
 /**
  * The display list of a fixture
