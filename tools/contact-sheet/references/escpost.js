@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import Bitmap from '../../../src/bitmap.js';
+import {toPng} from '../../../src/formats/png.js';
 import {references, root, locate, run, unavailable, outOfScope, fromPng} from './shared.js';
 
 /*
@@ -144,16 +145,25 @@ export async function reference(fixture, target) {
     bitmaps.push(await fromPng(new Uint8Array(fs.readFileSync(path.join(output, sheet)))));
   }
 
+  /* ESCPost writes one sheet per cut; the sheet shows and measures them
+     stacked in order, the way our own render stitches its items, so a receipt
+     with cuts is seen whole and not as its first sheet alone */
+
+  const bitmap = bitmaps.length === 1 ? bitmaps[0] : stack(bitmaps);
+  const file = `${fixture.name}.escpost.png`;
+
+  fs.writeFileSync(path.join(target.directory, file), await toPng(bitmap));
+
   return {
     tool: name,
     version,
     available: true,
     reason: '',
     kind: 'image',
-    file: path.join(target.prefix, `${fixture.name}.escpost`, sheets[0]),
+    file: path.join(target.prefix, file),
     files: sheets.map((sheet) => path.join(target.prefix, `${fixture.name}.escpost`, sheet)),
-    bitmap: bitmaps.length === 1 ? bitmaps[0] : stack(bitmaps),
-    note: sheets.length > 1 ? `${sheets.length} sheets, stacked for the metric` : '',
+    bitmap,
+    note: sheets.length > 1 ? `${sheets.length} sheets, stacked` : '',
     command: `${command}, profile ${profile}`,
   };
 }

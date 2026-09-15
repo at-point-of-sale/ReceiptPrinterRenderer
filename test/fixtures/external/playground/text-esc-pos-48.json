@@ -1,7 +1,7 @@
 {
   "source": "https://github.com/NielsLeenheer/ReceiptPrinterPlayground",
   "file": "src/assets/templates/text.js",
-  "commit": "a0345933eaacd19fc75fee7ac022d8f34a58e474",
+  "commit": "1c27d83484b1ca1d318bc70e4e7ce9a2efc762ed",
   "licence": "MIT",
   "setup": "npm install, and a checkout of ReceiptPrinterPlayground next to this repository, RENDERER_PLAYGROUND overrides the path, see tools/external/playground/capture.js",
   "command": "node tools/external/playground/capture.js text-esc-pos-48",
@@ -10,7 +10,7 @@
   "columns": 48,
   "width": 576,
   "codepageMapping": "epson",
-  "captured": "2026-09-13",
+  "captured": "2026-09-15",
   "unknown": 0,
-  "notes": "The text sample of the playground's \"New...\" menu, section 16g. Both fonts at every width, the styles, the sizes, the alignments, boxes and rules, the eight scripts of the codepage test and a cut at the end. Evaluated the way src/utils/encoder.js of the playground does, in an async function with an `encoder` of 48 columns and a `model` of 'Generic', which is what the playground puts there when no printer model is selected. Reviewed as ASCII art against the render of the other language of the same width. Re-rendered on 2026-09-14, when the Hebrew and the Thai of the code point set gained their glyphs from the third and the fourth source of tools/generate.js and three rules of the cell were added: a combining mark is centred in its cell by its ink instead of drawn from an origin it sits to the left of, a glyph whose ink lies outside its own advance is fitted by its ink instead of clipped at the edge of the cell, and a Unicode format character is an empty cell whether or not a source has a glyph for it. The diff against the previous golden was reviewed by eye row by row and holds only those changes: a letter where the fallback box stood, a mark where an empty cell stood, and a glyph made whole where a column of it was clipped at the edge of its cell, which here is the Thai ำ and ไ."
+  "notes": "The text sample of the playground's \"New...\" menu, section 16g. Both fonts at every width, the styles, the sizes, the alignments, boxes and rules, the eight scripts of the codepage test and a cut at the end. Evaluated the way src/utils/encoder.js of the playground does, in an async function with an `encoder` of 48 columns and a `model` of 'Generic', which is what the playground puts there when no printer model is selected. Reviewed as ASCII art against the render of the other language of the same width."
 }

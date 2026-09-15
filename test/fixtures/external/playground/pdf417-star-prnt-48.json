@@ -1,7 +1,7 @@
 {
   "source": "https://github.com/NielsLeenheer/ReceiptPrinterPlayground",
   "file": "src/assets/templates/pdf417.js",
-  "commit": "a0345933eaacd19fc75fee7ac022d8f34a58e474",
+  "commit": "1c27d83484b1ca1d318bc70e4e7ce9a2efc762ed",
   "licence": "MIT",
   "setup": "npm install, and a checkout of ReceiptPrinterPlayground next to this repository, RENDERER_PLAYGROUND overrides the path, see tools/external/playground/capture.js",
   "command": "node tools/external/playground/capture.js pdf417-star-prnt-48",
@@ -10,7 +10,7 @@
   "columns": 48,
   "width": 576,
   "codepageMapping": "star",
-  "captured": "2026-09-13",
+  "captured": "2026-09-15",
   "unknown": 0,
   "notes": "The pdf417 sample of the playground's \"New...\" menu, section 16g. The sizes, the error levels and the column counts. Evaluated the way src/utils/encoder.js of the playground does, in an async function with an `encoder` of 48 columns and a `model` of 'Generic', which is what the playground puts there when no printer model is selected. Reviewed as ASCII art against the render of the other language of the same width."
 }
