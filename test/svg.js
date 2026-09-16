@@ -13,6 +13,7 @@ import {scanlines} from '../src/formats/png.js';
 import Bitmap from '../src/bitmap.js';
 import outlines from '../data/fonts/outlines.js';
 import {names, fromPbm} from './helpers/fixtures.js';
+import {Resvg, unavailable} from './helpers/resvg.js';
 import {dotAgreement, fromPng} from '../tools/contact-sheet/references/shared.js';
 
 /*
@@ -29,27 +30,6 @@ import {dotAgreement, fromPng} from '../tools/contact-sheet/references/shared.js
 */
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
-
-/* The wasm build of resvg, a dev dependency of this file alone. It is loaded
-   here rather than in a hook, so that the tests that need it are defined only
-   when it is there and a machine without it runs the rest of the file */
-
-const WASM = path.join(
-    path.dirname(fileURLToPath(import.meta.url)), '..', 'node_modules', '@resvg', 'resvg-wasm', 'index_bg.wasm',
-);
-
-let Resvg = null;
-let unavailable = '';
-
-try {
-  const module = await import('@resvg/resvg-wasm');
-
-  await module.initWasm(fs.readFileSync(WASM));
-
-  Resvg = module.Resvg;
-} catch (error) {
-  unavailable = error.message;
-}
 
 /* The printer the fixtures were made for, see test/tools/make-fixtures.js */
 

@@ -4,6 +4,8 @@ import outlines from '../data/fonts/outlines.js';
 import fonts from '../data/fonts/fonts.js';
 import Font from '../src/font.js';
 import Bitmap from '../src/bitmap.js';
+import {Resvg, unavailable} from './helpers/resvg.js';
+import {fromPng} from '../tools/contact-sheet/references/shared.js';
 
 /*
     What data/fonts/outlines.js and data/fonts/fonts.js say about each other.
@@ -12,9 +14,18 @@ import Bitmap from '../src/bitmap.js';
     code that makes or remakes them, see Section 21 of the implementation plan,
     so what is checked here is what the two files alone can prove: that the
     outlines cover the glyphs of the packed font, that every path parses with
-    the small parser below, that the box drawing characters are the dots of the
-    rendered cell of the packed font in each of the three cells of the profiles,
-    and where a glyph paints outside its cell, which is reported and not pinned.
+    the small parser below, that the box drawing characters fill to the dots of
+    the rendered cell of the packed font in each of the three cells of the
+    profiles, and where a glyph paints outside its cell, which is reported and
+    not pinned.
+
+    The box set is no longer a trace of those dots. Since Section 21 of the
+    editor's plan it is the geometry of its box drawing rule written as path
+    data in dots, a rectangle per arm, band and block and a pair of arcs per
+    rounded corner, so a straight glyph still lands on whole dots and a corner
+    does not. It is therefore measured here the way a reader of the SVG
+    measures it, by rasterizing the path at one pixel per dot with resvg and
+    comparing that with the cell, rather than by painting rectangles.
 
     How well a filled outline reproduces its packed glyph is the editor's
     measurement and not this repository's: an outline is written in whole tenths
@@ -48,14 +59,15 @@ const SEGMENTS = 10;
 
 /* How many numbers every path command takes */
 
-const ARITY = {M: 2, L: 2, Q: 4, C: 6, h: 1, v: 1, Z: 0};
+const ARITY = {M: 2, L: 2, Q: 4, C: 6, A: 7, h: 1, v: 1, Z: 0};
 
 /**
  * Parse SVG path data into contours, in dots.
  *
- * Absolute M, L, Q, C and Z, which the glyph paths are written with, and the
- * relative h and v of the traced box drawing characters. A command letter that
- * repeats may be left out, as it may in SVG.
+ * Absolute M, L, Q, C and Z, which the glyph paths are written with, the
+ * relative h and v of the rectangles of a box drawing character, and the
+ * absolute A of the arcs of a rounded corner, rx ry rotation large-arc sweep
+ * x y. A command letter that repeats may be left out, as it may in SVG.
  *
  * @param  {string}   data      SVG path data
  * @param  {number}   units     Path units per dot
@@ -131,6 +143,20 @@ function parsePath(data, units) {
         contour.push({type: 'Q', x1: value(index), y1: value(index + 1), x: value(index + 2), y: value(index + 3)});
         x = value(index + 2);
         y = value(index + 3);
+      } else if (command === 'A') {
+        /* The flags and the rotation of an arc are not in dots, so they are
+           read as they are written and only the radii and the end point are
+           divided by the units */
+
+        contour.push({
+          type: 'A',
+          rx: value(index), ry: value(index + 1),
+          rotation: Number(tokens[index + 2]),
+          large: Number(tokens[index + 3]), sweep: Number(tokens[index + 4]),
+          x: value(index + 5), y: value(index + 6),
+        });
+        x = value(index + 5);
+        y = value(index + 6);
       } else if (command === 'C') {
         contour.push({
           type: 'C',
@@ -167,6 +193,13 @@ function flatten(contours) {
 
     for (const command of contour) {
       if (command.type === 'M' || command.type === 'L') {
+        points.push([command.x, command.y]);
+      } else if (command.type === 'A') {
+        /* The chord of an arc, not its bulge. Only the glyph outlines are
+           measured by their ink here and none of them holds an arc: the arcs
+           are the four rounded corners of the box set, which are measured by
+           rasterizing them */
+
         points.push([command.x, command.y]);
       } else {
         for (let step = 1; step <= SEGMENTS; step++) {
@@ -217,34 +250,27 @@ function difference(one, other) {
 }
 
 /**
- * Fill a box drawing path into a cell.
+ * Rasterize a box drawing path into a cell, one pixel per dot.
  *
- * A box path is the rectangles the tracer merged the black runs of a cell into,
- * in whole dots and all wound the same way, so painting each of them is the
- * whole of the fill: there is no curve in one and no hole.
+ * The path is wrapped in a document of the size of the cell and rendered by
+ * resvg at its original size, so a dot of the cell is a pixel of the render and
+ * a path that lands on whole dots comes back with no grey in it at all. The
+ * background is transparent, so the render is composited over the white of the
+ * paper and thresholded at half, which is what fromPng() does and what the
+ * contact sheet reads a reference render with.
  *
- * @param  {Array}    contours   Contours of a box path, as parsePath returned them
- * @param  {number}   width      Cell width in dots
- * @param  {number}   height     Cell height in dots
- * @return {object}              The cell as a bitmap
+ * @param  {string}          data      SVG path data, in dots
+ * @param  {number}          width     Cell width in dots
+ * @param  {number}          height    Cell height in dots
+ * @return {Promise<object>}           The cell as a bitmap
  */
-function fillRectangles(contours, width, height) {
-  const bitmap = Bitmap.create(width, height);
+async function rasterizePath(data, width, height) {
+  const document = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" ` +
+    `viewBox="0 0 ${width} ${height}"><path d="${data}"/></svg>`;
 
-  for (const contour of contours) {
-    assert.lengthOf(contour, 4, 'a box path that is not a rectangle');
+  const png = new Resvg(document, {fitTo: {mode: 'original'}}).render().asPng();
 
-    const xs = contour.map((command) => command.x);
-    const ys = contour.map((command) => command.y);
-
-    for (let y = Math.min(...ys); y < Math.max(...ys); y++) {
-      for (let x = Math.min(...xs); x < Math.max(...xs); x++) {
-        Bitmap.setPixel(bitmap, x, y, 1);
-      }
-    }
-  }
-
-  return bitmap;
+  return fromPng(new Uint8Array(png));
 }
 
 /**
@@ -406,8 +432,17 @@ describe('Outlines', function() {
       ]);
     });
 
+    it('should read the arcs of a rounded corner', function() {
+      assert.deepEqual(parsePath('M5 16.5A5.5 5.5 0 0 1 10.5 11L10.5 13A3.5 3.5 0 0 0 7 16.5Z', 1), [[
+        {type: 'M', x: 5, y: 16.5},
+        {type: 'A', rx: 5.5, ry: 5.5, rotation: 0, large: 0, sweep: 1, x: 10.5, y: 11},
+        {type: 'L', x: 10.5, y: 13},
+        {type: 'A', rx: 3.5, ry: 3.5, rotation: 0, large: 0, sweep: 0, x: 7, y: 16.5},
+      ]]);
+    });
+
     it('should not read a command it does not know', function() {
-      assert.throws(() => parsePath('M0 0A1 1 0 0 1 2 2Z', 10));
+      assert.throws(() => parsePath('M0 0S1 1 2 2Z', 10));
     });
 
     it('should be empty for the glyphs the face draws nothing for', function() {
@@ -668,9 +703,49 @@ describe('Outlines', function() {
   });
 
   describe('the box drawing characters', function() {
-    for (const cell of CELLS) {
-      it(`should fill to the cells of the ${cell.name} cell exactly`, function() {
+    /* The four rounded corners, which are the only glyphs of the range whose
+       path is not rectangles: a subpath of the outer arc, a line across the
+       stroke, the inner arc back and a close */
+
+    const ROUNDED = [0x256d, 0x256e, 0x256f, 0x2570];
+
+    /* How far a rounded corner may drift from the dots of its cell. The arc is
+       filled by the rasterizer with the coverage rule of an anti-aliased edge
+       and by the font with the centre of a dot, so a dot the arc grazes may go
+       either way; nothing else in the range has an edge that is not on a whole
+       dot, so nothing else may drift at all */
+
+    const CORNER_DOTS = 6;
+
+    /* The cells of font A the owner tuned by hand on the dot grid before the
+       range was geometry and whose dots differ from the rule: their double
+       lines are one dot wide where the rule draws two. The outline of one is
+       the rule and the packed cell is the hand edit, so the two differ by the
+       widening of those lines, by the number of dots pinned here, until the
+       owner reverts them in the editor and exports the font again, at which
+       point they drift by nothing and leave this list; see the Section 21 note
+       of the editor's plan. The four rounded corners were tuned by hand as
+       well, but the rule reproduces them dot for dot, so they are measured with
+       the arcs above and not excused here */
+
+    const HAND_EDITED = {
+      '12x24': {0x255f: 46, 0x2562: 46, 0x2564: 22, 0x2567: 22, 0x256a: 20},
+      '9x17': {},
+      '9x24': {},
+    };
+
+    if (!Resvg) {
+      it('needs resvg, which did not load', function() {
+        assert.fail(`@resvg/resvg-wasm did not load, so the box drawing paths are not filled: ${unavailable}`);
+      });
+    }
+
+    for (const cell of Resvg ? CELLS : []) {
+      it(`should fill to the dots of the ${cell.name} cell`, async function() {
         const font = new Font(fonts[cell.font]);
+
+        const corners = [];
+        const edited = [];
         const failed = [];
 
         for (const [key, path] of Object.entries(outlines.box[cell.name])) {
@@ -682,23 +757,66 @@ describe('Outlines', function() {
             stretch: true,
           });
 
-          const filled = fillRectangles(parsePath(path, 1), cell.width, cell.height);
-          const dots = difference(filled, bitmap);
+          const drawn = await rasterizePath(path, cell.width, cell.height);
+          const dots = difference(drawn, bitmap);
 
-          if (dots !== 0) {
+          if (ROUNDED.includes(codepoint)) {
+            corners.push(`${name(codepoint)} by ${dots}`);
+
+            if (dots > CORNER_DOTS) {
+              failed.push(`${name(codepoint)} by ${dots} dots, more than the ${CORNER_DOTS} an arc may`);
+            }
+          } else if (codepoint in HAND_EDITED[cell.name]) {
+            edited.push(`${name(codepoint)} by ${dots}`);
+
+            if (dots !== HAND_EDITED[cell.name][codepoint]) {
+              failed.push(
+                  `${name(codepoint)} by ${dots} dots, not the ${HAND_EDITED[cell.name][codepoint]} of the hand edit`,
+              );
+            }
+          } else if (dots !== 0) {
             failed.push(`${name(codepoint)} by ${dots} dots`);
           }
         }
 
         assert.deepEqual(failed, []);
-      });
+
+        report.push(`the rounded corners of the ${cell.name} cell drift by ${corners.join(', ')} dots` +
+          (edited.length ? `, and the cells edited by hand by ${edited.join(', ')}` : ''));
+      }).timeout(60 * 1000);
     }
 
-    it('should be rectangles on whole dots', function() {
+    it('should be path data in dots, rectangles and the arcs of a rounded corner', function() {
+      /* A number is dots, written with at most three decimals and never in
+         exponent notation, and a subpath is one of the two shapes the export
+         writes: the rectangle of an arm, a band, a block or a dot of a shade,
+         and the ring between the two radii of a rounded corner */
+
+      const NUMBER = '-?\\d+(?:\\.\\d{1,3})?';
+      const RECTANGLE = `M${NUMBER} ${NUMBER}h${NUMBER}v${NUMBER}h${NUMBER}Z`;
+      const CORNER = `M${NUMBER} ${NUMBER}` +
+        `A${NUMBER} ${NUMBER} ${NUMBER} [01] [01] ${NUMBER} ${NUMBER}` +
+        `L${NUMBER} ${NUMBER}` +
+        `A${NUMBER} ${NUMBER} ${NUMBER} [01] [01] ${NUMBER} ${NUMBER}Z`;
+
+      const shape = new RegExp(`^(?:${RECTANGLE}|${CORNER})*$`);
+
       for (const cell of CELLS) {
-        for (const path of Object.values(outlines.box[cell.name])) {
-          assert.match(path, /^(M\d+ \d+h\d+v\d+h-\d+Z)*$/, `in the ${cell.name} cell`);
+        for (const [key, path] of Object.entries(outlines.box[cell.name])) {
+          assert.match(path, shape, `${name(Number(key))} in the ${cell.name} cell`);
+
+          assert.doesNotThrow(() => parsePath(path, 1), `${name(Number(key))} in the ${cell.name} cell`);
         }
+      }
+    });
+
+    it('should draw an arc for the four rounded corners and for nothing else', function() {
+      for (const cell of CELLS) {
+        const arcs = Object.entries(outlines.box[cell.name])
+            .filter(([, path]) => path.includes('A'))
+            .map(([key]) => Number(key));
+
+        assert.deepEqual(arcs.map(name), ROUNDED.map(name), `in the ${cell.name} cell`);
       }
     });
   });

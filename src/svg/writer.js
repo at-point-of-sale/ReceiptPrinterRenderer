@@ -91,9 +91,10 @@ const DEFAULT_DPI = 203;
 
 const GLYPH_FONTS = {A: '12x24', B: '8x16'};
 
-/* Which font the box set of the outlines was traced with, per cell: the 12 by
-   24 font in the 12 by 24 cell of font A, the 8 by 16 font in the 9 by 17 cell
-   of an Epson and the 9 by 24 cell of a Star. A cell of another shape, or one
+/* Which font the box set of the outlines belongs to, per cell: the 12 by 24
+   font in the 12 by 24 cell of font A, the 8 by 16 font in the 9 by 17 cell of
+   an Epson and the 9 by 24 cell of a Star, whose sets are that font's shapes
+   placed and stretched into the cell the way the painter does it. A cell of another shape, or one
    of these with the other font, is traced at write time instead */
 
 const BOX_FONTS = {'12x24': 'A', '9x17': 'B', '9x24': 'B'};
@@ -665,8 +666,9 @@ class SvgWriter {
   }
 
   /**
-     * What is drawn for a box drawing or block character: the rectangles of the
-     * box set of the outlines for the cell of the operation, or, for a cell the
+     * What is drawn for a box drawing or block character: the path of the box
+     * set of the outlines for the cell of the operation, rectangles and the arcs
+     * of a rounded corner, or, for a cell the
      * set has no entry for, which is a cell size of a profile of an
      * application's own, the cell the bitmap font renders traced at write time
      * and kept for the cells that follow
@@ -681,8 +683,8 @@ class SvgWriter {
     const size = `${cell.width}x${cell.height}`;
     const set = outlines.box[size];
 
-    /* The box set was traced with the font of the cell it belongs to, so a cell
-       of that shape in the other font is traced here instead */
+    /* The box set of a cell is the shapes of the font that cell belongs to, so a
+       cell of that shape in the other font is traced here instead */
 
     if (set && BOX_FONTS[size] === font && codepoint in set) {
       return set[codepoint] === '' ?

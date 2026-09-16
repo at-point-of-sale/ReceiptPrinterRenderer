@@ -1,8 +1,10 @@
 /*
     Turn a 1-bit bitmap into SVG path data, for the glyphs a stream downloads,
-    which the SVG writer traces with it. The box drawing glyphs of
-    data/fonts/outlines.js were traced with a copy of this in
-    ReceiptPrinterFontEditor, which makes that file.
+    which the SVG writer traces with it, and for a box drawing character in a
+    cell the box set of data/fonts/outlines.js has no entry for. The box set
+    itself is geometry, written by ReceiptPrinterFontEditor from the rule that
+    draws the range; the editor keeps a copy of this for the fallback glyph and
+    for a code point of the range its rule has no drawing for.
 
     A dot could be a rectangle of its own, but a box drawing glyph is a handful
     of bars and a downloaded glyph is a drawing, so the runs of black dots are
