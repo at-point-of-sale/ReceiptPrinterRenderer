@@ -146,6 +146,26 @@ assert.throws(() => new ReceiptPrinterRenderer({language: 'meow', width: 576}), 
   );
 }
 
+/* The tokenizer of the decoder is bundled into the browser builds, the way the
+   codepage encoder is, and the main entry of the decoder is not: the names and
+   the meanings of the commands and the codepage mappings behind them are for
+   the inspector and the command line, and a page that draws a receipt must not
+   load them. The needles are strings of the two sides that terser keeps,
+   because it mangles the names it does not keep */
+
+for (const file of [bundle, path.join(dist, 'receipt-printer-renderer.esm.js')]) {
+  const text = fs.readFileSync(file, 'utf8');
+  const name = path.basename(file);
+
+  assert.ok(text.includes('The stream has ended'), `${name} holds the tokenizer of the decoder`);
+  assert.ok(text.includes('star-graphics'), `${name} holds the languages of the tokenizer`);
+
+  assert.ok(!text.includes('CATEGORIES'), `${name} holds none of the descriptions of the decoder`);
+  assert.ok(!text.includes('Cut and drawer'), `${name} names no category of the decoder`);
+  assert.ok(!text.includes('Initialize the printer'), `${name} names no command of the decoder`);
+  assert.ok(!/\bmappings\b/.test(text), `${name} holds none of the codepage mappings of the decoder`);
+}
+
 /* And it draws the same dots as the module build of the same sources, text
    included, which is the check that a bundle that decodes nothing would fail */
 
@@ -192,5 +212,6 @@ assert.throws(() => new ReceiptPrinterRenderer({language: 'meow', width: 576}), 
 
 console.log(
     'UMD global is ReceiptPrinterRenderer, renders and lays out esc-pos, star-prnt, star-line and star-graphics, ' +
-    'draws the dots of the module build, and ReceiptPrinterRendererSvg writes the SVG of a list it made',
+    'draws the dots of the module build, carries the tokenizer of the decoder and none of its descriptions, ' +
+    'and ReceiptPrinterRendererSvg writes the SVG of a list it made',
 );

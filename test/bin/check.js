@@ -5,6 +5,8 @@ import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
+import {decode} from '@point-of-sale/receipt-printer-decoder';
+
 import ReceiptPrinterRenderer, {stitch, toPng} from '../../src/receipt-printer-renderer.js';
 import {toSvg} from '../../src/svg.js';
 
@@ -107,6 +109,41 @@ try {
     assert.ok(!fs.existsSync(path.join(target, 'cut.4.png')), 'and nothing behind the last piece');
   }
 
+  /* The commands of a stream as text, which is the one thing the command does
+     that the renderer does not: the bundle imports the main entry of the
+     decoder and resolves it out of node_modules, where the browser builds
+     carry the tokenizer alone */
+
+  {
+    const written = command(['-f', 'commands'], bytes('receipt')).toString('utf8');
+    const lines = written.split('\n');
+
+    assert.equal(lines.length - 1, decode(bytes('receipt'), 'esc-pos').length, 'one line per token');
+    assert.match(lines[0], /^ *0 {2}ESC @ +Initialize the printer$/, 'the first command names itself');
+    assert.ok(written.includes('Select codepage'), 'and the mapping of the language is applied');
+  }
+
+  /* And the language read out of the commands themselves, which the same
+     package answers */
+
+  {
+    const star = path.join(root, 'test', 'fixtures', 'star-prnt', 'receipt.bin');
+    const stream = new Uint8Array(fs.readFileSync(star));
+
+    const output = path.join(target, 'auto.png');
+
+    command([star, '-l', 'auto', '-o', output]);
+
+    const renderer = new ReceiptPrinterRenderer({language: 'star-prnt', width: WIDTH});
+    const expected = await toPng(stitch(renderer.render(stream), {width: WIDTH}));
+
+    assert.deepEqual(
+        Array.from(new Uint8Array(fs.readFileSync(output))),
+        Array.from(expected),
+        'a Star stream through -l auto renders as StarPRNT',
+    );
+  }
+
   /* The version of the manifest and the usage, which is what a shell asks for
      before anything else */
 
@@ -118,7 +155,8 @@ try {
   }
 
   console.log(
-      'The built command writes the PNG of a file, the SVG of a pipe and the three pieces of a cut receipt, ' +
+      'The built command writes the PNG of a file, the SVG of a pipe, the three pieces of a cut receipt, ' +
+      'the commands of a stream as text and the render of the language -l auto found, ' +
       'all as the sources make them, and reports version ' +
       `${JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version}`,
   );

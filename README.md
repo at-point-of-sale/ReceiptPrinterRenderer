@@ -16,6 +16,8 @@ Render images based on raw ESC/POS, StarPRNT, Star Line or Star Graphics printer
 
 This library is a renderer that supports the same language that receipt printers support. Give it the bytes an application sends to a receipt printer, whatever produced them, and it interprets them the way the printer would: the text in the printer's fonts and codepages, the styles, the images, the page mode of ESC/POS, the cuts, and the barcodes, which it draws itself: the one-dimensional symbologies, the GS1 DataBar family, QR codes and PDF417. What comes out is a stream of image segments and optionally a set of commands a printer does understand, such as cut and pulse, and from there a PNG, an SVG or a preview on a canvas.
 
+The syntax of the four languages is not in this package: the bytes are cut into commands, runs of text and control bytes by the tokenizer of [ReceiptPrinterDecoder](https://github.com/at-point-of-sale/ReceiptPrinterDecoder), and what is here is what each of them does to the paper.
+
 That makes it a viewer of receipts, a way to test what an application prints without a printer on the desk, and a renderer for printers that have no fonts and no barcode engine of their own. Internally it is used by the [@point-of-sale](https://point-of-sale.dev) printer drivers to support receipt printers that only support printing graphics, such as the Star TSP100 series up to the TSP100III.
 
 <br>
@@ -70,12 +72,13 @@ The renderer can also be used on its own: `render()` turns a stream into image s
 
 ## Command line interface
 
-The package ships with a command line as well, for rendering a stream of printer commands to an image from the shell without writing a script: the same renderer and the same helpers with arguments in front of them, writing PNG, PBM, SVG or the display list as JSON, as one image of the whole roll or one per piece of paper. It runs without installing anything through `npx`.
+The package ships with a command line as well, for rendering a stream of printer commands to an image from the shell without writing a script: the same renderer and the same helpers with arguments in front of them, writing PNG, PBM, SVG or the display list as JSON, as one image of the whole roll or one per piece of paper. It reads the language out of the commands themselves with `-l auto`, and writes the stream as a list of its commands with `-f commands`. It runs without installing anything through `npx`.
 
 ```
 npx @point-of-sale/receipt-printer-renderer receipt.bin -o receipt.png
 npx @point-of-sale/receipt-printer-renderer -l star-prnt -c 32 receipt.bin -o receipt.svg
 npx @point-of-sale/receipt-printer-renderer --pieces receipt.bin -o receipt.png
+npx @point-of-sale/receipt-printer-renderer -l auto -f commands receipt.bin
 ```
 
 See [Command line interface](documentation/cli.md) for every option, the formats, the pieces and the exit codes.

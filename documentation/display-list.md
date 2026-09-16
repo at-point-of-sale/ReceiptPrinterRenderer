@@ -73,7 +73,7 @@ Inside a line. `x` is from the left edge of the surface, `y` from the top of the
 
 | Field | Meaning |
 |---|---|
-| `codepoint` | The Unicode code point the parser decoded, U+FFFD for a byte the codepage does not map and for the placeholder cells of multibyte text. |
+| `codepoint` | The Unicode code point the renderer decoded, U+FFFD for a byte the codepage does not map and for the placeholder cells of multibyte text. |
 | `bitmap` | Stands in the place of `codepoint` for a glyph the stream downloaded, the dots as `ESC &` or `FS 2` defined them, a `{width, height, data}` bitmap placed at the top left of an unscaled cell of the size of `cell` and clipped by it. |
 | `font` | `A` or `B`. |
 | `cell` | The unscaled cell of this operation, `{width: 12, height: 24}` for font A, `{width: 9, height: 17}` or `{width: 9, height: 24}` for font B, and twice as wide for a downloaded multibyte glyph. |

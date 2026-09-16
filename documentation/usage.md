@@ -34,6 +34,8 @@ Install the package using npm:
 
     npm install @point-of-sale/receipt-printer-renderer --save
 
+It depends on [@point-of-sale/codepage-encoder](https://github.com/at-point-of-sale/CodepageEncoder) for the codepages, on [lean-qr](https://github.com/davidje13/lean-qr) for the QR codes, and on the tokenizer entry of [@point-of-sale/receipt-printer-decoder](https://github.com/at-point-of-sale/ReceiptPrinterDecoder), which says where every command of a stream begins and ends. The bundles for the browser carry all three, the builds for Node import them.
+
 The default export is `ReceiptPrinterRenderer`, which renders every language the encoder speaks:
 
 ```js
@@ -333,7 +335,7 @@ To preview the same receipt for a Star printer, encode it with `language: 'star-
 
 ### Command line
 
-Everything on this page is also available from the shell, as `receipt-printer-renderer` or through `npx` without installing: a stream in, a PNG, a PBM, an SVG or the display list out, as one image or one per piece of paper. See [Command line interface](cli.md).
+Everything on this page is also available from the shell, as `receipt-printer-renderer` or through `npx` without installing: a stream in, a PNG, a PBM, an SVG or the display list out, as one image or one per piece of paper. It can also read the language out of the commands themselves, `-l auto`, and write the stream as a list of its commands rather than as an image, `-f commands`. See [Command line interface](cli.md).
 
 <br>
 
@@ -469,9 +471,9 @@ Passing a renderer is optional. Without one a driver for a printer that only pri
 
 The renderer covers the commands ReceiptPrinterEncoder version 3 emits. A few things are recognised, so that the rest of the stream stays in sync, but do not appear on the paper:
 
-- **Maxicode, the two dimensional GS1 DataBar and the composite symbologies.** The other selectors of the two dimensional group of `GS ( k`, parsed and reported as an `unknown` item.
+- **Maxicode, the two dimensional GS1 DataBar and the composite symbologies.** The other selectors of the two dimensional group of `GS ( k`, read and reported as an `unknown` item.
 - **CJK text, and the logos a printer already holds.** There is no CJK font here, so a multibyte character is drawn as two placeholder cells unless the stream downloaded a glyph for it itself, and an image the stream never defined is reported instead of printed. Glyphs and images a stream does define are drawn, see the `ESC &` and the graphics rows of the ESC/POS reference.
-- **Commands the parser does not know.** Skipped according to the argument lengths of the specification and reported as an `unknown` item, so that one command the renderer has never seen does not derail the text after it.
+- **Commands the renderer does not draw.** Skipped according to the argument lengths of the specification and reported as an `unknown` item, so that one command the renderer has never seen does not derail the text after it. Where a command ends is not this package's answer: the stream is cut into commands, runs of text and control bytes by the tokenizer of [@point-of-sale/receipt-printer-decoder](https://github.com/at-point-of-sale/ReceiptPrinterDecoder), which owns the syntax of all four languages, and the renderer says what each of them does to the paper.
 
 An `unknown` item only reaches you when `unknown` is in `commands`, otherwise it is dropped. It carries the bytes of the command, which makes it the place to look when something is missing from a render. A command that cannot change the paper at all, a status request or a setting of the printer, does not produce one: it is consumed with its length and nothing else happens, so an `unknown` item always means something that could have been on the paper is not. The two command references say which is which, under "Statuses".
 

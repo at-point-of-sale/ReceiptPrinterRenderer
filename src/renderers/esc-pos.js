@@ -1,4 +1,5 @@
 import CodepageEncoder from '@point-of-sale/codepage-encoder';
+import {tokenize} from '@point-of-sale/receipt-printer-decoder/tokenizer';
 import Bitmap from '../bitmap.js';
 import Painter from '../painter.js';
 import {internationalCharacterSet, noCharacterSet} from '../charsets.js';
@@ -11,17 +12,23 @@ import printerProfiles from '../../generated/profiles.js';
  * @typedef {import('../types.js').Layout} Layout
  * @typedef {import('../types.js').RendererOptions} RendererOptions
  * @typedef {import('../types.js').RenderItem} RenderItem
+ * @typedef {import('@point-of-sale/receipt-printer-decoder/tokenizer').Token} Token
  */
 
-const ESC = 0x1b;
-const FS = 0x1c;
-const GS = 0x1d;
-const DLE = 0x10;
+/* The control bytes a printer acts on. The tokenizer hands one of these back
+   as a control token, everything else below 0x20 that is not the prefix of a
+   command it hands back as an ignored one */
+
 const HT = 0x09;
 const LF = 0x0a;
 const FF = 0x0c;
 const CR = 0x0d;
 const CAN = 0x18;
+
+/* The width of the paper `handlers()` builds a renderer on, which is the
+   narrowest a renderer takes: it is thrown away without rendering a dot */
+
+const HANDLER_WIDTH = 8;
 
 /* The resolution of a printer that has no dpi in its profile, which is what
    every receipt printer of this class prints at */
@@ -48,10 +55,9 @@ const LAST_GLYPH_CODE = 0x7e;
 const GLYPH_BYTES = 3;
 
 /* The size of a user defined Kanji glyph of FS 2: 24 by 24 dots in column
-   format, three bytes per column, which is 72 data bytes */
+   format, three bytes per column */
 
 const KANJI_GLYPH_SIZE = 24;
-const KANJI_GLYPH_BYTES = (KANJI_GLYPH_SIZE / 8) * KANJI_GLYPH_SIZE;
 
 /* The values ESC V n accepts. 0 and 48 switch the rotation off, 1, 49, 2 and 50
    switch it on: the two differ in the space the printer leaves between the
@@ -67,11 +73,6 @@ const ROTATION = Object.assign(Object.create(null), {
    every colour is the black of its paper */
 
 const COLOUR_FUNCTIONS = [48, 49, 50];
-
-/* The code system FS C selects, which decides which bytes are the lead byte of
-   a multibyte character in Kanji mode */
-
-const CODE_SYSTEMS = Object.assign(Object.create(null), {0: 'jis', 1: 'shift-jis', 48: 'jis', 49: 'shift-jis'});
 
 /* The codepage every printer starts in, and the one an unknown codepage number
    falls back to */
@@ -238,339 +239,16 @@ function codepointsOf(name) {
   }
 }
 
-/*
-    Argument lengths.
-
-    A command in the tables below says how many bytes follow its two byte
-    prefix, either as a number or as a function of the bytes. A function is
-    given the whole stream and the position of the first argument, and returns
-    the number of argument bytes, or -1 when the stream ends before the command
-    is complete, which stops the parser without an error.
-*/
-
-/**
- * Arguments of a command that ends at the first NUL byte
- *
- * @param  {Uint8Array}   bytes   The whole stream
- * @param  {number}       index   Position of the first argument
- * @return {number}               Number of argument bytes, or -1 when the stream is too short
- */
-function nulTerminated(bytes, index) {
-  let end = index;
-
-  while (end < bytes.length && bytes[end] !== 0x00) {
-    end++;
-  }
-
-  return end < bytes.length ? end - index + 1 : -1;
-}
-
-/**
- * Arguments of GS ( x pL pH d1..dk, where the two length bytes count the data
- * that follows them
- *
- * @param  {Uint8Array}   bytes   The whole stream
- * @param  {number}       index   Position of the first argument
- * @return {number}               Number of argument bytes, or -1 when the stream is too short
- */
-function parenthesisArguments(bytes, index) {
-  if (index + 3 > bytes.length) {
-    return -1;
-  }
-
-  return 3 + bytes[index + 1] + bytes[index + 2] * 256;
-}
-
-/**
- * Arguments of GS 8 L p1 p2 p3 p4 d1..dk, the four byte length variant
- *
- * @param  {Uint8Array}   bytes   The whole stream
- * @param  {number}       index   Position of the first argument
- * @return {number}               Number of argument bytes, or -1 when the stream is too short
- */
-function largeParenthesisArguments(bytes, index) {
-  if (index + 5 > bytes.length) {
-    return -1;
-  }
-
-  return 5 + bytes[index + 1] + bytes[index + 2] * 256 +
-    bytes[index + 3] * 65536 + bytes[index + 4] * 16777216;
-}
-
-/**
- * Arguments of ESC * m nL nH d1..dk, a column mode image. The 24 dot modes
- * carry three bytes per column, the 8 dot modes one.
- *
- * @param  {Uint8Array}   bytes   The whole stream
- * @param  {number}       index   Position of the first argument
- * @return {number}               Number of argument bytes, or -1 when the stream is too short
- */
-function columnImageArguments(bytes, index) {
-  if (index + 3 > bytes.length) {
-    return -1;
-  }
-
-  const mode = bytes[index];
-  const columns = bytes[index + 1] + bytes[index + 2] * 256;
-
-  return 3 + (mode === 32 || mode === 33 ? columns * 3 : columns);
-}
-
-/**
- * Arguments of GS v 0 m xL xH yL yH d1..dk, a raster image
- *
- * @param  {Uint8Array}   bytes   The whole stream
- * @param  {number}       index   Position of the first argument
- * @return {number}               Number of argument bytes, or -1 when the stream is too short
- */
-function rasterImageArguments(bytes, index) {
-  if (index + 6 > bytes.length) {
-    return -1;
-  }
-
-  const width = bytes[index + 2] + bytes[index + 3] * 256;
-  const height = bytes[index + 4] + bytes[index + 5] * 256;
-
-  return 6 + width * height;
-}
-
-/**
- * Arguments of GS k m .., a barcode. Function A, for m below 65, ends at a NUL
- * byte, function B carries its length.
- *
- * @param  {Uint8Array}   bytes   The whole stream
- * @param  {number}       index   Position of the first argument
- * @return {number}               Number of argument bytes, or -1 when the stream is too short
- */
-function barcodeArguments(bytes, index) {
-  if (index + 1 > bytes.length) {
-    return -1;
-  }
-
-  if (bytes[index] >= 65) {
-    if (index + 2 > bytes.length) {
-      return -1;
-    }
-
-    return 2 + bytes[index + 1];
-  }
-
-  const length = nulTerminated(bytes, index + 1);
-
-  return length < 0 ? -1 : length + 1;
-}
-
-/**
- * Arguments of GS V n, a cut. The variants that feed the paper first carry the
- * distance as a second argument.
- *
- * @param  {Uint8Array}   bytes   The whole stream
- * @param  {number}       index   Position of the first argument
- * @return {number}               Number of argument bytes, or -1 when the stream is too short
- */
-function cutArguments(bytes, index) {
-  if (index + 1 > bytes.length) {
-    return -1;
-  }
-
-  return [65, 66, 103, 104].includes(bytes[index]) ? 2 : 1;
-}
-
-/**
- * Arguments of FS g 1 and FS g 2, the commands that write and read the user
- * memory. Writing carries its data length, reading does not.
- *
- * @param  {Uint8Array}   bytes   The whole stream
- * @param  {number}       index   Position of the first argument
- * @return {number}               Number of argument bytes, or -1 when the stream is too short
- */
-function userMemoryArguments(bytes, index) {
-  if (index + 1 > bytes.length) {
-    return -1;
-  }
-
-  /* FS g 1 m a1 a2 a3 a4 nL nH d1..dk writes, FS g 2 m a1 a2 a3 a4 nL nH reads */
-
-  if (bytes[index] === 1) {
-    if (index + 8 > bytes.length) {
-      return -1;
-    }
-
-    return 8 + bytes[index + 6] + bytes[index + 7] * 256;
-  }
-
-  return bytes[index] === 2 ? 8 : 0;
-}
-
-/**
- * Arguments of FS q n [xL xH yL yH d1..dk]1..[..]n, the definition of n NV bit
- * images, each x bytes wide and y bytes of eight dots tall
- *
- * @param  {Uint8Array}   bytes   The whole stream
- * @param  {number}       index   Position of the first argument
- * @return {number}               Number of argument bytes, or -1 when the stream is too short
- */
-function nvBitImageArguments(bytes, index) {
-  if (index + 1 > bytes.length) {
-    return -1;
-  }
-
-  let length = 1;
-
-  for (let image = 0; image < bytes[index]; image++) {
-    const header = index + length;
-
-    if (header + 4 > bytes.length) {
-      return -1;
-    }
-
-    const width = bytes[header] + bytes[header + 1] * 256;
-    const height = bytes[header + 2] + bytes[header + 3] * 256;
-
-    length += 4 + width * height * 8;
-  }
-
-  return length;
-}
-
-/**
- * Arguments of ESC & y c1 c2 [x d1..d(y * x)]1..[..], the definition of the
- * glyphs of the character codes c1 to c2. Every character carries the number of
- * columns it is wide and y bytes of eight dots per column.
- *
- * @param  {Uint8Array}   bytes   The whole stream
- * @param  {number}       index   Position of the first argument
- * @return {number}               Number of argument bytes, or -1 when the stream is too short
- */
-function userDefinedArguments(bytes, index) {
-  if (index + 3 > bytes.length) {
-    return -1;
-  }
-
-  const characters = bytes[index + 2] - bytes[index + 1] + 1;
-
-  /* A height the fonts of these printers do not have is a command the parser
-     has no layout for, so it consumes the three parameters and leaves the rest
-     to the stream, which is what it does for a c2 below c1 as well */
-
-  if (bytes[index] !== GLYPH_BYTES) {
-    return 3;
-  }
-
-  let length = 3;
-
-  for (let character = 0; character < characters; character++) {
-    if (index + length + 1 > bytes.length) {
-      return -1;
-    }
-
-    length += 1 + bytes[index + length] * GLYPH_BYTES;
-  }
-
-  return length;
-}
-
-/**
- * Arguments of GS * x y d1..dk, a downloaded bitmap
- *
- * @param  {Uint8Array}   bytes   The whole stream
- * @param  {number}       index   Position of the first argument
- * @return {number}               Number of argument bytes, or -1 when the stream is too short
- */
-function downloadedBitmapArguments(bytes, index) {
-  if (index + 2 > bytes.length) {
-    return -1;
-  }
-
-  return 2 + bytes[index] * bytes[index + 1] * 8;
-}
-
-/**
- * Arguments of DLE EOT n, the real time status request. Two of its functions
- * carry a second parameter byte, every other one is a single byte.
- *
- * @param  {Uint8Array}   bytes   The whole stream
- * @param  {number}       index   Position of the first argument
- * @return {number}               Number of argument bytes, or -1 when the stream is too short
- */
-function realTimeStatusArguments(bytes, index) {
-  if (index + 1 > bytes.length) {
-    return -1;
-  }
-
-  return bytes[index] === 7 || bytes[index] === 8 ? 2 : 1;
-}
-
-/*
-    The number of bytes of DLE DC4, including its function byte. Function 1
-    generates a pulse, m and t behind it, function 2 runs the power off
-    sequence with its two byte fixed data, function 8 clears the buffers with
-    its seven byte fixed data. Functions 3 and 7 are transmit requests of one
-    parameter byte. Every other function is read as the function byte alone.
-
-    The lengths of functions 3 and 7 are the common ones, they are not settled
-    by a specification text that was available here.
-*/
-
-const REAL_TIME_REQUESTS = Object.assign(Object.create(null), {1: 3, 2: 3, 3: 2, 7: 2, 8: 8});
-
-/**
- * Arguments of DLE DC4 fn .., the real time request
- *
- * @param  {Uint8Array}   bytes   The whole stream
- * @param  {number}       index   Position of the first argument
- * @return {number}               Number of argument bytes, or -1 when the stream is too short
- */
-function realTimeRequestArguments(bytes, index) {
-  if (index + 1 > bytes.length) {
-    return -1;
-  }
-
-  return REAL_TIME_REQUESTS[bytes[index]] || 1;
-}
-
-/*
-    Argument lengths of the commands the renderer does not implement, from the
-    ESC/POS specification. They are only used to stay in sync with the stream,
-    the command itself becomes an unknown item. Commands that are not in these
-    tables consume their prefix alone, which is the best guess there is.
-*/
-
-const UNKNOWN_ARGUMENTS = {
-  [DLE]: {
-    0x14: realTimeRequestArguments, /* DLE DC4 fn .., real time request */
-  },
-
-  [ESC]: {
-    0x2f: 1, /* print downloaded bitmap */
-    0x3d: 1, /* select peripheral device */
-    0x43: 1, /* page length in lines */
-    0x55: 1, /* unidirectional printing */
-    0x63: 2, /* paper sensor and panel button settings */
-  },
-
-  [GS]: {
-    0x3a: 0, /* start or end macro definition */
-    0x41: 2, /* print position adjustment */
-    0x45: 1, /* print control method */
-    0x54: 1, /* print position at the top of the line */
-    0x63: 0, /* print counter */
-    0x67: 4, /* maintenance counter, GS g 0 m nL nH and GS g 2 m nL nH */
-    0x7a: 2, /* print density and other settings */
-  },
-
-  [FS]: {
-    0x67: userMemoryArguments, /* write and read the user memory */
-  },
-};
-
 /**
  * Renders the ESC/POS commands ReceiptPrinterEncoder produces to images, the
  * way a printer would put them on paper.
  *
- * The parser is a table driven state machine over the byte stream. Every
- * command knows how many argument bytes it has, so that commands the renderer
- * does not implement can be skipped without losing the rest of the stream.
+ * The syntax of the stream belongs to @point-of-sale/receipt-printer-decoder:
+ * `tokenize()` cuts the bytes into commands, runs of text, control bytes and
+ * the tail of a truncated command, and this renderer says what every one of
+ * them does to the paper. The tables below are the handlers of the commands,
+ * keyed by the mnemonic of the prefix and the command byte the way the tokens
+ * are, and a command without a handler is an unknown item.
  */
 class EscPosRenderer {
   static language = 'esc-pos';
@@ -587,8 +265,6 @@ class EscPosRenderer {
   #doubleStrike;
   #verticalUnits;
   #horizontalUnits;
-  #kanji;
-  #codeSystem;
   #userDefined;
   #direction;
   #dpi;
@@ -659,6 +335,24 @@ class EscPosRenderer {
   }
 
   /**
+     * The commands this renderer has a handler for, as the command bytes under
+     * the mnemonic of their prefix, which is how a token of the tokenizer of
+     * @point-of-sale/receipt-printer-decoder names them.
+     *
+     * It is here for the tests, `test/tokens.js`, which asserts that the
+     * tokenizer has an argument length for every one of them: without that the
+     * command would be read as its two bytes alone and the rest of the stream
+     * would be lost. Nothing else of this package calls it, and the tables it
+     * reports are built per renderer, so it builds one of the smallest paper
+     * there is to read them off
+     *
+     * @return {Object<string, number[]>}   The command bytes, keyed by the mnemonic of the prefix
+     */
+  static handlers() {
+    return new EscPosRenderer({width: HANDLER_WIDTH}).#handlers();
+  }
+
+  /**
      * Number of font A characters that fit on a line, which must be the number
      * of columns the encoder was configured with
      *
@@ -697,7 +391,7 @@ class EscPosRenderer {
   }
 
   /**
-     * Parse a stream and return whatever the painter made of it
+     * Tokenize a stream and return whatever the painter made of it
      *
      * @param  {Uint8Array|number[]}   bytes   The commands
      * @return {RenderItem[]|Layout}           The items, or the display list
@@ -711,7 +405,7 @@ class EscPosRenderer {
 
     try {
       this.#initialize();
-      this.#parse(data);
+      this.#dispatch(tokenize(data, EscPosRenderer.language));
 
       return this.#painter.end();
     } finally {
@@ -731,8 +425,6 @@ class EscPosRenderer {
     this.#characterSet = noCharacterSet();
     this.#emphasis = false;
     this.#doubleStrike = false;
-    this.#kanji = false;
-    this.#codeSystem = 'shift-jis';
     this.#userDefined = false;
     this.#direction = 0;
     this.#text = [];
@@ -750,120 +442,127 @@ class EscPosRenderer {
   }
 
   /**
-     * Walk the stream, turning printable bytes into text and everything else
-     * into calls on the painter. A command that runs past the end of the stream
-     * stops the parser, so malformed input never throws.
+     * Turn the tokens of a stream into calls on the painter. The tokenizer has
+     * already said where every command ends, which run of bytes is text and
+     * which of those runs is multibyte, so there is no syntax left here: every
+     * token is handed to the handler of what it means.
      *
-     * @param  {Uint8Array}   bytes   The commands
+     * @param  {Token[]}   tokens   The tokens of the stream
      */
-  #parse(bytes) {
-    let index = 0;
+  #dispatch(tokens) {
+    for (const token of tokens) {
+      switch (token.type) {
+        case 'text':
+          this.#printText(token);
+          break;
 
-    while (index < bytes.length) {
-      const byte = bytes[index];
+        case 'control':
+          this.#control(token.byte);
+          break;
 
-      /* In Kanji mode a lead byte and the byte behind it are one character.
-         There is no CJK font here, so the pair becomes two cells of the
-         fallback glyph, which is exactly the width a printer gives a Kanji
-         character. A lead byte at the very end of the stream is not a pair and
-         is printed as a character of its own */
+          /* A byte a printer ignores changes nothing but the run of text it
+           stands in, which ends there the way it ends at a command, and the
+           tail of a command the stream was cut inside of stops the parse,
+           which is what an `incomplete` token is and why it is always last */
 
-      if (this.#kanji && this.#isLeadByte(byte) && index + 1 < bytes.length) {
-        this.#flushText();
+        case 'ignored':
+        case 'incomplete':
+          this.#flushText();
+          break;
 
-        /* Unless the stream defined a glyph for this code with FS 2, which is
-           drawn in the two cells the placeholder would have taken */
-
-        if (!this.#painter.glyph(byte * 256 + bytes[index + 1], {multibyte: true})) {
-          this.#painter.placeholder(2);
-        }
-
-        index += 2;
-        continue;
+        default:
+          this.#command(token);
+          break;
       }
+    }
 
-      /* A byte that has a glyph a stream downloaded, while ESC % selected the
-         user defined set, prints that glyph instead of the one of the codepage */
+    this.#flushText();
+  }
 
-      if (byte >= 0x20 && this.#userDefined && this.#painter.hasGlyph(byte)) {
-        this.#flushText();
-        this.#painter.glyph(byte);
+  /**
+     * A run of printable bytes.
+     *
+     * A multibyte run is pairs of a lead byte and the byte behind it, one
+     * character each. There is no CJK font here, so a pair becomes two cells of
+     * the fallback glyph, which is exactly the width a printer gives a Kanji
+     * character, unless the stream defined a glyph for the code with FS 2.
+     *
+     * A single byte run is gathered, so that a run of characters becomes one
+     * call on the painter in one codepage, and is broken where a byte has a
+     * glyph a stream downloaded while ESC % selected the user defined set: that
+     * glyph is drawn instead of the one of the codepage.
+     *
+     * @param  {Token}   token   The text token
+     */
+  #printText(token) {
+    const bytes = token.bytes;
 
-        index++;
-        continue;
-      }
-
-      /* Printable bytes are gathered, so that a run of characters becomes one
-         call on the painter, in one codepage */
-
-      if (byte >= 0x20) {
-        this.#text.push(byte);
-        index++;
-        continue;
-      }
-
+    if (token.multibyte) {
       this.#flushText();
 
-      if (byte === HT) {
+      for (let index = 0; index + 1 < bytes.length; index += 2) {
+        if (!this.#painter.glyph(bytes[index] * 256 + bytes[index + 1], {multibyte: true})) {
+          this.#painter.placeholder(2);
+        }
+      }
+
+      return;
+    }
+
+    for (const byte of bytes) {
+      if (this.#userDefined && this.#painter.hasGlyph(byte)) {
+        this.#flushText();
+        this.#painter.glyph(byte);
+        continue;
+      }
+
+      this.#text.push(byte);
+    }
+  }
+
+  /**
+     * One control byte the printer acts on, the five the tokenizer hands back
+     * as a control token
+     *
+     * @param  {number}   byte   The control byte
+     */
+  #control(byte) {
+    this.#flushText();
+
+    switch (byte) {
+      case HT:
         this.#painter.tab();
-        index++;
-        continue;
-      }
+        break;
 
-      if (byte === LF) {
+      case LF:
         this.#painter.lineFeed();
-        index++;
-        continue;
-      }
+        break;
 
-      /* FF prints the page of page mode and returns to standard mode. In
+        /* FF prints the page of page mode and returns to standard mode. In
          standard mode it feeds to the next page, which a receipt printer with
          a roll of paper has not got, so it does nothing at all */
 
-      if (byte === FF) {
+      case FF:
         if (this.#painter.pageMode) {
           this.#painter.printPage();
           this.#painter.page(false);
         }
 
-        index++;
-        continue;
-      }
+        break;
 
-      /* CAN deletes the print data of the print area in page mode, which is
+        /* CAN deletes the print data of the print area in page mode, which is
          where this command is defined. In standard mode a printer ignores it */
 
-      if (byte === CAN) {
+      case CAN:
         this.#painter.cancelPage();
-        index++;
-        continue;
-      }
+        break;
 
-      /* The encoder ends its lines with LF CR, the carriage return does not
+        /* The encoder ends its lines with LF CR, the carriage return does not
          move the paper */
 
-      if (byte === CR) {
-        index++;
-        continue;
-      }
-
-      /* Other control characters are not commands, a printer ignores them */
-
-      if (byte !== ESC && byte !== GS && byte !== FS && byte !== DLE) {
-        index++;
-        continue;
-      }
-
-      const length = this.#execute(bytes, index);
-
-      if (length < 0) {
-        return;
-      }
-
-      index += length;
+      case CR:
+        break;
     }
-
-    this.#flushText();
   }
 
   /**
@@ -880,54 +579,49 @@ class EscPosRenderer {
   }
 
   /**
-     * Handle the command at a position in the stream
+     * Hand a command token to its handler, or report it as an unknown command
+     * when there is none. The handler decides, not the tokenizer: a command the
+     * tokenizer has a length for but this renderer draws nothing for is an
+     * unknown item all the same, which is what a driver sees today
      *
-     * @param  {Uint8Array}   bytes   The whole stream
-     * @param  {number}       index   Position of the prefix byte of the command
-     * @return {number}               Number of bytes the command occupies, or -1 when the stream is too short
+     * @param  {Token}   token   The command token
      */
-  #execute(bytes, index) {
-    const prefix = bytes[index];
+  #command(token) {
+    this.#flushText();
 
-    if (index + 2 > bytes.length) {
-      return -1;
-    }
-
-    const code = bytes[index + 1];
-    const start = index + 2;
-
-    const command = this.#commands[prefix][code];
-    const argument = command ? command.args : UNKNOWN_ARGUMENTS[prefix][code];
-
-    const length = typeof argument === 'function' ?
-      argument(bytes, start) :
-      (typeof argument === 'number' ? argument : 0);
-
-    if (length < 0 || start + length > bytes.length) {
-      return -1;
-    }
-
-    const consumed = bytes.subarray(index, start + length);
+    const command = this.#commands[token.prefix][token.code];
 
     if (!command) {
-      this.#unknown(consumed);
-    } else if (command.run) {
-      command.run(bytes.subarray(start, start + length), consumed);
+      this.#unknown(token.bytes);
+      return;
     }
 
-    return 2 + length;
+    if (command.run) {
+      command.run(token.arguments, token.bytes);
+    }
   }
 
   /**
-     * The command tables, one per prefix byte. They are built per renderer so
-     * that the handlers can reach the state of this renderer.
+     * The tables of this renderer as the keys they hold, for `handlers()`
      *
-     * A command without a handler is parsed and ignored, which is what the
-     * printer does with the commands that do not change the paper. The blocks
-     * are ignored here as well, they are rendered in a later section, but their
-     * argument lengths are right so that the stream stays in sync.
+     * @return {Object<string, number[]>}   The command bytes, keyed by the mnemonic of the prefix
+     */
+  #handlers() {
+    return Object.fromEntries(Object.entries(this.#commands).map(
+        ([prefix, table]) => [prefix, Object.keys(table).map(Number)],
+    ));
+  }
+
+  /**
+     * The command handlers, one table per prefix, keyed by the mnemonic of the
+     * prefix and the command byte the way the tokens of the tokenizer are.
+     * They are built per renderer so that the handlers can reach its state.
      *
-     * @return {object}   The tables, keyed by prefix byte and command byte
+     * An entry without a `run` is a command that is read and does nothing,
+     * which is what the printer does with the commands that do not change the
+     * paper; a command with no entry at all is an unknown item.
+     *
+     * @return {object}   The tables, keyed by the mnemonic of the prefix and the command byte
      */
   #tables() {
     return {
@@ -936,90 +630,90 @@ class EscPosRenderer {
          DLE DC4 is not one of them, it fires the drawer and clears the buffer,
          and stays an unknown item the driver can see */
 
-      [DLE]: {
-        0x04: {args: realTimeStatusArguments, run: null}, /* DLE EOT n, transmit real time status */
-        0x05: {args: 1, run: null}, /* DLE ENQ n, real time request to the printer */
+      'DLE': {
+        0x04: {run: null}, /* DLE EOT n, transmit real time status */
+        0x05: {run: null}, /* DLE ENQ n, real time request to the printer */
       },
 
-      [ESC]: {
-        0x0c: {args: 0, run: () => this.#painter.printPage({keep: true})}, /* ESC FF, print the page */
-        0x20: {args: 1, run: (a) => this.#painter.spacing(this.#across(a[0]))},
-        0x21: {args: 1, run: (a) => this.#printMode(a[0])},
-        0x24: {args: 2, run: (a) => this.#painter.position(this.#across(a[0] + a[1] * 256))},
-        0x25: {args: 1, run: (a) => this.#selectUserDefined(a[0])},
-        0x26: {args: userDefinedArguments, run: (a) => this.#defineUserDefined(a)},
-        0x2a: {args: columnImageArguments, run: (a) => this.#columnImage(a)},
-        0x2d: {args: 1, run: (a) => this.#underline(a[0])},
-        0x3f: {args: 1, run: (a) => this.#cancelUserDefined(a[0])},
-        0x32: {args: 0, run: () => this.#painter.lineSpacing(null)},
-        0x33: {args: 1, run: (a) => this.#painter.lineSpacing(this.#down(a[0]))},
-        0x34: {args: 1, run: null}, /* italic, parsed and ignored, as the hardware does */
-        0x40: {args: 0, run: () => this.#initialize()},
-        0x44: {args: nulTerminated, run: (a) => this.#painter.tabs(Array.from(a.subarray(0, a.length - 1)))},
-        0x45: {args: 1, run: (a) => this.#bold({emphasis: (a[0] & 1) !== 0})},
-        0x47: {args: 1, run: (a) => this.#bold({doubleStrike: (a[0] & 1) !== 0})},
-        0x4a: {args: 1, run: (a) => this.#painter.feed(this.#down(a[0]))},
-        0x4b: {args: 1, run: (a) => this.#reverseFeed(a[0])},
-        0x4c: {args: 0, run: () => this.#painter.page(true)}, /* ESC L, select page mode */
-        0x4d: {args: 1, run: (a) => this.#font(a[0])},
-        0x52: {args: 1, run: (a) => this.#international(a[0])},
-        0x53: {args: 0, run: () => this.#painter.page(false)}, /* ESC S, select standard mode */
-        0x54: {args: 1, run: (a) => this.#printDirection(a[0])},
-        0x56: {args: 1, run: (a) => this.#rotate(a[0])},
-        0x57: {args: 8, run: (a) => this.#printArea(a)},
-        0x5c: {args: 2, run: (a) => this.#relative(a)},
-        0x61: {args: 1, run: (a) => this.#align(a[0])},
-        0x64: {args: 1, run: (a) => this.#painter.lineFeed(a[0])},
-        0x65: {args: 1, run: (a) => this.#painter.reverseLineFeed(a[0])},
-        0x69: {args: 0, run: () => this.#emitCut('full')}, /* legacy full cut */
-        0x6d: {args: 0, run: () => this.#emitCut('partial')}, /* legacy partial cut */
-        0x70: {args: 3, run: (a) => this.#pulse(a)},
-        0x72: {args: 1, run: null}, /* print colour, parsed, this renderer draws one bit */
-        0x74: {args: 1, run: (a) => this.#selectCodepage(a[0])},
-        0x75: {args: 1, run: null}, /* transmit peripheral device status, parsed, there is no channel back */
-        0x76: {args: 0, run: null}, /* transmit paper sensor status, parsed */
-        0x7b: {args: 1, run: (a) => this.#painter.style({upsideDown: (a[0] & 1) !== 0})},
+      'ESC': {
+        0x0c: {run: () => this.#painter.printPage({keep: true})}, /* ESC FF, print the page */
+        0x20: {run: (a) => this.#painter.spacing(this.#across(a[0]))},
+        0x21: {run: (a) => this.#printMode(a[0])},
+        0x24: {run: (a) => this.#painter.position(this.#across(a[0] + a[1] * 256))},
+        0x25: {run: (a) => this.#selectUserDefined(a[0])},
+        0x26: {run: (a) => this.#defineUserDefined(a)},
+        0x2a: {run: (a) => this.#columnImage(a)},
+        0x2d: {run: (a) => this.#underline(a[0])},
+        0x3f: {run: (a) => this.#cancelUserDefined(a[0])},
+        0x32: {run: () => this.#painter.lineSpacing(null)},
+        0x33: {run: (a) => this.#painter.lineSpacing(this.#down(a[0]))},
+        0x34: {run: null}, /* italic, parsed and ignored, as the hardware does */
+        0x40: {run: () => this.#initialize()},
+        0x44: {run: (a) => this.#painter.tabs(Array.from(a.subarray(0, a.length - 1)))},
+        0x45: {run: (a) => this.#bold({emphasis: (a[0] & 1) !== 0})},
+        0x47: {run: (a) => this.#bold({doubleStrike: (a[0] & 1) !== 0})},
+        0x4a: {run: (a) => this.#painter.feed(this.#down(a[0]))},
+        0x4b: {run: (a) => this.#reverseFeed(a[0])},
+        0x4c: {run: () => this.#painter.page(true)}, /* ESC L, select page mode */
+        0x4d: {run: (a) => this.#font(a[0])},
+        0x52: {run: (a) => this.#international(a[0])},
+        0x53: {run: () => this.#painter.page(false)}, /* ESC S, select standard mode */
+        0x54: {run: (a) => this.#printDirection(a[0])},
+        0x56: {run: (a) => this.#rotate(a[0])},
+        0x57: {run: (a) => this.#printArea(a)},
+        0x5c: {run: (a) => this.#relative(a)},
+        0x61: {run: (a) => this.#align(a[0])},
+        0x64: {run: (a) => this.#painter.lineFeed(a[0])},
+        0x65: {run: (a) => this.#painter.reverseLineFeed(a[0])},
+        0x69: {run: () => this.#emitCut('full')}, /* legacy full cut */
+        0x6d: {run: () => this.#emitCut('partial')}, /* legacy partial cut */
+        0x70: {run: (a) => this.#pulse(a)},
+        0x72: {run: null}, /* print colour, parsed, this renderer draws one bit */
+        0x74: {run: (a) => this.#selectCodepage(a[0])},
+        0x75: {run: null}, /* transmit peripheral device status, parsed, there is no channel back */
+        0x76: {run: null}, /* transmit paper sensor status, parsed */
+        0x7b: {run: (a) => this.#painter.style({upsideDown: (a[0] & 1) !== 0})},
       },
 
-      [GS]: {
-        0x21: {args: 1, run: (a) => this.#size(a[0])},
-        0x24: {args: 2, run: (a) => this.#pageVertical(a, false)}, /* GS $, absolute vertical position */
-        0x28: {args: parenthesisArguments, run: (a, consumed) => this.#parenthesis(a, consumed)},
-        0x2a: {args: downloadedBitmapArguments, run: (a) => this.#defineBitImage(a)},
-        0x2f: {args: 1, run: (a, consumed) => this.#printBitImage(a, consumed)},
-        0x38: {args: largeParenthesisArguments, run: (a, consumed) => this.#largeParenthesis(a, consumed)},
-        0x42: {args: 1, run: (a) => this.#painter.style({invert: (a[0] & 1) !== 0})},
-        0x48: {args: 1, run: (a) => this.#hriPosition(a[0])},
-        0x49: {args: 1, run: null}, /* transmit printer id, parsed, there is no channel back */
-        0x4c: {args: 2, run: (a) => this.#painter.margins({left: this.#horizontal(a[0] + a[1] * 256)})},
-        0x50: {args: 2, run: (a) => this.#motionUnits(a[0], a[1])},
-        0x56: {args: cutArguments, run: (a) => this.#cut(a[0])},
-        0x57: {args: 2, run: (a) => this.#painter.margins({width: this.#horizontal(a[0] + a[1] * 256)})},
-        0x5c: {args: 2, run: (a) => this.#pageVertical(a, true)}, /* GS \, relative vertical position */
-        0x61: {args: 1, run: null}, /* automatic status back, parsed, there is no channel back */
-        0x62: {args: 1, run: null}, /* smoothing, parsed, it changes no dot of a one bit image */
-        0x66: {args: 1, run: (a) => this.#hriFont(a[0])},
-        0x68: {args: 1, run: (a) => this.#barcodeHeight(a[0])},
-        0x6a: {args: 1, run: null}, /* transmit remaining paper sensor status, parsed */
-        0x6b: {args: barcodeArguments, run: (a, consumed) => this.#drawBarcode(a, consumed)},
-        0x72: {args: 1, run: null}, /* transmit status, parsed, there is no channel back */
-        0x76: {args: rasterImageArguments, run: (a, consumed) => this.#rasterImage(a, consumed)},
-        0x77: {args: 1, run: (a) => this.#moduleWidth(a[0])},
+      'GS': {
+        0x21: {run: (a) => this.#size(a[0])},
+        0x24: {run: (a) => this.#pageVertical(a, false)}, /* GS $, absolute vertical position */
+        0x28: {run: (a, consumed) => this.#parenthesis(a, consumed)},
+        0x2a: {run: (a) => this.#defineBitImage(a)},
+        0x2f: {run: (a, consumed) => this.#printBitImage(a, consumed)},
+        0x38: {run: (a, consumed) => this.#largeParenthesis(a, consumed)},
+        0x42: {run: (a) => this.#painter.style({invert: (a[0] & 1) !== 0})},
+        0x48: {run: (a) => this.#hriPosition(a[0])},
+        0x49: {run: null}, /* transmit printer id, parsed, there is no channel back */
+        0x4c: {run: (a) => this.#painter.margins({left: this.#horizontal(a[0] + a[1] * 256)})},
+        0x50: {run: (a) => this.#motionUnits(a[0], a[1])},
+        0x56: {run: (a) => this.#cut(a[0])},
+        0x57: {run: (a) => this.#painter.margins({width: this.#horizontal(a[0] + a[1] * 256)})},
+        0x5c: {run: (a) => this.#pageVertical(a, true)}, /* GS \, relative vertical position */
+        0x61: {run: null}, /* automatic status back, parsed, there is no channel back */
+        0x62: {run: null}, /* smoothing, parsed, it changes no dot of a one bit image */
+        0x66: {run: (a) => this.#hriFont(a[0])},
+        0x68: {run: (a) => this.#barcodeHeight(a[0])},
+        0x6a: {run: null}, /* transmit remaining paper sensor status, parsed */
+        0x6b: {run: (a, consumed) => this.#drawBarcode(a, consumed)},
+        0x72: {run: null}, /* transmit status, parsed, there is no channel back */
+        0x76: {run: (a, consumed) => this.#rasterImage(a, consumed)},
+        0x77: {run: (a) => this.#moduleWidth(a[0])},
       },
 
-      [FS]: {
-        0x21: {args: 1, run: null}, /* multibyte print mode, parsed, see the notes */
-        0x26: {args: 0, run: () => this.#kanjiMode(true)},
-        0x28: {args: parenthesisArguments, run: (a, consumed) => this.#fsParenthesis(a, consumed)},
-        0x2d: {args: 1, run: null}, /* multibyte underline, parsed */
-        0x2e: {args: 0, run: () => this.#kanjiMode(false)},
-        0x32: {args: 2 + KANJI_GLYPH_BYTES, run: (a) => this.#defineKanji(a)},
-        0x3f: {args: 2, run: (a) => this.#cancelKanji(a)},
-        0x43: {args: 1, run: (a) => this.#kanjiCodeSystem(a[0])},
-        0x53: {args: 2, run: null}, /* multibyte character spacing, parsed */
-        0x57: {args: 1, run: null}, /* quadruple size multibyte, parsed */
-        0x70: {args: 2, run: (a, consumed) => this.#printNvBitImage(a, consumed)},
-        0x71: {args: nvBitImageArguments, run: (a) => this.#defineNvBitImages(a)},
+      'FS': {
+        0x21: {run: null}, /* multibyte print mode, parsed, see the notes */
+        0x26: {run: null}, /* FS &, Kanji mode on, which is the tokenizer's to keep, see the notes */
+        0x28: {run: (a, consumed) => this.#fsParenthesis(a, consumed)},
+        0x2d: {run: null}, /* multibyte underline, parsed */
+        0x2e: {run: null}, /* FS ., Kanji mode off */
+        0x32: {run: (a) => this.#defineKanji(a)},
+        0x3f: {run: (a) => this.#cancelKanji(a)},
+        0x43: {run: null}, /* FS C n, the code system of the multibyte characters */
+        0x53: {run: null}, /* multibyte character spacing, parsed */
+        0x57: {run: null}, /* quadruple size multibyte, parsed */
+        0x70: {run: (a, consumed) => this.#printNvBitImage(a, consumed)},
+        0x71: {run: (a) => this.#defineNvBitImages(a)},
       },
     };
   }
@@ -1822,6 +1516,12 @@ class EscPosRenderer {
      * No stream in the wild nests them, and the alternative is a stream that
      * costs one stack frame per three bytes.
      *
+     * The payload is tokenized on its own, with a tokenizer that starts fresh,
+     * so a command inside refused data still does what it does but can no
+     * longer change where the rest of the stream is cut: the tokenizer read
+     * `GS k` as one command and its length as the length of its data, which is
+     * what the reference says and what a printer does, see design.md
+     *
      * @param  {Uint8Array}   args       The arguments of the command
      * @param  {Uint8Array}   consumed   The whole command, for the unknown item
      */
@@ -1855,7 +1555,7 @@ class EscPosRenderer {
     this.#refusing = true;
 
     try {
-      this.#parse(data);
+      this.#dispatch(tokenize(data, EscPosRenderer.language));
     } finally {
       this.#refusing = false;
     }
@@ -2222,28 +1922,6 @@ class EscPosRenderer {
   }
 
   /**
-     * FS & and FS ., which switch Kanji mode on and off
-     *
-     * @param  {boolean}   value   True for on
-     */
-  #kanjiMode(value) {
-    this.#kanji = value;
-  }
-
-  /**
-     * FS C n, the code system of the multibyte characters, which says which
-     * bytes are a lead byte. A value the command does not define leaves it as
-     * it was.
-     *
-     * @param  {number}   value   The argument of the command
-     */
-  #kanjiCodeSystem(value) {
-    if (CODE_SYSTEMS[value]) {
-      this.#codeSystem = CODE_SYSTEMS[value];
-    }
-  }
-
-  /**
      * ESC & y c1 c2 [x d1..d(y * x)]1..[..], which defines the glyphs of the
      * character codes c1 to c2 in the font that is current: y bytes of eight
      * dots in the vertical direction, which is three for the fonts of these
@@ -2358,22 +2036,6 @@ class EscPosRenderer {
     }
 
     this.#painter.style({rotate: ROTATION[value]});
-  }
-
-  /**
-     * Whether a byte starts a multibyte character in the current code system.
-     * Shift JIS has two ranges of lead bytes, JIS is a pair of bytes of the
-     * printable ASCII range for every character.
-     *
-     * @param  {number}   byte   The byte
-     * @return {boolean}         True when a trail byte follows it
-     */
-  #isLeadByte(byte) {
-    if (this.#codeSystem === 'jis') {
-      return byte >= 0x21 && byte <= 0x7e;
-    }
-
-    return (byte >= 0x81 && byte <= 0x9f) || (byte >= 0xe0 && byte <= 0xfc);
   }
 
   /**

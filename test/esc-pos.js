@@ -797,6 +797,45 @@ describe('EscPosRenderer', function() {
       assert.equal(dots(stitch(refused, {width: WIDTH})), dots(stitch(printed, {width: WIDTH})));
     });
 
+    it('should not let a command inside refused data cut the rest of the stream differently', function() {
+      /* The one behaviour the switch to the tokenizer changed, see the design
+         notes. An FS & inside refused barcode data used to put the renderer's
+         own parser into Kanji mode for the rest of the stream, so the lead
+         byte behind the barcode swallowed the ESC of the command behind it and
+         the emphasis never arrived. The tokenizer cut the stream before the
+         payload was refused and a payload is the arguments of its command, so
+         the FS & still runs and still changes nothing, and the ESC E behind
+         the barcode is the command it is */
+
+      const refused = render(stream(ESC, '@', GS, 'k', 66, 2, FS, '&', [0x82], ESC, 'E', 1, 'B', LF));
+      const emphasised = render(stream(ESC, '@', [0x82], ESC, 'E', 1, 'B', LF));
+      const plain = render(stream(ESC, '@', [0x82], 'B', LF));
+
+      assert.equal(dots(stitch(refused, {width: WIDTH})), dots(stitch(emphasised, {width: WIDTH})));
+      assert.notEqual(dots(stitch(refused, {width: WIDTH})), dots(stitch(plain, {width: WIDTH})));
+    });
+
+    it('should not carry the state of the stream into the refused data either', function() {
+      /* The mirror of the case above, and the other half of the one behaviour
+         the switch changed. The payload of a refused barcode is tokenized on
+         its own with a tokenizer that starts fresh, so Kanji mode being on
+         outside the barcode no longer makes a lead byte inside the payload
+         swallow the byte behind it: the old parser read the 0x82 and the ESC
+         of this payload as one multibyte character and drew two placeholder
+         cells, where the bytes are an e acute of cp437 and an ESC E that turns
+         the emphasis on */
+
+      const refused = render(stream(
+          ESC, '@', FS, '&', GS, 'k', 66, 4, [0x82], ESC, 'E', 1, FS, '.', 'B', LF,
+      ));
+
+      const printed = render(stream(ESC, '@', [0x82], ESC, 'E', 1, 'B', LF));
+      const placeholders = render(stream(ESC, '@', FS, '&', [0x82], ESC, FS, '.', 'E', 1, 'B', LF));
+
+      assert.equal(dots(stitch(refused, {width: WIDTH})), dots(stitch(printed, {width: WIDTH})));
+      assert.notEqual(dots(stitch(refused, {width: WIDTH})), dots(stitch(placeholders, {width: WIDTH})));
+    });
+
     it('should print no text at all for a barcode the symbology accepts', function() {
       const items = render(stream(ESC, '@', GS, 'h', 60, GS, 'w', 3, GS, 'k', 2, '4006381333931', [0]));
 

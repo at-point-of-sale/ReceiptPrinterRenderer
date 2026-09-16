@@ -104,6 +104,7 @@
     },
     "dependencies": {
         "@point-of-sale/codepage-encoder": "^3.0.0",
+        "@point-of-sale/receipt-printer-decoder": "^1.0.0",
         "lean-qr": "^2.4.1"
     },
     "engines": {

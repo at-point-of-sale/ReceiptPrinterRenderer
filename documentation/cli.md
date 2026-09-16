@@ -74,7 +74,7 @@ receipt-printer-renderer receipt.bin > receipt.png
 receipt-printer-renderer receipt.bin -o - | open -f -a Preview
 ```
 
-There are four formats, and the command takes the format from the extension of the output file, so the three lines below write three different things without a further option:
+There are five formats, and the command takes the format from the extension of the output file, so the three lines below write three different things without a further option:
 
 ```
 receipt-printer-renderer receipt.bin -o receipt.png
@@ -88,6 +88,7 @@ receipt-printer-renderer receipt.bin -o receipt.pbm
 | `pbm` | The same dots as a portable bitmap, the binary P4 variant, for tools that read that and for diffs. |
 | `svg` | The receipt as a vector document, the text as the outlines of the face the bitmap font was made from, so it scales and prints at the resolution of whatever renders it. See [SVG output](usage.md#svg-output). |
 | `json` | Not an image: the display list of the stream, what is printed and where, indented, for looking at what a stream lays out or feeding a writer of your own. |
+| `commands` | Not an image either: the commands of the stream as text, one line per command, run of text or control byte, for reading what an application actually sent. |
 
 `-f` or `--format` names the format when the extension cannot, or should not: an output name without an extension or with one the command does not know needs it, standard output takes it to get anything but PNG, and given together with an extension it wins.
 
@@ -97,6 +98,23 @@ receipt-printer-renderer receipt.bin -f json | jq '.entries | length'
 receipt-printer-renderer receipt.bin -o receipt.out -f pbm
 ```
 
+`-f commands` is the stream read back rather than drawn. It is [ReceiptPrinterDecoder](https://github.com/at-point-of-sale/ReceiptPrinterDecoder)'s `decode()` written out, one line per token of the stream and every byte of the stream in one of them: where the token begins, what it is called, and what it says. A command is named by its mnemonic and says what it does with the values of its parameters in it; a run of printable bytes is called `text` and says its characters in quotes, decoded with the codepage the stream selected and therefore with `--codepage-mapping`; a control byte the printer acts on is called `control` and a byte it ignores `ignored`, and both say their name; a run of multibyte characters says `data`, because there is no CJK table here; and the tail of a command the stream was cut inside of is called `incomplete` and says nothing but where it begins.
+
+```
+receipt-printer-renderer receipt.bin -f commands
+```
+
+```
+ 0  ESC @    Initialize the printer
+ 2  FS .     Cancel Kanji mode
+ 4  ESC M    Font A
+ 7  ESC t    Select codepage 0, cp437
+10  text     "Hello world!"
+22  control  Line feed
+```
+
+The commands of a stream are one list whatever the stream cuts, so there is nothing for `--pieces` to number: it is refused for this format rather than ignored, in front of the `--output` it would otherwise ask for. The SVG options do nothing here either, but those are ignored the way they are for the other formats that are not SVG.
+
 <br>
 
 ### The printer
@@ -105,6 +123,17 @@ A stream only makes sense for the printer it was made for, and four options desc
 
 ```
 receipt-printer-renderer -l star-prnt receipt.bin -o receipt.png
+```
+
+`-l auto` does not name a language but asks for one: the bytes are read first and [ReceiptPrinterDecoder](https://github.com/at-point-of-sale/ReceiptPrinterDecoder)'s `detect()` says which of the three command sets they are written in, `esc-pos`, `star-prnt` or `star-graphics`, which the command then renders as. `star-line` is never the answer, it is the same command set as `star-prnt` and renders the same paper.
+
+It works by counting the commands that belong to one family and no other, so a stream that carries none of them cannot be told apart and is read as `esc-pos`, which is what a tie falls to. That is not only a stream of nothing but text: a stream that uses only the commands the two families share is a tie as well, however long it is. `ESC @`, `ESC R` and `ESC D` are the same bytes in both, so this package's own `star-prnt/raw/international` and `star-prnt/raw/tabs`, which are those three commands and text, are read as ESC/POS although they are Star streams. They still render, and the text on them is the text, but with the Epson profile behind them rather than the Star one, so the lines sit 30 dots apart instead of 32 and font B has a cell of 9 by 17 rather than 9 by 24. When the language is known, name it; `-l auto` is for a stream whose origin is not.
+
+Because the stream has to be read before the renderer exists, this is the one invocation where a `--codepage-mapping` or a `--profile` the package does not have is reported behind the input rather than in front of it.
+
+```
+receipt-printer-renderer -l auto receipt.bin -o receipt.png
+cat unknown.bin | receipt-printer-renderer -l auto -f commands
 ```
 
 `-w` or `--width` is the width of the paper in dots, a positive multiple of 8, and the default is 576, the 80 mm roll at 203 dots per inch. `-c` or `--columns` says the same as a number of characters of font A, which is 12 dots wide in every profile, so `-c 48` is 576 dots and `-c 32` the 384 of a 58 mm roll; the two are exclusive. The width has to be the one the application encoded for, or text wraps in the wrong place: the encoder's `columns` times 12 is the number to give.
@@ -182,7 +211,7 @@ The exit code says what went wrong, so that a script can tell a mistake in the c
 | Code | Meaning |
 |---|---|
 | 0 | The image was written. |
-| 1 | A usage error: an option the command does not know, a language, a format, a profile or a codepage mapping the package does not have, a width that is not a positive multiple of 8, `--pieces` without `--output`, or a file that cannot be read or written. |
+| 1 | A usage error: an option the command does not know, a language, a format, a profile or a codepage mapping the package does not have, a width that is not a positive multiple of 8, `--pieces` without `--output` or with `--format commands`, or a file that cannot be read or written. |
 | 2 | The renderer or the writer could not handle the stream. The command was called correctly, the commands in the file were the problem. |
 
 Every error is one line on standard error, `receipt-printer-renderer: ` and the message, and a usage error ends in `, see --help`. The messages name the names: an unknown language lists the four, an unknown profile or codepage mapping lists the ones that language has, an unknown format or unit lists the ones there are.
@@ -200,14 +229,14 @@ A pipe that closes before the image is through, `| head` on a PNG, is not an err
 
 | Option | Default | Meaning |
 |---|---|---|
-| `-l, --language <name>` | `esc-pos` | The language the commands are in: `esc-pos`, `star-prnt`, `star-line` or `star-graphics`. |
+| `-l, --language <name>` | `esc-pos` | The language the commands are in: `esc-pos`, `star-prnt`, `star-line` or `star-graphics`, or `auto` to read it out of the commands themselves. |
 | `-w, --width <dots>` | `576` | Width of the paper in dots, a positive multiple of 8. 576 is the 80 mm roll at 203 dpi. |
 | `-c, --columns <n>` | | Width as a number of font A columns, 12 dots each: `-c 48` is 576 dots, `-c 32` is 384. Exclusive with `--width`. |
 | `-m, --codepage-mapping <name>` | `epson` for ESC/POS, `star` for the Star languages | The mapping the commands were encoded with. |
 | `-p, --profile <name>` | `epson` for ESC/POS, `star` for the Star languages | The printer family the defaults come from. |
 | `-o, --output <path>` | standard output | Where the image goes. `-` is standard output. With `--pieces` the path is the pattern the names are made from. |
-| `-f, --format <name>` | the extension of `--output`, `png` for standard output | `png`, `svg`, `pbm` or `json`, which is the display list. |
-| `--pieces` | off | One image per piece of paper, the stream split at its cuts. Needs `--output`. |
+| `-f, --format <name>` | the extension of `--output`, `png` for standard output | `png`, `svg`, `pbm`, `json`, which is the display list, or `commands`, which is the stream as text. |
+| `--pieces` | off | One image per piece of paper, the stream split at its cuts. Needs `--output`, and is refused with `--format commands`. |
 | `--cut-marker` | off | A dashed line where the paper is cut, in one image of the whole roll. Nothing with `--pieces`. |
 | `--commands <list>` | none | Comma separated `cut`, `pulse`, `feed` and `unknown`, the commands the printer performs. A cut is added when `--pieces` or `--cut-marker` needs one. |
 | `--line-spacing <dots>` | the profile's | Default line spacing in dots. |

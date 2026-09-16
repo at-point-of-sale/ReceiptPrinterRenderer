@@ -4,6 +4,17 @@ import terser from '@rollup/plugin-terser';
 import dts from 'rollup-plugin-dts';
 import path from 'node:path';
 
+// The dependencies of the package, which the Node builds import and the
+// browser builds bundle. The decoder has two entries: the renderers import the
+// tokenizer, which is the light one, and the command line imports the main one
+// for its `-f commands` listing
+const DEPENDENCIES = [
+	'@point-of-sale/codepage-encoder',
+	'lean-qr',
+	'@point-of-sale/receipt-printer-decoder',
+	'@point-of-sale/receipt-printer-decoder/tokenizer'
+];
+
 // Which of the two entries a resolved module is, by a path with the separators
 // of this platform turned into the ones an import uses, so that the command
 // imports the builds beside it on Windows as well as on the others
@@ -56,7 +67,7 @@ export default [
 	// CommonJS (for Node) and ES module (for bundlers) build
 	{
 		input: 'src/receipt-printer-renderer.js',
-		external: ['@point-of-sale/codepage-encoder', 'lean-qr'],
+		external: DEPENDENCIES,
 		output: [
 			{ file: 'dist/receipt-printer-renderer.cjs', exports: 'named', format: 'cjs' },
 			{ file: 'dist/receipt-printer-renderer.mjs', exports: 'named', format: 'es' }
@@ -71,8 +82,7 @@ export default [
 	// it: the command is not an API and tsconfig.json does not include it
 	{
 		input: 'src/cli.js',
-		external: (id) => id === '@point-of-sale/codepage-encoder' || id === 'lean-qr' ||
-			/^node:/.test(id) || entry(id) !== null,
+		external: (id) => DEPENDENCIES.includes(id) || /^node:/.test(id) || entry(id) !== null,
 		output: [
 			{
 				file: 'dist/receipt-printer-renderer-cli.mjs',
@@ -85,7 +95,7 @@ export default [
 	// Bundled TypeScript declarations
 	{
 		input: 'dist/tmp/src/receipt-printer-renderer.d.ts',
-		external: ['@point-of-sale/codepage-encoder', 'lean-qr'],
+		external: DEPENDENCIES,
 		output: {
 			file: 'dist/receipt-printer-renderer.d.ts',
 			format: 'es'

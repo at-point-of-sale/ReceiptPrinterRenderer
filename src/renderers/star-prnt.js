@@ -1,4 +1,5 @@
 import CodepageEncoder from '@point-of-sale/codepage-encoder';
+import {tokenize} from '@point-of-sale/receipt-printer-decoder/tokenizer';
 import Bitmap from '../bitmap.js';
 import Painter from '../painter.js';
 import {internationalCharacterSet, noCharacterSet} from '../charsets.js';
@@ -11,7 +12,11 @@ import printerProfiles from '../../generated/profiles.js';
  * @typedef {import('../types.js').Layout} Layout
  * @typedef {import('../types.js').RendererOptions} RendererOptions
  * @typedef {import('../types.js').RenderItem} RenderItem
+ * @typedef {import('@point-of-sale/receipt-printer-decoder/tokenizer').Token} Token
  */
+
+/* The control bytes a printer acts on, the eight the tokenizer hands back as a
+   control token, and the two arguments of ESC FF that are control bytes too */
 
 const BEL = 0x07;
 const HT = 0x09;
@@ -22,21 +27,19 @@ const NUL = 0x00;
 const EM = 0x19;
 const SUB = 0x1a;
 const CAN = 0x18;
-const ESC = 0x1b;
 const FS = 0x1c;
-const GS = 0x1d;
-const RS = 0x1e;
 
 /* The highest international character set the Star table shares with the Epson
    one, see the notes in documentation/commands-star-prnt.md */
 
 const LAST_CHARACTER_SET = 13;
 
-/* The raster data commands, one row of dots each. `b` feeds one dot row behind
-   the data, `k` leaves the position where it was */
+/* The raster data command that feeds one dot row behind its data, `b`. The
+   other one, `k`, leaves the position where it was; the tokenizer tells the
+   two apart from the letters they are outside raster mode, and the byte of the
+   token says which of them it is */
 
 const RASTER_FEED = 0x62;
-const RASTER_HOLD = 0x6b;
 
 /* The EOT and FF modes of raster mode that cut the paper, by the value of
    ESC * r E n NUL and ESC * r F n NUL. The modes that only print or feed are
@@ -64,19 +67,13 @@ const MAX_RASTER_MOVE = 65535;
 const RASTER_DRAWERS = Object.assign(Object.create(null), {1: [0], 2: [1], 3: [0, 1]});
 
 /* A Star command is ESC and a command byte, or ESC GS, ESC RS or ESC FS and a
-   command byte. The four groups have their own table, keyed by the byte that
-   follows the prefix */
+   command byte. The four groups have their own table of handlers, keyed by the
+   mnemonic of the group the way the tokens of the tokenizer are */
 
-const GROUP_ESC = 'esc';
-const GROUP_GS = 'esc gs';
-const GROUP_RS = 'esc rs';
-const GROUP_FS = 'esc fs';
-
-/* The byte behind the ESC that opens a group, and the group it opens */
-
-const GROUPS = Object.assign(Object.create(null), {
-  [GS]: GROUP_GS, [RS]: GROUP_RS, [FS]: GROUP_FS,
-});
+const GROUP_ESC = 'ESC';
+const GROUP_GS = 'ESC GS';
+const GROUP_RS = 'ESC RS';
+const GROUP_FS = 'ESC FS';
 
 /* The codepage a Star printer starts in, when the mapping has no entry 0, and
    the one an unknown codepage number falls back to */
@@ -203,12 +200,20 @@ const PAGE_MODE_FUNCTIONS = Object.assign(Object.create(null), {
   48: 0, 49: 1, 50: 2, 51: 3, 52: 4, 53: 5,
 });
 
-const PAGE_MODE_ARGUMENTS = [0, 0, 8, 1, 2, 2];
+/* The number of dot rows an ESC k band carries, which the command does not
+   name: the height of a band is fixed, the width bytes are the only argument */
+
+const BAND_ROWS = 24;
 
 /* Pulse width of the drawer commands that do not carry one, in milliseconds.
    ESC BEL n1 n2 sets the width of BEL and FS, SUB and EM are fixed */
 
 const DEFAULT_PULSE = 200;
+
+/* The width of the paper `handlers()` builds a renderer on, which is the
+   narrowest a renderer takes: it is thrown away without rendering a dot */
+
+const HANDLER_WIDTH = 8;
 
 /* The languages this renderer speaks, which are one command set: star-line
    differs only in the line buffering of the encoder, and star-graphics is the
@@ -246,348 +251,19 @@ function codepointsOf(name) {
   }
 }
 
-/*
-    Argument lengths.
-
-    A command in the tables below says how many bytes follow its prefix, either
-    as a number or as a function of the bytes. A function is given the whole
-    stream and the position of the first argument, and returns the number of
-    argument bytes, or -1 when the stream ends before the command is complete,
-    which stops the parser without an error.
-*/
-
-/**
- * Arguments of a command that ends at the first NUL byte
- *
- * @param  {Uint8Array}   bytes   The whole stream
- * @param  {number}       index   Position of the first argument
- * @return {number}               Number of argument bytes, or -1 when the stream is too short
- */
-function nulTerminated(bytes, index) {
-  let end = index;
-
-  while (end < bytes.length && bytes[end] !== 0x00) {
-    end++;
-  }
-
-  return end < bytes.length ? end - index + 1 : -1;
-}
-
-/**
- * Arguments of ESC b n1 n2 n3 n4 d1..dk RS, a barcode. The four parameters are
- * followed by the data, which ends at the record separator. Data that holds a
- * 0x1e byte itself therefore ends the command early, which is inherent to the
- * framing of the command and not something the parser can repair. The encoder
- * encodes barcode data as ASCII, so it never sends one.
- *
- * @param  {Uint8Array}   bytes   The whole stream
- * @param  {number}       index   Position of the first argument
- * @return {number}               Number of argument bytes, or -1 when the stream is too short
- */
-function barcodeArguments(bytes, index) {
-  let end = index + 4;
-
-  if (end > bytes.length) {
-    return -1;
-  }
-
-  while (end < bytes.length && bytes[end] !== RS) {
-    end++;
-  }
-
-  return end < bytes.length ? end - index + 1 : -1;
-}
-
-/**
- * Arguments of ESC GS y .., the QR code group: S s n sets a parameter,
- * D 1 m nL nH d1..dk stores the data and P prints the symbol.
- *
- * @param  {Uint8Array}   bytes   The whole stream
- * @param  {number}       index   Position of the first argument
- * @return {number}               Number of argument bytes, or -1 when the stream is too short
- */
-function qrcodeArguments(bytes, index) {
-  if (index + 1 > bytes.length) {
-    return -1;
-  }
-
-  /* ESC GS y S 0 n, S 1 n and S 2 n, the model, the error level and the size */
-
-  if (bytes[index] === 0x53) {
-    return 3;
-  }
-
-  /* ESC GS y D 1 m nL nH d1..dk, the data of the next symbol */
-
-  if (bytes[index] === 0x44) {
-    if (index + 5 > bytes.length) {
-      return -1;
-    }
-
-    return 5 + bytes[index + 3] + bytes[index + 4] * 256;
-  }
-
-  /* ESC GS y P prints, anything else is a command of one byte */
-
-  return 1;
-}
-
-/**
- * Arguments of ESC GS x .., the PDF417 group: S 0 n n1 n2 sets the shape,
- * S 1 n, S 2 n and S 3 n set a parameter, D nL nH d1..dk stores the data and
- * P prints the symbol.
- *
- * @param  {Uint8Array}   bytes   The whole stream
- * @param  {number}       index   Position of the first argument
- * @return {number}               Number of argument bytes, or -1 when the stream is too short
- */
-function pdf417Arguments(bytes, index) {
-  if (index + 1 > bytes.length) {
-    return -1;
-  }
-
-  if (bytes[index] === 0x53) {
-    if (index + 2 > bytes.length) {
-      return -1;
-    }
-
-    /* ESC GS x S 0 n n1 n2 carries the rows and the columns, the other
-       parameters are one byte */
-
-    return bytes[index + 1] === 0x30 ? 5 : 3;
-  }
-
-  /* ESC GS x D nL nH d1..dk, the data of the next symbol. Unlike the QR code
-     data command this one has no function byte between D and the length */
-
-  if (bytes[index] === 0x44) {
-    if (index + 3 > bytes.length) {
-      return -1;
-    }
-
-    return 3 + bytes[index + 1] + bytes[index + 2] * 256;
-  }
-
-  return 1;
-}
-
-/**
- * Arguments of ESC X nL nH d1..dk, a column mode image of 24 dot strips, three
- * bytes per column. The LF CR that follows it in the stream is not part of the
- * command.
- *
- * @param  {Uint8Array}   bytes   The whole stream
- * @param  {number}       index   Position of the first argument
- * @return {number}               Number of argument bytes, or -1 when the stream is too short
- */
-function columnImageArguments(bytes, index) {
-  if (index + 2 > bytes.length) {
-    return -1;
-  }
-
-  return 2 + (bytes[index] + bytes[index + 1] * 256) * 3;
-}
-
-/**
- * Arguments of ESC K, ESC L and ESC k, the bit image commands, which carry the
- * number of data bytes in two length bytes
- *
- * @param  {Uint8Array}   bytes   The whole stream
- * @param  {number}       index   Position of the first argument
- * @return {number}               Number of argument bytes, or -1 when the stream is too short
- */
-function bitImageArguments(bytes, index) {
-  if (index + 2 > bytes.length) {
-    return -1;
-  }
-
-  return 2 + bytes[index] + bytes[index + 1] * 256;
-}
-
-/* The number of dot rows an ESC k band carries, which the command does not
-   name: the height of a band is fixed, the width bytes are the only argument */
-
-const BAND_ROWS = 24;
-
-/**
- * Arguments of ESC k n1 n2 d1..dk, the twenty four dot band of Star Line Mode:
- * the width of the band in bytes of eight dots, followed by twenty four rows of
- * that many bytes
- *
- * @param  {Uint8Array}   bytes   The whole stream
- * @param  {number}       index   Position of the first argument
- * @return {number}               Number of argument bytes, or -1 when the stream is too short
- */
-function bandImageArguments(bytes, index) {
-  if (index + 2 > bytes.length) {
-    return -1;
-  }
-
-  return 2 + (bytes[index] + bytes[index + 1] * 256) * BAND_ROWS;
-}
-
-/**
- * Arguments of ESC GS S m n1 n2 n3 n4 n5 d1..dk, the raster image: the width of
- * the image in bytes of eight dots, its height in dots, a fixed byte, and the
- * dots in raster format
- *
- * @param  {Uint8Array}   bytes   The whole stream
- * @param  {number}       index   Position of the first argument
- * @return {number}               Number of argument bytes, or -1 when the stream is too short
- */
-function rasterImageArguments(bytes, index) {
-  if (index + 6 > bytes.length) {
-    return -1;
-  }
-
-  const width = bytes[index + 1] + bytes[index + 2] * 256;
-  const height = bytes[index + 3] + bytes[index + 4] * 256;
-
-  return 6 + width * height;
-}
-
-/**
- * Arguments of ESC GS P n .., the page mode group: the function byte and the
- * arguments that belong to that function
- *
- * @param  {Uint8Array}   bytes   The whole stream
- * @param  {number}       index   Position of the first argument
- * @return {number}               Number of argument bytes, or -1 when the stream is too short
- */
-function pageModeArguments(bytes, index) {
-  if (index + 1 > bytes.length) {
-    return -1;
-  }
-
-  const fn = PAGE_MODE_FUNCTIONS[bytes[index]];
-
-  return 1 + (typeof fn === 'number' ? PAGE_MODE_ARGUMENTS[fn] : 0);
-}
-
-/**
- * Arguments of ESC FS q n [xL xH yL yH d1..dk]1..[..]n, the definition of n
- * logos, each x bytes wide and y bytes of eight dots tall. The layout is the
- * one of the ESC/POS command of the same name, see the notes of this command
- * in documentation/commands-star-prnt.md.
- *
- * @param  {Uint8Array}   bytes   The whole stream
- * @param  {number}       index   Position of the first argument
- * @return {number}               Number of argument bytes, or -1 when the stream is too short
- */
-function logoDefinitionArguments(bytes, index) {
-  if (index + 1 > bytes.length) {
-    return -1;
-  }
-
-  let length = 1;
-
-  for (let image = 0; image < bytes[index]; image++) {
-    const header = index + length;
-
-    if (header + 4 > bytes.length) {
-      return -1;
-    }
-
-    const width = bytes[header] + bytes[header + 1] * 256;
-    const height = bytes[header + 2] + bytes[header + 3] * 256;
-
-    length += 4 + width * height * 8;
-  }
-
-  return length;
-}
-
-/**
- * Arguments of ESC * r .., the raster mode commands of the TSP100 family. Most
- * of them carry their parameter as ASCII digits followed by a NUL byte, the
- * ones that switch a mode carry nothing, and the margins have a second letter.
- *
- * @param  {Uint8Array}   bytes   The whole stream
- * @param  {number}       index   Position of the first argument
- * @return {number}               Number of argument bytes, or -1 when the stream is too short
- */
-function rasterArguments(bytes, index) {
-  if (index + 1 > bytes.length) {
-    return -1;
-  }
-
-  /* ESC * is the raster group only when the letter r follows. Anything else is
-     a command of one byte, and it is complete, so the check for the second byte
-     belongs behind this one */
-
-  if (bytes[index] !== 0x72) {
-    return 1;
-  }
-
-  if (index + 2 > bytes.length) {
-    return -1;
-  }
-
-  /* R initializes, A enters, B quits, C clears, a and b delimit a block */
-
-  if ([0x41, 0x42, 0x43, 0x52, 0x61, 0x62].includes(bytes[index + 1])) {
-    return 2;
-  }
-
-  /* ESC * r m l n NUL and ESC * r m r n NUL, the left and right margins */
-
-  const digits = bytes[index + 1] === 0x6d ?
-    nulTerminated(bytes, index + 3) :
-    nulTerminated(bytes, index + 2);
-
-  if (digits < 0) {
-    return -1;
-  }
-
-  return (bytes[index + 1] === 0x6d ? 3 : 2) + digits;
-}
-
-/*
-    Argument lengths of the commands the renderer does not implement. StarPRNT
-    and Star Line Mode share most of their command set, and these are the
-    lengths of the common ones, as best as the Star Line Mode and Star Graphic
-    Mode specifications describe them. They are only used to stay in sync with
-    the stream, the command itself becomes an unknown item. Commands that are
-    not in these tables consume their prefix alone, which is the best guess
-    there is, and the encoder emits none of them.
-*/
-
-const UNKNOWN_ARGUMENTS = {
-  [GROUP_ESC]: {
-    0x28: 1, /* select character expansion */
-    0x29: 1, /* cancel character expansion */
-    0x31: 0, /* select 1/8 inch line spacing, legacy */
-    0x63: 1, /* select character set */
-  },
-
-  [GROUP_FS]: {
-    0x70: 2, /* ESC FS p n m, print an NV logo the printer holds */
-    0x71: logoDefinitionArguments, /* ESC FS q n .., define logos, see the notes */
-  },
-
-  [GROUP_GS]: {
-    0x5c: 2, /* vertical position */
-    0x62: 1, /* blackmark and sensor settings */
-    0x63: 2, /* ESC GS c h v, reduced printing, see the reference page */
-  },
-
-  [GROUP_RS]: {
-    0x41: 1, /* print area */
-    0x43: 1, /* character style */
-    0x45: 1, /* character expansion */
-  },
-};
-
 /**
  * Renders the StarPRNT commands ReceiptPrinterEncoder produces to images, the
  * way a printer would put them on paper. The Star Line Mode commands the
  * encoder emits for the star-line language are the same set, so this renderer
  * handles both.
  *
- * The parser is a table driven state machine over the byte stream, the same
- * one the ESC/POS renderer uses, over the three Star command groups. Every
- * command knows how many argument bytes it has, so that commands the renderer
- * does not implement can be skipped without losing the rest of the stream.
+ * The syntax of the stream belongs to @point-of-sale/receipt-printer-decoder:
+ * `tokenize()` cuts the bytes into commands, runs of text, control bytes, the
+ * rows of dots of raster mode and the tail of a truncated command, and this
+ * renderer says what every one of them does to the paper. The tables below are
+ * the handlers of the commands, keyed by the mnemonic of the group and the
+ * command byte the way the tokens are, and a command without a handler is an
+ * unknown item.
  */
 class StarPrntRenderer {
   static language = 'star-prnt';
@@ -678,6 +354,24 @@ class StarPrntRenderer {
   }
 
   /**
+     * The commands this renderer has a handler for, as the command bytes under
+     * the mnemonic of their group, which is how a token of the tokenizer of
+     * @point-of-sale/receipt-printer-decoder names them.
+     *
+     * It is here for the tests, `test/tokens.js`, which asserts that the
+     * tokenizer has an argument length for every one of them: without that the
+     * command would be read as its prefix alone and the rest of the stream
+     * would be lost. Nothing else of this package calls it, and the tables it
+     * reports are built per renderer, so it builds one of the smallest paper
+     * there is to read them off
+     *
+     * @return {Object<string, number[]>}   The command bytes, keyed by the mnemonic of the group
+     */
+  static handlers() {
+    return new StarPrntRenderer({width: HANDLER_WIDTH}).#handlers();
+  }
+
+  /**
      * Number of font A characters that fit on a line, which must be the number
      * of columns the encoder was configured with
      *
@@ -732,7 +426,7 @@ class StarPrntRenderer {
       this.#pulse = {on: DEFAULT_PULSE, off: DEFAULT_PULSE};
 
       this.#initialize();
-      this.#parse(data);
+      this.#dispatch(tokenize(data, StarPrntRenderer.language));
 
       /* Rows that are still in the raster image buffer when the stream ends are
          printed, so that a job that forgot its execute command is not lost */
@@ -765,117 +459,105 @@ class StarPrntRenderer {
   }
 
   /**
-     * Walk the stream, turning printable bytes into text and everything else
-     * into calls on the painter. A command that runs past the end of the stream
-     * stops the parser, so malformed input never throws.
+     * Turn the tokens of a stream into calls on the painter. The tokenizer has
+     * already said where every command ends, which bytes are text and which of
+     * the printable bytes are the rows of dots of raster mode, so there is no
+     * syntax left here: every token is handed to the handler of what it means.
      *
-     * @param  {Uint8Array}   bytes   The commands
+     * @param  {Token[]}   tokens   The tokens of the stream
      */
-  #parse(bytes) {
-    let index = 0;
+  #dispatch(tokens) {
+    for (const token of tokens) {
+      switch (token.type) {
+        /* Printable bytes are gathered, so that a run of characters becomes
+           one call on the painter, in one codepage. Star has no multibyte
+           character set, so a run is never pairs of bytes */
 
-    while (index < bytes.length) {
-      const byte = bytes[index];
+        case 'text':
+          for (const byte of token.bytes) {
+            this.#text.push(byte);
+          }
 
-      /* In raster mode `b` and `k` are the commands that carry a row of dots,
-         everywhere else they are the letters b and k. Both carry the number of
-         data bytes in front of the data */
+          break;
 
-      if (this.#raster.active && (byte === RASTER_FEED || byte === RASTER_HOLD)) {
-        this.#flushText();
+        case 'control':
+          this.#control(token);
+          break;
 
-        /* A row that runs past the end of the stream stops the parse, the way
-           a truncated command does, and everything in front of it is kept */
+          /* A byte a printer ignores changes nothing but the run of text it
+           stands in, which ends there the way it ends at a command, and the
+           tail of a command or of a row of dots the stream was cut inside of
+           stops the parse, which is what an `incomplete` token is and why it
+           is always last */
 
-        if (index + 3 > bytes.length) {
-          return;
-        }
+        case 'ignored':
+        case 'incomplete':
+          this.#flushText();
+          break;
 
-        const length = bytes[index + 1] + bytes[index + 2] * 256;
-
-        if (index + 3 + length > bytes.length) {
-          return;
-        }
-
-        this.#rasterRow(bytes.subarray(index + 3, index + 3 + length), byte === RASTER_FEED);
-
-        index += 3 + length;
-        continue;
+        default:
+          this.#command(token);
+          break;
       }
-
-      /* Printable bytes are gathered, so that a run of characters becomes one
-         call on the painter, in one codepage */
-
-      if (byte >= 0x20) {
-        this.#text.push(byte);
-        index++;
-        continue;
-      }
-
-      this.#flushText();
-
-      if (byte === HT) {
-        this.#painter.tab();
-        index++;
-        continue;
-      }
-
-      if (byte === LF) {
-        this.#painter.lineFeed();
-        index++;
-        continue;
-      }
-
-      /* The encoder ends its lines with LF CR, the carriage return does not
-         move the paper */
-
-      if (byte === CR) {
-        index++;
-        continue;
-      }
-
-      /* CAN throws away the print data of the line that is being composed,
-         without advancing the paper. The encoder only ever sends it right
-         behind ESC @, where the line buffer is already empty */
-
-      if (byte === CAN) {
-        this.#painter.cancel();
-        index++;
-        continue;
-      }
-
-      /* The drawers are driven by single control characters, BEL and FS for
-         the first one, SUB and EM for the second */
-
-      if (byte === BEL || byte === FS) {
-        this.#drawer(0);
-        index++;
-        continue;
-      }
-
-      if (byte === SUB || byte === EM) {
-        this.#drawer(1);
-        index++;
-        continue;
-      }
-
-      /* Other control characters are not commands, a printer ignores them */
-
-      if (byte !== ESC) {
-        index++;
-        continue;
-      }
-
-      const length = this.#execute(bytes, index);
-
-      if (length < 0) {
-        return;
-      }
-
-      index += length;
     }
 
     this.#flushText();
+  }
+
+  /**
+     * A control token: one of the eight control bytes a Star printer acts on,
+     * or a row of dots of raster mode, which carries its data as the arguments
+     * of the token and says with its byte whether the paper feeds behind it
+     *
+     * @param  {Token}   token   The control token
+     */
+  #control(token) {
+    this.#flushText();
+
+    /* In raster mode `b` and `k` are the commands that carry a row of dots,
+       everywhere else they are the letters b and k */
+
+    if (token.arguments) {
+      this.#rasterRow(token.arguments, token.byte === RASTER_FEED);
+      return;
+    }
+
+    switch (token.byte) {
+      case HT:
+        this.#painter.tab();
+        break;
+
+      case LF:
+        this.#painter.lineFeed();
+        break;
+
+        /* CAN throws away the print data of the line that is being composed,
+         without advancing the paper. The encoder only ever sends it right
+         behind ESC @, where the line buffer is already empty */
+
+      case CAN:
+        this.#painter.cancel();
+        break;
+
+        /* The drawers are driven by single control characters, BEL and FS for
+         the first one, SUB and EM for the second */
+
+      case BEL:
+      case FS:
+        this.#drawer(0);
+        break;
+
+      case SUB:
+      case EM:
+        this.#drawer(1);
+        break;
+
+        /* The encoder ends its lines with LF CR, the carriage return does not
+         move the paper */
+
+      case CR:
+        break;
+    }
   }
 
   /**
@@ -892,98 +574,84 @@ class StarPrntRenderer {
   }
 
   /**
-     * Handle the command at a position in the stream
+     * Hand a command token to its handler, or report it as an unknown command
+     * when there is none. The handler decides, not the tokenizer: a command the
+     * tokenizer has a length for but this renderer draws nothing for is an
+     * unknown item all the same, which is what a driver sees today
      *
-     * @param  {Uint8Array}   bytes   The whole stream
-     * @param  {number}       index   Position of the ESC byte of the command
-     * @return {number}               Number of bytes the command occupies, or -1 when the stream is too short
+     * @param  {Token}   token   The command token
      */
-  #execute(bytes, index) {
-    if (index + 2 > bytes.length) {
-      return -1;
-    }
+  #command(token) {
+    this.#flushText();
 
-    /* ESC GS, ESC RS and ESC FS are prefixes of their own group, everything
-       else is a command of the ESC group */
-
-    const prefix = bytes[index + 1];
-    const grouped = prefix === GS || prefix === RS || prefix === FS;
-
-    if (grouped && index + 3 > bytes.length) {
-      return -1;
-    }
-
-    const group = GROUPS[prefix] || GROUP_ESC;
-    const code = grouped ? bytes[index + 2] : prefix;
-    const start = index + (grouped ? 3 : 2);
-
-    const command = this.#commands[group][code];
-    const argument = command ? command.args : UNKNOWN_ARGUMENTS[group][code];
-
-    const length = typeof argument === 'function' ?
-      argument(bytes, start) :
-      (typeof argument === 'number' ? argument : 0);
-
-    if (length < 0 || start + length > bytes.length) {
-      return -1;
-    }
-
-    const consumed = bytes.subarray(index, start + length);
+    const command = this.#commands[token.prefix][token.code];
 
     if (!command) {
-      this.#unknown(consumed);
-    } else if (command.run) {
-      command.run(bytes.subarray(start, start + length), consumed);
+      this.#unknown(token.bytes);
+      return;
     }
 
-    return start + length - index;
+    if (command.run) {
+      command.run(token.arguments, token.bytes);
+    }
   }
 
   /**
-     * The command tables, one per group. They are built per renderer so that
-     * the handlers can reach the state of this renderer.
+     * The tables of this renderer as the keys they hold, for `handlers()`
      *
-     * A command without a handler is parsed and ignored, which is what the
-     * printer does with the commands that do not change the paper. The blocks
-     * are ignored here as well, they are rendered in a later section, but their
-     * argument lengths are right so that the stream stays in sync.
+     * @return {Object<string, number[]>}   The command bytes, keyed by the mnemonic of the group
+     */
+  #handlers() {
+    return Object.fromEntries(Object.entries(this.#commands).map(
+        ([prefix, table]) => [prefix, Object.keys(table).map(Number)],
+    ));
+  }
+
+  /**
+     * The command handlers, one table per group, keyed by the mnemonic of the
+     * group and the command byte the way the tokens of the tokenizer are. They
+     * are built per renderer so that the handlers can reach its state.
      *
-     * @return {object}   The tables, keyed by group and command byte
+     * An entry without a `run` is a command that is read and does nothing,
+     * which is what the printer does with the commands that do not change the
+     * paper; a command with no entry at all is an unknown item.
+     *
+     * @return {object}   The tables, keyed by the mnemonic of the group and the command byte
      */
   #tables() {
     return {
       [GROUP_ESC]: {
-        0x06: {args: 1, run: null}, /* ESC ACK SOH, the real time status, parsed, there is no channel back */
-        0x07: {args: 2, run: (a) => this.#pulseWidth(a)},
-        0x20: {args: 1, run: (a) => this.#painter.spacing(this.#spacing(a[0]))},
-        0x0c: {args: 1, run: (a, consumed) => this.#formFeed(a[0], consumed)},
-        0x2a: {args: rasterArguments, run: (a, consumed) => this.#rasterCommand(a, consumed)},
-        0x2d: {args: 1, run: (a) => this.#underline(a[0])},
-        0x30: {args: 0, run: () => this.#painter.lineSpacing(LINE_SPACING_ESC_0)},
-        0x34: {args: 0, run: () => this.#painter.style({invert: true})},
-        0x35: {args: 0, run: () => this.#painter.style({invert: false})},
-        0x40: {args: 0, run: () => this.#initialize()},
-        0x44: {args: nulTerminated, run: (a) => this.#painter.tabs(Array.from(a.subarray(0, a.length - 1)))},
-        0x45: {args: 0, run: () => this.#painter.style({bold: true})},
-        0x46: {args: 0, run: () => this.#painter.style({bold: false})},
-        0x49: {args: 1, run: (a) => this.#painter.feed(a[0])}, /* feed n eighths of a millimetre, one dot each */
-        0x4a: {args: 1, run: (a) => this.#painter.feed(a[0] * 2)}, /* feed n quarters of a millimetre, two dots each */
-        0x4b: {args: bitImageArguments, run: (a) => this.#bitImage(a, 2)}, /* bit image, normal density */
-        0x4c: {args: bitImageArguments, run: (a) => this.#bitImage(a, 1)}, /* bit image, fine density */
-        0x51: {args: 1, run: (a) => this.#rightMargin(a[0])},
-        0x52: {args: 1, run: (a) => this.#international(a[0])},
-        0x57: {args: 1, run: (a) => this.#doubleWidth(a[0])},
-        0x58: {args: columnImageArguments, run: (a) => this.#columnImage(a)},
-        0x5f: {args: 1, run: (a) => this.#upperline(a[0])},
-        0x61: {args: 1, run: (a) => this.#painter.lineFeed(a[0])},
-        0x62: {args: barcodeArguments, run: (a, consumed) => this.#drawBarcode(a, consumed)},
-        0x64: {args: 1, run: (a) => this.#cut(a[0])},
-        0x68: {args: 1, run: (a) => this.#height(a[0])},
-        0x69: {args: 2, run: (a) => this.#size(a[0], a[1])},
-        0x6b: {args: bandImageArguments, run: (a) => this.#bandImage(a)}, /* bit image, twenty four dot band */
-        0x6c: {args: 1, run: (a) => this.#leftMargin(a[0])},
-        0x73: {args: 2, run: null}, /* ESC s n1 n2, a printer setting, parsed, see the reference page */
-        0x7a: {args: 1, run: (a) => this.#lineSpacing(a[0])},
+        0x06: {run: null}, /* ESC ACK SOH, the real time status, parsed, there is no channel back */
+        0x07: {run: (a) => this.#pulseWidth(a)},
+        0x20: {run: (a) => this.#painter.spacing(this.#spacing(a[0]))},
+        0x0c: {run: (a, consumed) => this.#formFeed(a[0], consumed)},
+        0x2a: {run: (a, consumed) => this.#rasterCommand(a, consumed)},
+        0x2d: {run: (a) => this.#underline(a[0])},
+        0x30: {run: () => this.#painter.lineSpacing(LINE_SPACING_ESC_0)},
+        0x34: {run: () => this.#painter.style({invert: true})},
+        0x35: {run: () => this.#painter.style({invert: false})},
+        0x40: {run: () => this.#initialize()},
+        0x44: {run: (a) => this.#painter.tabs(Array.from(a.subarray(0, a.length - 1)))},
+        0x45: {run: () => this.#painter.style({bold: true})},
+        0x46: {run: () => this.#painter.style({bold: false})},
+        0x49: {run: (a) => this.#painter.feed(a[0])}, /* feed n eighths of a millimetre, one dot each */
+        0x4a: {run: (a) => this.#painter.feed(a[0] * 2)}, /* feed n quarters of a millimetre, two dots each */
+        0x4b: {run: (a) => this.#bitImage(a, 2)}, /* bit image, normal density */
+        0x4c: {run: (a) => this.#bitImage(a, 1)}, /* bit image, fine density */
+        0x51: {run: (a) => this.#rightMargin(a[0])},
+        0x52: {run: (a) => this.#international(a[0])},
+        0x57: {run: (a) => this.#doubleWidth(a[0])},
+        0x58: {run: (a) => this.#columnImage(a)},
+        0x5f: {run: (a) => this.#upperline(a[0])},
+        0x61: {run: (a) => this.#painter.lineFeed(a[0])},
+        0x62: {run: (a, consumed) => this.#drawBarcode(a, consumed)},
+        0x64: {run: (a) => this.#cut(a[0])},
+        0x68: {run: (a) => this.#height(a[0])},
+        0x69: {run: (a) => this.#size(a[0], a[1])},
+        0x6b: {run: (a) => this.#bandImage(a)}, /* bit image, twenty four dot band */
+        0x6c: {run: (a) => this.#leftMargin(a[0])},
+        0x73: {run: null}, /* ESC s n1 n2, a printer setting, parsed, see the reference page */
+        0x7a: {run: (a) => this.#lineSpacing(a[0])},
       },
 
       /* The status, the settings and the buzzer are parsed: none of them puts a
@@ -992,25 +660,25 @@ class StarPrntRenderer {
          move the paper and the colour is a second ribbon */
 
       [GROUP_GS]: {
-        0x03: {args: 3, run: null}, /* ESC GS ETX s n1 n2, automatic status */
-        0x07: {args: 3, run: null}, /* ESC GS BEL m n1 n2, buzzer */
-        0x19: {args: 4, run: null}, /* ESC GS EM DC1 or DC2 m n1 n2, buzzer */
-        0x23: {args: 1, run: null}, /* print density */
-        0x41: {args: 2, run: (a) => this.#painter.position(a[0] + a[1] * 256)},
-        0x50: {args: pageModeArguments, run: (a) => this.#pageMode(a)}, /* the page mode group */
-        0x52: {args: 2, run: (a) => this.#relative(a)},
-        0x53: {args: rasterImageArguments, run: (a, consumed) => this.#rasterImage(a, consumed)},
-        0x61: {args: 1, run: (a) => this.#align(a[0])},
-        0x74: {args: 1, run: (a) => this.#selectCodepage(a[0])},
-        0x78: {args: pdf417Arguments, run: (a) => this.#pdf417Symbol(a)},
-        0x79: {args: qrcodeArguments, run: (a) => this.#symbol(a)},
+        0x03: {run: null}, /* ESC GS ETX s n1 n2, automatic status */
+        0x07: {run: null}, /* ESC GS BEL m n1 n2, buzzer */
+        0x19: {run: null}, /* ESC GS EM DC1 or DC2 m n1 n2, buzzer */
+        0x23: {run: null}, /* print density */
+        0x41: {run: (a) => this.#painter.position(a[0] + a[1] * 256)},
+        0x50: {run: (a) => this.#pageMode(a)}, /* the page mode group */
+        0x52: {run: (a) => this.#relative(a)},
+        0x53: {run: (a, consumed) => this.#rasterImage(a, consumed)},
+        0x61: {run: (a) => this.#align(a[0])},
+        0x74: {run: (a) => this.#selectCodepage(a[0])},
+        0x78: {run: (a) => this.#pdf417Symbol(a)},
+        0x79: {run: (a) => this.#symbol(a)},
       },
 
       [GROUP_RS]: {
-        0x46: {args: 1, run: (a) => this.#font(a[0])},
-        0x61: {args: 1, run: null}, /* print start control */
-        0x64: {args: 1, run: null}, /* print density */
-        0x72: {args: 1, run: null}, /* print speed */
+        0x46: {run: (a) => this.#font(a[0])},
+        0x61: {run: null}, /* print start control */
+        0x64: {run: null}, /* print density */
+        0x72: {run: null}, /* print speed */
       },
 
       /* ESC FS p prints a logo the printer holds and ESC FS q defines one,
@@ -1037,6 +705,12 @@ class StarPrntRenderer {
      * it, which is the Epson reference applied to StarPRNT and unverified on
      * Star hardware. Refused data that is itself a refused barcode goes to the
      * text path instead of being parsed again, which bounds the recursion.
+     *
+     * The payload is tokenized on its own, with a tokenizer that starts fresh,
+     * so a command inside refused data still does what it does but can no
+     * longer change where the rest of the stream is cut: the tokenizer read
+     * `ESC b` as one command and the record separator as the end of its data,
+     * which is what the reference says and what a printer does, see design.md
      *
      * @param  {Uint8Array}   args       The arguments of the command
      * @param  {Uint8Array}   consumed   The whole command, for the unknown item
@@ -1074,7 +748,7 @@ class StarPrntRenderer {
     this.#refusing = true;
 
     try {
-      this.#parse(data);
+      this.#dispatch(tokenize(data, StarPrntRenderer.language));
     } finally {
       this.#refusing = false;
     }

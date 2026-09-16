@@ -2,6 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {parseArgs} from 'node:util';
 
+import {decode} from '@point-of-sale/receipt-printer-decoder';
+import {detect} from '@point-of-sale/receipt-printer-decoder/tokenizer';
+
 import ReceiptPrinterRenderer, {pieces, stitch, toPbm, toPng} from './receipt-printer-renderer.js';
 import {toSvg} from './svg.js';
 
@@ -51,6 +54,11 @@ const NAME = 'receipt-printer-renderer';
 const DEFAULT_LANGUAGE = 'esc-pos';
 const DEFAULT_WIDTH = 576;
 
+/* The language that is not a language but a question: the bytes are read by
+   detect() of the decoder and the answer is the language of the renderer */
+
+const AUTO_LANGUAGE = 'auto';
+
 /* How wide one font A column is, in every profile the package has, which is
    what --columns counts */
 
@@ -59,8 +67,15 @@ const DOTS_PER_COLUMN = 12;
 /* The formats the command writes, and the one standard output gets when
    nothing says otherwise */
 
-const FORMATS = ['png', 'svg', 'pbm', 'json'];
+const LANGUAGES = [...ReceiptPrinterRenderer.languages, AUTO_LANGUAGE];
+
+const FORMATS = ['png', 'svg', 'pbm', 'json', 'commands'];
 const DEFAULT_FORMAT = 'png';
+
+/* The format that is not an image: the commands of the stream as text, one
+   line per token of decode() of the decoder */
+
+const COMMAND_LIST = 'commands';
 
 /* The command types --commands takes, which are the ones the renderer emits
    items for */
@@ -110,8 +125,9 @@ stitched image, or one image per piece of paper. The input is a file of
 commands; left out, or -, it is standard input, read to the end.
 
 Options:
-  -l, --language <name>          esc-pos, star-prnt, star-line or
-                                 star-graphics (default: esc-pos)
+  -l, --language <name>          esc-pos, star-prnt, star-line,
+                                 star-graphics, or auto to read it from the
+                                 commands themselves (default: esc-pos)
   -w, --width <dots>             Width of the paper in dots, a positive
                                  multiple of 8 (default: 576)
   -c, --columns <n>              Width as a number of font A columns, 12 dots
@@ -124,11 +140,13 @@ Options:
                                  Star languages)
   -o, --output <path>            Where the image goes, - for standard output
                                  (default: standard output)
-  -f, --format <name>            png, svg, pbm or json, the display list
-                                 (default: the extension of --output, png for
-                                 standard output)
+  -f, --format <name>            png, svg, pbm, json, the display list, or
+                                 commands, the stream as text (default: the
+                                 extension of --output, png for standard
+                                 output)
       --pieces                   One image per piece of paper, the stream
-                                 split at its cuts. Needs --output
+                                 split at its cuts. Needs --output, and is
+                                 refused with --format commands
       --cut-marker               A dashed line where the paper is cut, in one
                                  image of the whole roll. Nothing with
                                  --pieces, which has no cut inside a piece
@@ -146,7 +164,8 @@ Options:
   -h, --help                     This text, on standard output
   -v, --version                  The version of the package
 
-The SVG options are ignored by the other formats.
+The SVG options are ignored by the other formats. The commands format has no
+pieces: the commands of a stream are one list, cuts and all.
 
 Pieces:
   With --pieces the first piece keeps the name of --output and the rest are
@@ -161,6 +180,7 @@ Exit codes:
 
 Examples:
   ${NAME} receipt.bin -o receipt.png
+  ${NAME} -l auto -f commands receipt.bin
   ${NAME} -l star-prnt -c 32 receipt.bin -o receipt.svg
   ${NAME} --pieces receipt.bin -o receipt.png
   cat receipt.bin | ${NAME} > receipt.png
@@ -282,7 +302,17 @@ function commandsOf(values) {
  * @return {object}            The options of ReceiptPrinterRenderer
  */
 function rendererOptions(values, width) {
-  const options = {language: values.language || DEFAULT_LANGUAGE, width};
+  const language = values.language || DEFAULT_LANGUAGE;
+
+  /* The renderer names the four languages it has, and `auto` is a fifth answer
+     this command takes and the renderer has never heard of, so the list the
+     user is shown is written here rather than left to the constructor */
+
+  if (!LANGUAGES.includes(language)) {
+    throw new UsageError(`Unknown language ${language}, must be one of ${LANGUAGES.join(', ')}`);
+  }
+
+  const options = {language, width};
 
   const commands = commandsOf(values);
 
@@ -406,6 +436,71 @@ function runs(items) {
 }
 
 /**
+ * What a token of decode() is called: the mnemonic of a command, `GS V`, and
+ * the kind of the token for everything else
+ *
+ * @param  {object}   token   One token of decode()
+ * @return {string}           The name of the token
+ */
+function mnemonic(token) {
+  return token.type === 'command' ? token.mnemonic : token.type;
+}
+
+/**
+ * What a token of decode() says: the summary of a command, the text of a run
+ * of characters in quotes, the name of a control byte, and for a run of
+ * multibyte characters the word data, since the decoder has no CJK table and
+ * hands the bytes over undecoded. An incomplete tail says nothing at all, its
+ * offset and the end of the file are the whole of it
+ *
+ * @param  {object}   token   One token of decode()
+ * @return {string}           The line behind the name
+ */
+function meaning(token) {
+  if (token.type === 'command') {
+    return token.summary;
+  }
+
+  if (token.type === 'text') {
+    return token.multibyte ? 'data' : JSON.stringify(token.text);
+  }
+
+  return token.name || '';
+}
+
+/**
+ * The stream as text, one line per token of decode(): where it begins, what it
+ * is called and what it says. The columns are as wide as the widest entry in
+ * them, so that a listing of a receipt lines up and a listing of a megabyte
+ * lines up as well
+ *
+ * @param  {Uint8Array}   bytes      The commands
+ * @param  {object}       settings   The renderer options, for the language and the mapping
+ * @return {string}                  The listing
+ */
+function listing(bytes, settings) {
+  const options = {};
+
+  if (typeof settings.codepageMapping !== 'undefined') {
+    options.codepageMapping = settings.codepageMapping;
+  }
+
+  const rows = decode(bytes, settings.language, options).map((token) => [
+    String(token.offset), mnemonic(token), meaning(token),
+  ]);
+
+  if (!rows.length) {
+    return '';
+  }
+
+  const offset = Math.max(...rows.map((row) => row[0].length));
+  const name = Math.max(...rows.map((row) => row[1].length));
+
+  return `${rows.map((row) => `${row[0].padStart(offset)}  ${row[1].padEnd(name)}  ${row[2]}`.trimEnd())
+      .join('\n')}\n`;
+}
+
+/**
  * Render the commands to the files the command writes, one per piece of paper
  * with --pieces and one altogether without it
  *
@@ -416,6 +511,14 @@ function runs(items) {
  */
 async function documents(renderer, bytes, settings) {
   const width = settings.renderer.width;
+
+  /* The commands of a stream are read out of the bytes and not off the paper,
+     so this format touches neither the renderer nor the pieces: a stream is
+     one list, whatever it cuts */
+
+  if (settings.format === COMMAND_LIST) {
+    return [listing(bytes, settings.renderer)];
+  }
 
   if (settings.format === 'png' || settings.format === 'pbm') {
     const items = renderer.render(bytes);
@@ -566,12 +669,23 @@ async function command(argv, io) {
   const input = positionals.length && positionals[0] !== '-' ? positionals[0] : null;
   const output = typeof values.output === 'undefined' || values.output === '-' ? null : values.output;
 
+  const format = formatOf(values, output);
+
+  /* The commands of a stream are one list whatever the stream cuts, so there
+     is nothing for --pieces to number and nothing to split at: it is refused
+     rather than ignored, and refused in front of the --output it would
+     otherwise ask for */
+
+  if (values.pieces && format === COMMAND_LIST) {
+    throw new UsageError(`--pieces has no pieces for the ${COMMAND_LIST} format, which is one list of the stream`);
+  }
+
   if (values.pieces && !output) {
     throw new UsageError('--pieces needs --output, since there is no name to number');
   }
 
   const settings = {
-    format: formatOf(values, output),
+    format,
     output,
     pieces: Boolean(values.pieces),
     cutMarker: Boolean(values['cut-marker']),
@@ -583,9 +697,14 @@ async function command(argv, io) {
      rejects is reported without reading a stream first. Every option has been
      read by now, the arguments first and the renderer's own last, so an
      invocation that is wrong is told what is wrong with it; the usage below is
-     for an invocation that is right and has nothing to read */
+     for an invocation that is right and has nothing to read.
 
-  const renderer = build(settings.renderer);
+     With -l auto there is nothing to build yet, the language is in the bytes,
+     so the codepage mapping and the profile of that one invocation are checked
+     behind the stream instead of in front of it */
+
+  const automatic = settings.renderer.language === AUTO_LANGUAGE;
+  const renderer = automatic ? null : build(settings.renderer);
 
   /* A bare invocation on a terminal explains itself instead of waiting for a
      stream that nobody is typing */
@@ -596,7 +715,16 @@ async function command(argv, io) {
     return EXIT_USAGE;
   }
 
-  write(await documents(renderer, await read(input, io), settings), settings, io);
+  const bytes = await read(input, io);
+
+  /* Which language the commands are written in is a question the decoder
+     answers by reading them, see the printer of documentation/cli.md */
+
+  if (automatic) {
+    settings.renderer.language = detect(bytes);
+  }
+
+  write(await documents(renderer || build(settings.renderer), bytes, settings), settings, io);
 
   return 0;
 }

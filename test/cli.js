@@ -4,6 +4,9 @@ import path from 'node:path';
 import {Readable, Writable} from 'node:stream';
 import {fileURLToPath} from 'node:url';
 
+import {decode} from '@point-of-sale/receipt-printer-decoder';
+import {detect} from '@point-of-sale/receipt-printer-decoder/tokenizer';
+
 import ReceiptPrinterRenderer, {pieces, stitch, toPbm, toPng} from '../src/receipt-printer-renderer.js';
 import {toSvg} from '../src/svg.js';
 import {run} from '../src/cli.js';
@@ -53,6 +56,35 @@ function bytes(language, name) {
  */
 function file(language, name) {
   return path.join(directory, language, `${name}.bin`);
+}
+
+/**
+ * What a token of decode() is called on a line of `-f commands`: the mnemonic
+ * of a command, the kind of the token for everything else
+ *
+ * @param  {object}   token   One token of decode()
+ * @return {string}           The name
+ */
+function label(token) {
+  return token.type === 'command' ? token.mnemonic : token.type;
+}
+
+/**
+ * What a token of decode() says on a line of `-f commands`
+ *
+ * @param  {object}   token   One token of decode()
+ * @return {string}           The meaning
+ */
+function said(token) {
+  if (token.type === 'command') {
+    return token.summary;
+  }
+
+  if (token.type === 'text') {
+    return token.multibyte ? 'data' : JSON.stringify(token.text);
+  }
+
+  return token.name || '';
 }
 
 /**
@@ -236,6 +268,88 @@ describe('cli', function() {
       assert.equal(JSON.parse(text).version, 1);
     });
 
+    it('should write the commands of the stream as text, one line per token', async function() {
+      const {code, stdout} = await cli([file('esc-pos', 'text'), '-f', 'commands']);
+
+      const tokens = decode(bytes('esc-pos', 'text'), 'esc-pos');
+      const lines = stdout.text().split('\n');
+
+      assert.equal(code, 0);
+      assert.equal(lines[lines.length - 1], '');
+      assert.equal(lines.length - 1, tokens.length);
+
+      /* Every line is the token of decode() at the same position: where it
+         begins, what it is called and what it says */
+
+      const offset = String(tokens[tokens.length - 1].offset).length;
+      const width = Math.max(...tokens.map((token) => label(token).length));
+
+      for (const [index, token] of tokens.entries()) {
+        assert.equal(
+            lines[index],
+            `${String(token.offset).padStart(offset)}  ${label(token).padEnd(width)}  ${said(token)}`.trimEnd(),
+            `line ${index + 1}`,
+        );
+      }
+    });
+
+    it('should name a command by its mnemonic and a run of text by its text', async function() {
+      const {stdout} = await cli(['-f', 'commands'], {stdin: Uint8Array.from([0x1b, 0x40, 0x41, 0x42, 0x0a])});
+
+      assert.equal(stdout.text(), [
+        '0  ESC @    Initialize the printer',
+        '2  text     "AB"',
+        '4  control  Line feed',
+        '',
+      ].join('\n'));
+    });
+
+    it('should read the codepage the mapping says, the way the renderer does', async function() {
+      const stream = Uint8Array.from([0x1b, 0x74, 0x02, 0x41]);
+
+      const epson = await cli(['-f', 'commands'], {stdin: stream});
+      const citizen = await cli(['-f', 'commands', '-m', 'citizen'], {stdin: stream});
+
+      assert.include(epson.stdout.text(), 'Select codepage 2, cp850');
+      assert.include(citizen.stdout.text(), 'Select codepage 2, cp858');
+    });
+
+    it('should write the commands of the language -l auto found', async function() {
+      const {code, stdout} = await cli([file('star-prnt', 'receipt'), '-l', 'auto', '-f', 'commands']);
+
+      assert.equal(code, 0);
+      assert.equal(stdout.text(), (await cli([
+        file('star-prnt', 'receipt'), '-l', 'star-prnt', '-f', 'commands',
+      ])).stdout.text());
+    });
+
+    it('should write one list for a stream with a cut in it', async function() {
+      const plain = await cli([file('esc-pos', 'cut'), '-f', 'commands']);
+      const {code} = await cli([file('esc-pos', 'cut'), '-f', 'commands', '-o', output('list.txt')]);
+
+      assert.equal(code, 0);
+      assert.equal(Buffer.from(written('list.txt')).toString('utf8'), plain.stdout.text());
+    });
+
+    it('should refuse --pieces for it, which has no pieces to number', async function() {
+      const {code, stderr} = await cli([file('esc-pos', 'cut'), '-f', 'commands', '--pieces', '-o', output('l.txt')]);
+
+      assert.equal(code, 1);
+      assert.equal(
+          stderr.text(),
+          'receipt-printer-renderer: --pieces has no pieces for the commands format, ' +
+          'which is one list of the stream, see --help\n',
+      );
+    });
+
+    it('should refuse --pieces for it before it asks for an --output', async function() {
+      const {code, stderr} = await cli([file('esc-pos', 'cut'), '-f', 'commands', '--pieces']);
+
+      assert.equal(code, 1);
+      assert.match(stderr.text(), /--pieces has no pieces for the commands format/);
+      assert.notMatch(stderr.text(), /needs --output/);
+    });
+
     it('should take the format from the extension of the output', async function() {
       await cli([file('esc-pos', 'receipt'), '-o', output('one.svg')]);
       await cli([file('esc-pos', 'receipt'), '-f', 'svg', '-o', output('two.txt')]);
@@ -272,7 +386,8 @@ describe('cli', function() {
       assert.equal(code, 1);
       assert.equal(
           stderr.text(),
-          'receipt-printer-renderer: Unknown format gif, must be one of png, svg, pbm, json, see --help\n',
+          'receipt-printer-renderer: Unknown format gif, must be one of ' +
+          'png, svg, pbm, json, commands, see --help\n',
       );
     });
   });
@@ -353,14 +468,65 @@ describe('cli', function() {
       assert.notDeepEqual(Array.from(written('star.png')), Array.from(written('escpos.png')));
     });
 
-    it('should refuse a language it does not have, and name the four it does', async function() {
+    it('should refuse a language it does not have, and name the four it does with auto behind them', async function() {
       const {code, stderr} = await cli([file('esc-pos', 'receipt'), '-l', 'meow']);
 
       assert.equal(code, 1);
       assert.equal(
           stderr.text(),
           'receipt-printer-renderer: Unknown language meow, must be one of ' +
-          'esc-pos, star-prnt, star-line, star-graphics, see --help\n',
+          'esc-pos, star-prnt, star-line, star-graphics, auto, see --help\n',
+      );
+    });
+
+    it('should refuse the language without reading the input, which -l auto is the exception to', async function() {
+      const {code, stderr} = await cli(['-l', 'meow', '/no/such/file.bin']);
+
+      assert.equal(code, 1);
+      assert.match(stderr.text(), /Unknown language meow/);
+    });
+  });
+
+  describe('the automatic language', function() {
+    const automatic = [
+      {name: 'an ESC/POS stream', fixture: ['esc-pos', 'receipt'], language: 'esc-pos'},
+      {name: 'a StarPRNT stream', fixture: ['star-prnt', 'receipt'], language: 'star-prnt'},
+      {name: 'a Star Graphics raster job', fixture: ['star-prnt/raw', 'star-graphics'], language: 'star-graphics'},
+    ];
+
+    for (const {name, fixture, language} of automatic) {
+      it(`should read ${name} as ${language} and render it that way`, async function() {
+        assert.equal(detect(bytes(...fixture)), language);
+
+        const {code} = await cli([file(...fixture), '-l', 'auto', '-o', output('auto.png')]);
+
+        assert.equal(code, 0);
+        assert.deepEqual(
+            Array.from(written('auto.png')),
+            Array.from(await png(bytes(...fixture), {language})),
+        );
+      });
+    }
+
+    it('should render a stream of nothing but text as ESC/POS, which is the tie', async function() {
+      const text = Buffer.from('The quick brown fox\n', 'ascii');
+
+      const {code} = await cli(['-l', 'auto', '-o', output('text.png')], {stdin: text});
+
+      assert.equal(code, 0);
+      assert.deepEqual(
+          Array.from(written('text.png')),
+          Array.from(await png(new Uint8Array(text), {language: 'esc-pos'})),
+      );
+    });
+
+    it('should read the file before it builds the renderer, so the mapping of the language applies', async function() {
+      const {code} = await cli([file('star-prnt', 'receipt'), '-l', 'auto', '-m', 'star', '-o', output('star.png')]);
+
+      assert.equal(code, 0);
+      assert.deepEqual(
+          Array.from(written('star.png')),
+          Array.from(await png(bytes('star-prnt', 'receipt'), {language: 'star-prnt', codepageMapping: 'star'})),
       );
     });
   });
