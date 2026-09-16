@@ -18,10 +18,7 @@ Render the ESC/POS and StarPRNT commands created by [ReceiptPrinterEncoder](http
   - [The display list](#the-display-list)
   - [Drivers and applications](#drivers-and-applications)
   - [What is not rendered](#what-is-not-rendered)
-- [ESC/POS commands](commands-esc-pos.md)
-- [StarPRNT commands](commands-star-prnt.md)
 - [The display list](display-list.md)
-- [Design document](design.md)
 
 <br>
 
@@ -511,7 +508,7 @@ let printer = new WebUSBReceiptPrinter({
 
 The driver knows which language the printer should be fed, so it constructs the renderer with that language, the width of the paper, the codepage mapping that belongs to the language and the commands the printer still understands. It then reports `language`, `codepageMapping` and `columns` in its connected event, and your application keeps using ReceiptPrinterEncoder exactly as it does for printers with native ESC/POS support.
 
-Passing a renderer is optional. Without one a driver for a printer that only prints images reports the name of the raw protocol instead, `star-graphics` for the TSP100 family and `meow` for the cat printers, and passes the bytes you give it through unchanged, for applications that build those packets themselves. See [Driver integration](design.md#driver-integration) in the design document for the full contract.
+Passing a renderer is optional. Without one a driver for a printer that only prints images reports the name of the raw protocol instead, `star-graphics` for the TSP100 family and `meow` for the cat printers, and passes the bytes you give it through unchanged, for applications that build those packets themselves.
 
 <br>
 
@@ -533,6 +530,3 @@ The repository keeps byte streams other open source projects produced or ship as
 
 `npm run contact-sheet` renders all of them to `build/contact-sheet/` and writes a page that puts every render next to its provenance. Where the tools are installed on the machine that builds the page it also shows what two other renderers make of the same bytes, [thermal](https://github.com/zachzurn/thermal) and [ESCPost](https://github.com/receiptful/escpost), with a coarse agreement metric per fixture. Both render to an image, which is what makes them comparable: a renderer that writes markup says nothing about whether the paper agrees. A third column, [receiptio](https://github.com/receiptline/receiptio), renders the ReceiptLine document a receiptline fixture was made from rather than its bytes, which says whether our render of a stream is the receipt the document describes whatever command set it was written in. None of them is needed: a tool that is not there is a "not available" cell, and the page builds without any of them. What each one needs is written in its module under `tools/contact-sheet/references`.
 
-<br>
-
-The two command references list every command of a language, what it does to the paper and the values it accepts: [ESC/POS commands](commands-esc-pos.md) and [StarPRNT commands](commands-star-prnt.md).

@@ -4,9 +4,7 @@ Render the ESC/POS and StarPRNT commands created by [ReceiptPrinterEncoder](http
 
 - [About ReceiptPrinterRenderer](README.md)
 - [Usage and installation](documentation/usage.md)
-- [ESC/POS commands](documentation/commands-esc-pos.md)
-- [StarPRNT commands](documentation/commands-star-prnt.md)
-- [Design document](documentation/design.md)
+- [The display list](documentation/display-list.md)
 
 <br>
 
@@ -74,7 +72,7 @@ The renderer is checked against the byte streams of ReceiptPrinterEncoder, golde
 
 The renderer is normally not used directly, but constructed by a printer driver such as [WebUSBReceiptPrinter](https://github.com/at-point-of-sale/WebUSBReceiptPrinter), which knows the language, the width and the commands of the printer and passes the images on in the format the printer expects. The application hands the driver the class, or a function that imports it when a graphics printer turns up. Applications keep using ReceiptPrinterEncoder exactly as they do for printers with native ESC/POS support.
 
-See [Usage and installation](documentation/usage.md) for the options, the item stream, the SVG output, the command line and a preview example, [The display list](documentation/display-list.md) for the format `layout()` returns, [ESC/POS commands](documentation/commands-esc-pos.md) and [StarPRNT commands](documentation/commands-star-prnt.md) for every command a language supports and how compatible it is, and the [design document](documentation/design.md) for the architecture, the output contract and the plan for driver support.
+See [Usage and installation](documentation/usage.md) for the options, the item stream, the SVG output, the command line, a preview example and the contract with the drivers, and [The display list](documentation/display-list.md) for the format `layout()` returns.
 
 <br>
 
