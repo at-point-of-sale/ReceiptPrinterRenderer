@@ -1,6 +1,6 @@
 {
     "name": "@point-of-sale/receipt-printer-renderer",
-    "version": "0.3.0",
+    "version": "1.0.0",
     "description": "Render images based on raw ESC/POS, StarPRNT, Star Line or Star Graphics printer language payloads, and export them as PNG or SVG",
     "type": "module",
     "exports": {
