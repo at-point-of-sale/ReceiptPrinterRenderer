@@ -1,7 +1,7 @@
 {
     "name": "@point-of-sale/receipt-printer-renderer",
     "version": "0.3.0",
-    "description": "Render ESC/POS commands created by ReceiptPrinterEncoder to 1-bit images, for printers that only support graphics",
+    "description": "Render the raw data sent to a receipt printer, ESC/POS, StarPRNT, Star Line or Star Graphics, to an image of the paper, as PNG or SVG",
     "type": "module",
     "exports": {
         ".": {
@@ -58,6 +58,10 @@
         "starprnt",
         "star-prnt",
         "starline",
+        "star-line",
+        "star-graphics",
+        "svg",
+        "png",
         "raster",
         "graphics",
         "bitmap",

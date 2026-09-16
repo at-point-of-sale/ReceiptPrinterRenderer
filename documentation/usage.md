@@ -2,7 +2,7 @@
 
 <br>
 
-Render the ESC/POS and StarPRNT commands created by [ReceiptPrinterEncoder](https://github.com/at-point-of-sale/ReceiptPrinterEncoder) to 1-bit images, for receipt printers that only support graphics.
+Render the raw data sent to a receipt printer, ESC/POS, StarPRNT, Star Line or Star Graphics, to an image of the paper, and export it as PNG or SVG.
 
 - [About ReceiptPrinterRenderer](../README.md)
 - [Usage and installation](usage.md)
