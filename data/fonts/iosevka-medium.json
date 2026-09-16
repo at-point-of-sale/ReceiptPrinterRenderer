@@ -3982,9 +3982,8 @@
           "bitmap": null
         },
         "9567": {
-          "source": "edited",
-          "bitmap": "CQAJAAkACQAJAAkACQAJAAkACQAJAAnwCfAJAAkACQAJAAkACQAJAAkACQAJAAkA",
-          "from": "box"
+          "source": "box",
+          "bitmap": null
         },
         "9568": {
           "source": "box",
@@ -3995,18 +3994,16 @@
           "bitmap": null
         },
         "9570": {
-          "source": "edited",
-          "bitmap": "CQAJAAkACQAJAAkACQAJAAkACQAJAPkA+QAJAAkACQAJAAkACQAJAAkACQAJAAkA",
-          "from": "box"
+          "source": "box",
+          "bitmap": null
         },
         "9571": {
           "source": "box",
           "bitmap": null
         },
         "9572": {
-          "source": "edited",
-          "bitmap": "AAAAAAAAAAAAAAAAAAAAAAAAAAD/8AAAAAD/8AYABgAGAAYABgAGAAYABgAGAAYA",
-          "from": "box"
+          "source": "box",
+          "bitmap": null
         },
         "9573": {
           "source": "box",
@@ -4017,9 +4014,8 @@
           "bitmap": null
         },
         "9575": {
-          "source": "edited",
-          "bitmap": "BgAGAAYABgAGAAYABgAGAAYABgD/8AAAAAD/8AAAAAAAAAAAAAAAAAAAAAAAAAAA",
-          "from": "box"
+          "source": "box",
+          "bitmap": null
         },
         "9576": {
           "source": "box",
@@ -4030,9 +4026,8 @@
           "bitmap": null
         },
         "9578": {
-          "source": "edited",
-          "bitmap": "BgAGAAYABgAGAAYABgAGAAYABgD/8AYABgD/8AYABgAGAAYABgAGAAYABgAGAAYA",
-          "from": "box"
+          "source": "box",
+          "bitmap": null
         },
         "9579": {
           "source": "box",
@@ -4043,24 +4038,20 @@
           "bitmap": null
         },
         "9581": {
-          "source": "edited",
-          "bitmap": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwAfADgAcABgAGAAYABgAGAAYABgAGAAYA",
-          "from": "box"
+          "source": "box",
+          "bitmap": null
         },
         "9582": {
-          "source": "edited",
-          "bitmap": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAPAA+AAcAA4ABgAGAAYABgAGAAYABgAGAAYA",
-          "from": "box"
+          "source": "box",
+          "bitmap": null
         },
         "9583": {
-          "source": "edited",
-          "bitmap": "BgAGAAYABgAGAAYABgAGAAYADgAcAPgA8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-          "from": "box"
+          "source": "box",
+          "bitmap": null
         },
         "9584": {
-          "source": "edited",
-          "bitmap": "BgAGAAYABgAGAAYABgAGAAYABwADgAHwAPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-          "from": "box"
+          "source": "box",
+          "bitmap": null
         },
         "9585": {
           "source": "box",

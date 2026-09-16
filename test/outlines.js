@@ -717,22 +717,11 @@ describe('Outlines', function() {
 
     const CORNER_DOTS = 6;
 
-    /* The cells of font A the owner tuned by hand on the dot grid before the
-       range was geometry and whose dots differ from the rule: their double
-       lines are one dot wide where the rule draws two. The outline of one is
-       the rule and the packed cell is the hand edit, so the two differ by the
-       widening of those lines, by the number of dots pinned here, until the
-       owner reverts them in the editor and exports the font again, at which
-       point they drift by nothing and leave this list; see the Section 21 note
-       of the editor's plan. The four rounded corners were tuned by hand as
-       well, but the rule reproduces them dot for dot, so they are measured with
-       the arcs above and not excused here */
-
-    const HAND_EDITED = {
-      '12x24': {0x255f: 46, 0x2562: 46, 0x2564: 22, 0x2567: 22, 0x256a: 20},
-      '9x17': {},
-      '9x24': {},
-    };
+    /* The owner tuned the tees and the corners of font A by hand on the dot
+       grid before the range was geometry; the rule of the editor's Section 21
+       reproduces the corners and he reverted the tees, so nothing in the range
+       is excused here: a cell that drifts from its path is a font that was not
+       exported from the rule that wrote the paths */
 
     if (!Resvg) {
       it('needs resvg, which did not load', function() {
@@ -745,7 +734,6 @@ describe('Outlines', function() {
         const font = new Font(fonts[cell.font]);
 
         const corners = [];
-        const edited = [];
         const failed = [];
 
         for (const [key, path] of Object.entries(outlines.box[cell.name])) {
@@ -766,14 +754,6 @@ describe('Outlines', function() {
             if (dots > CORNER_DOTS) {
               failed.push(`${name(codepoint)} by ${dots} dots, more than the ${CORNER_DOTS} an arc may`);
             }
-          } else if (codepoint in HAND_EDITED[cell.name]) {
-            edited.push(`${name(codepoint)} by ${dots}`);
-
-            if (dots !== HAND_EDITED[cell.name][codepoint]) {
-              failed.push(
-                  `${name(codepoint)} by ${dots} dots, not the ${HAND_EDITED[cell.name][codepoint]} of the hand edit`,
-              );
-            }
           } else if (dots !== 0) {
             failed.push(`${name(codepoint)} by ${dots} dots`);
           }
@@ -781,8 +761,7 @@ describe('Outlines', function() {
 
         assert.deepEqual(failed, []);
 
-        report.push(`the rounded corners of the ${cell.name} cell drift by ${corners.join(', ')} dots` +
-          (edited.length ? `, and the cells edited by hand by ${edited.join(', ')}` : ''));
+        report.push(`the rounded corners of the ${cell.name} cell drift by ${corners.join(', ')} dots`);
       }).timeout(60 * 1000);
     }
 
