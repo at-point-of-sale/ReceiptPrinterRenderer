@@ -1,7 +1,7 @@
 {
     "name": "@point-of-sale/receipt-printer-renderer",
     "version": "0.3.0",
-    "description": "Render the raw data sent to a receipt printer, ESC/POS, StarPRNT, Star Line or Star Graphics, to an image of the paper, as PNG or SVG",
+    "description": "Render images based on raw ESC/POS, StarPRNT, Star Line or Star Graphics printer language payloads, and export them as PNG or SVG",
     "type": "module",
     "exports": {
         ".": {

@@ -1,6 +1,6 @@
 # ReceiptPrinterRenderer
 
-Render the raw data sent to a receipt printer, ESC/POS, StarPRNT, Star Line or Star Graphics, to an image of the paper, and export it as PNG or SVG.
+Render images based on raw ESC/POS, StarPRNT, Star Line or Star Graphics printer language payloads. Instead of sending the raw bytes to a receipt printer, you render it as an image and export it as PNG or SVG.
 
 - [About ReceiptPrinterRenderer](README.md)
 - [Usage and installation](documentation/usage.md)
@@ -14,9 +14,9 @@ Render the raw data sent to a receipt printer, ESC/POS, StarPRNT, Star Line or S
 
 ## About ReceiptPrinterRenderer
 
-This library is a receipt printer without the printer. Give it the bytes an application sends to one, whatever produced them, and it interprets them the way the printer would: the text in the printer's fonts and codepages, the styles, the images, the page mode of ESC/POS, the cuts, and the barcodes, which it draws itself: the one-dimensional symbologies, the GS1 DataBar family, QR codes and PDF417. What comes out is the paper, as a stream of image segments and the few commands a printer that only prints graphics still understands, such as cut and pulse, and from there a PNG, an SVG or a preview on a canvas.
+This library is a renderer that supports the same language that receipt printers support. Give it the bytes an application sends to a receipt printer, whatever produced them, and it interprets them the way the printer would: the text in the printer's fonts and codepages, the styles, the images, the page mode of ESC/POS, the cuts, and the barcodes, which it draws itself: the one-dimensional symbologies, the GS1 DataBar family, QR codes and PDF417. What comes out is a stream of image segments and optionally a set of commands a printer does understand, such as cut and pulse, and from there a PNG, an SVG or a preview on a canvas.
 
-That makes it a viewer of receipts, a way to test what an application prints without a printer on the desk, and a renderer for printers that have no fonts and no barcode engine of their own. Internally it is used by the [@point-of-sale](https://point-of-sale.dev) printer drivers to support receipt printers that only support printing graphics, such as the Star TSP100 series up to the TSP100III and the Bluetooth "cat" printers.
+That makes it a viewer of receipts, a way to test what an application prints without a printer on the desk, and a renderer for printers that have no fonts and no barcode engine of their own. Internally it is used by the [@point-of-sale](https://point-of-sale.dev) printer drivers to support receipt printers that only support printing graphics, such as the Star TSP100 series up to the TSP100III.
 
 <br>
 
@@ -84,7 +84,7 @@ See [Command line interface](documentation/cli.md) for every option, the formats
 
 ## Fonts
 
-Receipts are rendered with a hand crafted bitmap font based on [Iosevka](https://github.com/be5invis/Iosevka) Medium: the face rasterized into the 12 by 24 cell of font A and the 8 by 16 cell of font B, and then tuned dot by dot, so that every stem and every counter is right at the size of a receipt printer rather than what a rasterizer makes of it. Three subsets stand behind it for the scripts Iosevka has no glyph for: [Sarasa Gothic](https://github.com/be5invis/Sarasa-Gothic) Mono J SemiBold for the half width katakana, [Noto Sans Hebrew](https://github.com/notofonts/hebrew) Medium for the Hebrew and [Noto Sans Thai](https://github.com/notofonts/thai) Medium for the Thai. A glyph comes from the first of the four that has the character, and all four are drawn at the scale of Iosevka, which is the face.
+Receipts are rendered with a hand crafted bitmap font based on [Iosevka](https://github.com/be5invis/Iosevka): the face rasterized into the 12 by 24 cell of font A and the 8 by 16 cell of font B, and then tuned dot by dot, so that every stem and every counter is right at the size of a receipt printer rather than what a rasterizer makes of it. Three subsets stand behind it for the scripts Iosevka has no glyph for: [Sarasa Gothic](https://github.com/be5invis/Sarasa-Gothic) Mono J for the half width katakana, [Noto Sans Hebrew](https://github.com/notofonts/hebrew) for the Hebrew and [Noto Sans Thai](https://github.com/notofonts/thai) for the Thai. A glyph comes from the first of the four that has the character, and all four are drawn at the scale of Iosevka, which is the face.
 
 The fonts are made in [ReceiptPrinterFontEditor](https://github.com/at-point-of-sale/ReceiptPrinterFontEditor), which rasterizes the faces and is where the hand work is done, and this package carries what it exports. The box drawing and block characters are not taken from a face at all: they are drawn by a rule on the dot grid, so that the lines of a box or a rule join across the cells, with double lines two dots thick and rounded corners as arcs in the SVG output.
 
@@ -94,7 +94,7 @@ Every code point of cp437, of the ISO 8859 and Windows Latin codepages, of the G
 
 ## Testing
 
-The renderer is checked against the byte streams of ReceiptPrinterEncoder, golden images that are reviewed by eye before they are frozen, and against streams that other open source projects produce for their own examples or ship as their own samples: receiptline, python-escpos, escpos-php, ESCPOS_NET, ESCPost and escpos-tools, so that what it renders is what those libraries send and not only what the encoder sends. Those streams live in `test/fixtures/external`, each with its provenance and a golden image. It is also checked against the sample scripts of the [playground](https://github.com/at-point-of-sale/ReceiptPrinterPlayground), the encoder's own features in both languages at both paper widths. `npm run contact-sheet` renders all of them to a page and, where those tools are installed, shows what thermal and ESCPost make of the same bytes next to our render, and what receiptio makes of the document a receiptline stream came from. That page also prints: connect a printer over USB, serial or Bluetooth in its header and send any fixture whose language the printer speaks straight to it, over `npm run contact-sheet:serve` because Web USB and Web Serial need a secure context.
+The renderer is checked against the byte streams of ReceiptPrinterEncoder, golden images that are reviewed by eye before they are frozen, and against streams that other open source projects produce for their own examples or ship as their own samples: receiptline, python-escpos, escpos-php, ESCPOS_NET, ESCPost and escpos-tools, so that what it renders is what real life applications send and not only what our own encoder sends. Those streams live in `test/fixtures/external`, each with its provenance and a golden image. It is also checked against the sample scripts of the [playground](https://github.com/at-point-of-sale/ReceiptPrinterPlayground), the encoder's own features in both languages at both paper widths. `npm run contact-sheet` renders all of them to a page and, where those tools are installed, shows what thermal and ESCPost make of the same bytes next to our render, and what receiptio makes of the document a receiptline stream came from. That page also prints: connect a printer over USB, serial or Bluetooth in its header and send any fixture whose language the printer speaks straight to it, over `npm run contact-sheet:serve` because Web USB and Web Serial need a secure context.
 
 <br>
 

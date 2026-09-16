@@ -2,7 +2,7 @@
 
 <br>
 
-Render the raw data sent to a receipt printer, ESC/POS, StarPRNT, Star Line or Star Graphics, to an image of the paper, and export it as PNG or SVG.
+Render images based on raw ESC/POS, StarPRNT, Star Line or Star Graphics printer language payloads. Instead of sending the raw bytes to a receipt printer, you render it as an image and export it as PNG or SVG.
 
 - [About ReceiptPrinterRenderer](../README.md)
 - [Usage and installation](usage.md)
