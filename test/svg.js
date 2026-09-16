@@ -682,7 +682,7 @@ describe('toSvg()', function() {
       assert.deepEqual(apply(use.attributes.transform, [12, 24]), [12 + 24, 72]);
     });
 
-    it('clips every glyph to its cell, whatever the size of the cell', function() {
+    it('draws the glyph box on the scaled cell, whatever the size of the cell', function() {
       const svg = parse(toSvg(list([
         cell({x: 0}),
         cell({x: 12, scale: {x: 4, y: 4}, width: 48, height: 96}),
@@ -690,18 +690,36 @@ describe('toSvg()', function() {
 
       const uses = all(svg, 'use');
 
-      assert.equal(uses[0].attributes['clip-path'], uses[1].attributes['clip-path'],
-          'one clip path serves every size a cell is drawn at');
+      /* The corners of the glyph box, under the transform of the element, are
+         the corners of the scaled cell */
 
-      const clip = definition(svg, uses[0].attributes['clip-path']);
-
-      assert.deepEqual(clipBox(clip), {x: 0, y: 0, width: 12, height: 24});
-
-      /* And the clip is the cell on the paper: the corners of the clip, under
-         the transform of the element, are the corners of the scaled cell */
-
+      assert.notProperty(uses[0].attributes, 'transform', 'a cell at the origin, at one, is drawn as is');
       assert.deepEqual(apply(uses[1].attributes.transform, [0, 0]), [12, 0]);
       assert.deepEqual(apply(uses[1].attributes.transform, [12, 24]), [12 + 48, 96]);
+    });
+
+    it('does not clip a glyph of the face to its cell, so a brace reaches above it', function() {
+      /* The face is drawn as designed, where it lies: a glyph that is taller
+         than the cell is finished by hand on the dot grid for the printer and
+         is neither squeezed nor cut in the vector output. The brace of the
+         face reaches above the 12 by 24 cell, and its element carries no clip */
+
+      const brace = 0x7b;
+      const top = Math.min(...outlines.glyphs[brace].match(/-?\d+/g).map(Number)
+          .filter((value, index) => index % 2 === 1));
+
+      assert.isBelow(top, 0, 'the outline of the brace reaches above its cell');
+
+      const svg = parse(toSvg(list([
+        cell({codepoint: brace}),
+        cell({x: 12, codepoint: brace, style: {bold: true, underline: 0, upperline: 0, invert: false}}),
+      ])));
+
+      for (const use of all(svg, 'use')) {
+        assert.notProperty(use.attributes, 'clip-path');
+      }
+
+      assert.equal(all(svg, 'clipPath').length, 1, 'the paper is the only clip of the document');
     });
 
     it('draws nothing for a glyph whose outline is empty', function() {
@@ -722,7 +740,7 @@ describe('toSvg()', function() {
       assert.equal(definition(svg, 'afffd').attributes.d, outlines.glyphs[outlines.fallback]);
     });
 
-    it('draws the bold overstrike a glyph dot to the right, clipped to the same cell', function() {
+    it('draws the bold overstrike a glyph dot to the right', function() {
       const svg = parse(toSvg(list([
         cell({x: 24, style: {bold: true, underline: 0, upperline: 0, invert: false},
           scale: {x: 2, y: 1}, width: 24}),
@@ -737,22 +755,6 @@ describe('toSvg()', function() {
 
       assert.deepEqual(apply(uses[0].attributes.transform, [0, 0]), [24, 0]);
       assert.deepEqual(apply(uses[1].attributes.transform, [0, 0]), [26, 0]);
-
-      /* And the overstrike is cut at the right edge of the cell of the first
-         one, not at the edge of a cell of its own */
-
-      const first = clipBox(definition(svg, uses[0].attributes['clip-path']));
-      const second = clipBox(definition(svg, uses[1].attributes['clip-path']));
-
-      assert.deepEqual(apply(uses[0].attributes.transform, [first.x, first.y]), [24, 0]);
-      assert.deepEqual(
-          apply(uses[0].attributes.transform, [first.x + first.width, first.y + first.height]), [48, 24],
-      );
-
-      assert.deepEqual(apply(uses[1].attributes.transform, [second.x, second.y]), [24, 0]);
-      assert.deepEqual(
-          apply(uses[1].attributes.transform, [second.x + second.width, second.y + second.height]), [48, 24],
-      );
     });
 
     it('draws an underline along the bottom of the scaled cell, over its whole width', function() {
@@ -916,14 +918,6 @@ describe('toSvg()', function() {
 
       assert.deepEqual(apply(use.attributes.transform, [0, 0]), [0, 0]);
       assert.deepEqual(apply(use.attributes.transform, [12, 24]), [8, 16]);
-
-      const clip = clipBox(definition(svg, use.attributes['clip-path']));
-
-      assert.deepEqual(apply(use.attributes.transform, [clip.x, clip.y]), [0, 0]);
-      assert.deepEqual(
-          apply(use.attributes.transform, [clip.x + clip.width, clip.y + clip.height]), [9, 17],
-          'and the clip is the 9 by 17 cell',
-      );
     });
 
     it('draws a box drawing character from the box set of its cell', function() {
@@ -984,7 +978,7 @@ describe('toSvg()', function() {
       assert.deepEqual(apply(glyph.attributes.transform, [0, 0]), [12, 0]);
     });
 
-    it('clips a downloaded glyph that is larger than its cell', function() {
+    it('clips a downloaded glyph that is larger than its cell, which is dots and not the face', function() {
       const bitmap = Bitmap.create(24, 48);
 
       for (let y = 0; y < 48; y++) {

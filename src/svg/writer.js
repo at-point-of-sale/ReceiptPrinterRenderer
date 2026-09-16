@@ -24,21 +24,26 @@ import {toStoredPng} from './png.js';
     the dots of the packed font, and nothing else: it reads a list and writes a
     string, synchronously, and has no dependency of its own.
 
-    Three rules of the paper the document has to reproduce, which the display
+    Two rules of the paper the document has to reproduce, which the display
     list states and the bitmap back-end applies by construction:
 
       - A line is clipped to the width of its surface, because the line bitmap of
         the back-end has that width. One clipPath serves every line of the paper.
-      - A cell is clipped to its scaled cell, because the bitmap of a cell is the
-        cell. A path is not clipped by anything, and 43 of the 919 glyphs of the
-        fonts paint outside the 12 by 24 cell, none of them wholly, so an
-        unclipped glyph puts ink where the printer has none. Every glyph element
-        carries a clip, the bold overstrike included, and the clip is written in
-        the element's own coordinate system, where it depends on the cell and the
-        glyph box and not on the size the cell is drawn at: a handful of clip
-        paths serve a whole document.
       - An area of a page is clipped to the intersection of the area and the
         page, because an area can be taller than the page it stands on.
+
+    And one rule of the paper the document does not reproduce, on purpose: a
+    glyph of the face is not clipped to its cell. The bitmap of a cell is the
+    cell, and a glyph of the face that is taller than it, a brace, a
+    parenthesis, a capital with two accents, is finished by hand on the dot
+    grid for the printer. The vector output draws the face, and the face is
+    not squeezed into the cell and not cut at its edge either: it is drawn as
+    designed, where it lies, above the cell when it reaches above it, the way
+    a typographer sets it. What is clipped to its cell is a glyph the stream
+    downloaded, which is dots of the printer's own and has no face behind it:
+    it is written with a clip in its own coordinate system, the cell moved
+    back by the position of the glyph box in it, so that one clip path serves
+    every size the cell is drawn at.
 
     And two the format states as rules rather than as fields: a cell that is
     inverted or turned by ESC V carries the underline and the upperline of the
@@ -489,8 +494,9 @@ class SvgWriter {
   }
 
   /**
-     * The glyph of a text cell, and the bold overstrike next to it, clipped to
-     * the scaled cell
+     * The glyph of a text cell, and the bold overstrike next to it. A glyph of
+     * the face is drawn where it lies, outside its cell when it reaches outside
+     * it; a downloaded glyph is clipped to the scaled cell, see the header
      *
      * @param  {TextOperation}   operation   The cell
      * @param  {number}          x           Left edge of the cell in the frame it is written in
@@ -522,16 +528,17 @@ class SvgWriter {
     const fx = scale.x * shape.fit;
     const fy = scale.y * shape.fit;
 
-    const clip = this.#cellClip(operation.cell, left, top, shape.fit);
+    const clip = shape.clipped ? this.#cellClip(operation.cell, left, top, shape.fit) : '';
 
     parts.push(this.#use(shape, x + left * scale.x, y + top * scale.y, fx, fy, clip, paint));
 
     /* Bold is the glyph a second time one glyph dot to the right, which is
-       scale.x paper dots, inside a clip of its own: a glyph whose ink reaches
-       the right edge of its cell is cut there in bold as it is on the paper */
+       scale.x paper dots. A downloaded glyph that reaches the right edge of
+       its cell is cut there in bold as it is on the paper, so its overstrike
+       is clipped to the same cell and not to a cell of its own */
 
     if (operation.style.bold) {
-      const bolder = this.#cellClip(operation.cell, left + 1, top, shape.fit);
+      const bolder = shape.clipped ? this.#cellClip(operation.cell, left + 1, top, shape.fit) : '';
 
       parts.push(this.#use(shape, x + (left + 1) * scale.x, y + top * scale.y, fx, fy, bolder, paint));
     }
@@ -547,7 +554,8 @@ class SvgWriter {
      * @param  {number}   y       Top of the glyph box
      * @param  {number}   fx      Horizontal scale of the path
      * @param  {number}   fy      Vertical scale of the path
-     * @param  {string}   clip    Id of the clip path of the cell
+     * @param  {string}   clip    Id of the clip path of the cell, or an empty string for a glyph
+     *                            that is drawn where it lies
      * @param  {string}   paint   The fill attribute of an inverted cell, or nothing
      * @return {string}           The element
      */
@@ -556,7 +564,8 @@ class SvgWriter {
     const move = x === 0 && y === 0 ? '' : `translate(${num(x)} ${num(y)})`;
     const transform = `${move}${scale}`;
 
-    const attributes = `${transform ? ` transform="${transform}"` : ''} clip-path="url(#${clip})"${paint}`;
+    const attributes = `${transform ? ` transform="${transform}"` : ''}${
+      clip ? ` clip-path="url(#${clip})"` : ''}${paint}`;
 
     return shape.id ?
       `<use href="#${shape.id}"${attributes}/>` :
@@ -613,7 +622,7 @@ class SvgWriter {
     if (operation.bitmap) {
       const data = trace(this.#crop(operation.bitmap, cell));
 
-      return data ? {data, width: cell.width, baseline: operation.baseline, fit: 1} : null;
+      return data ? {data, width: cell.width, baseline: operation.baseline, fit: 1, clipped: true} : null;
     }
 
     /* A code point that is not a whole number names no glyph of the outlines
