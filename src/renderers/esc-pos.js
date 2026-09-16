@@ -618,7 +618,9 @@ class EscPosRenderer {
     const mapping = settings.codepageMapping || 'epson';
 
     if (!Object.prototype.hasOwnProperty.call(codepageMappings['esc-pos'], mapping)) {
-      throw new Error(`Unknown codepage mapping ${mapping}`);
+      const names = Object.keys(codepageMappings['esc-pos']);
+
+      throw new Error(`Unknown codepage mapping ${mapping}, must be one of ${names.join(', ')}`);
     }
 
     this.#mapping = codepageMappings['esc-pos'][mapping];
@@ -631,7 +633,9 @@ class EscPosRenderer {
 
     if (typeof profile === 'string') {
       if (!Object.prototype.hasOwnProperty.call(printerProfiles, profile)) {
-        throw new Error(`Unknown printer profile ${profile}`);
+        throw new Error(
+            `Unknown printer profile ${profile}, must be one of ${Object.keys(printerProfiles).join(', ')}`,
+        );
       }
 
       resolved = printerProfiles[profile];

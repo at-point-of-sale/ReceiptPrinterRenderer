@@ -144,12 +144,24 @@ describe('ReceiptPrinterRenderer', function() {
 
       assert.throws(
           () => new ReceiptPrinterRenderer({language: 'star-line', width: WIDTH, codepageMapping: 'epson'}),
-          /Unknown codepage mapping epson/,
+          /Unknown codepage mapping epson, must be one of star/,
       );
 
       assert.throws(
           () => new ReceiptPrinterRenderer({width: WIDTH, codepageMapping: 'nonesuch'}),
-          /Unknown codepage mapping nonesuch/,
+          /Unknown codepage mapping nonesuch, must be one of .*epson/,
+      );
+    });
+
+    it('lets the profile check of the renderer through, and names the profiles', function() {
+      assert.throws(
+          () => new ReceiptPrinterRenderer({width: WIDTH, profile: 'nonesuch'}),
+          /Unknown printer profile nonesuch, must be one of epson, star/,
+      );
+
+      assert.throws(
+          () => new ReceiptPrinterRenderer({language: 'star-prnt', width: WIDTH, profile: 'nonesuch'}),
+          /Unknown printer profile nonesuch, must be one of epson, star/,
       );
     });
 

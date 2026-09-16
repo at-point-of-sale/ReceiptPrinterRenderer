@@ -25,6 +25,9 @@
             "require": "./dist/receipt-printer-renderer-svg.cjs"
         }
     },
+    "bin": {
+        "receipt-printer-renderer": "bin/receipt-printer-renderer.js"
+    },
     "main": "dist/receipt-printer-renderer.cjs",
     "module": "dist/receipt-printer-renderer.mjs",
     "types": "dist/receipt-printer-renderer.d.ts",
@@ -33,11 +36,12 @@
         "contact-sheet": "node tools/contact-sheet.js",
         "contact-sheet:serve": "node tools/contact-sheet/serve.js",
         "generate": "node tools/generate.js",
-        "lint": "eslint --fix src test tools",
+        "lint": "eslint --fix src test tools bin",
         "mocha": "mocha test/",
         "test": "npm run lint && npm run mocha",
         "test:types": "tsc -p test/types/tsconfig.json",
-        "test:umd": "node test/umd/check.js"
+        "test:umd": "node test/umd/check.js",
+        "test:bin": "node test/bin/check.js"
     },
     "repository": {
         "type": "git",
@@ -98,7 +102,11 @@
         "@point-of-sale/codepage-encoder": "^3.0.0",
         "lean-qr": "^2.4.1"
     },
+    "engines": {
+        "node": ">=18"
+    },
     "files": [
+        "bin",
         "dist",
         "README.md",
         "LICENSE"

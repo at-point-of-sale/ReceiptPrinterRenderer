@@ -629,7 +629,9 @@ class StarPrntRenderer {
     const mapping = settings.codepageMapping || 'star';
 
     if (!Object.prototype.hasOwnProperty.call(codepageMappings['star-prnt'], mapping)) {
-      throw new Error(`Unknown codepage mapping ${mapping}`);
+      const names = Object.keys(codepageMappings['star-prnt']);
+
+      throw new Error(`Unknown codepage mapping ${mapping}, must be one of ${names.join(', ')}`);
     }
 
     this.#mapping = codepageMappings['star-prnt'][mapping];
@@ -647,7 +649,9 @@ class StarPrntRenderer {
 
     if (typeof profile === 'string') {
       if (!Object.prototype.hasOwnProperty.call(printerProfiles, profile)) {
-        throw new Error(`Unknown printer profile ${profile}`);
+        throw new Error(
+            `Unknown printer profile ${profile}, must be one of ${Object.keys(printerProfiles).join(', ')}`,
+        );
       }
 
       resolved = printerProfiles[profile];
