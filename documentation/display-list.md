@@ -17,6 +17,8 @@ const items = rasterize(layout, { commands: ['cut'] });   // the same dots rende
 
 `rasterize(layout, options)` draws a list again and returns the items of the output contract. It takes `commands`, `maxHeight`, `feedThreshold` and `font`, the options of a renderer that decide how the dots come out, and it is a named export as well as a static of `ReceiptPrinterRenderer`.
 
+`pieces(layout)` splits a list at its cuts into the pieces of paper that leave the printer, one list per piece in order, each with the height of the paper between two cuts and the entries that start on it moved up to row 0, and without the cuts, which are the boundaries. The paper is cut between row `y - 1` and row `y` of a cut, so row `y` is the first row of the next piece; a cut at the very top or bottom, or two on one row, leave no piece, and a piece with nothing on it, a feed and then a cut, is a blank one. The list is not changed. It is a named export as well as a static, and a piece is a list like any other: `rasterize(piece)` draws the same dots as the items of a render between the same two cuts, stitched, and `toSvg(piece)` writes a document of the piece.
+
 <br>
 
 ## The list

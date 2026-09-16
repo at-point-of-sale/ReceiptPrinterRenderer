@@ -18,7 +18,7 @@ import {drivers, scripts, styles, header, script} from './contact-sheet/printing
     render.
 
     Next to our render, in a grid of five equal columns, it shows our own SVG
-    output rasterized by resvg and what other renderers make of the same bytes,
+    output, the document itself, and what other renderers make of the same bytes,
     where they are installed on this machine: ESCPost and thermal, both of which
     produce an image, and receiptio, which renders the document a receiptline
     fixture was made from rather than its bytes, see section 16f. Every tool is

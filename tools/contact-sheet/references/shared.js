@@ -40,7 +40,9 @@ import Bitmap from '../../../src/bitmap.js';
  * @property {boolean}      [applicable] False when the tool has nothing to say about this fixture at all,
  *                                       and the sheet leaves its cell out
  * @property {string}       reason      Why it did not run or did not produce a render
- * @property {string}       [file]      Path of what it wrote, relative to the contact sheet
+ * @property {string}       [file]      Path of what it wrote, relative to the contact sheet, which the page shows
+ * @property {string}       [raster]    Path of the raster a bitmap was measured on when `file` is not one, relative
+ *                                      to the contact sheet
  * @property {string[]}     [files]     One path per piece of paper, relative to the contact sheet, when the tool
  *                                      has pieces to show; the page stacks them and falls back to `file`
  * @property {string}       [kind]      'image' or 'html'

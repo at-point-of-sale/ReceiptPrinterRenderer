@@ -12,6 +12,7 @@ import ReceiptPrinterRenderer, {
   EscPosRenderer,
   StarPrntRenderer,
   rasterize,
+  pieces,
   toPbm,
   toPng,
   toImageData,
@@ -293,6 +294,8 @@ const rasterizeOptions: RasterizeOptions = {commands, maxHeight: 1024, feedThres
 
 const drawn: RenderItem[] = rasterize(list, rasterizeOptions);
 const drawnAgain: RenderItem[] = ReceiptPrinterRenderer.rasterize(list);
+const split: Layout[] = pieces(list);
+const splitAgain: Layout[] = ReceiptPrinterRenderer.pieces(list);
 
 void escposList;
 void starList;
@@ -310,6 +313,10 @@ const svgOptions: SvgOptions = {units: 'mm', cutMarker: true, background: null, 
 
 const svg: string = toSvg(list, svgOptions);
 const svgAgain: string = toSvgDefault(list);
+const perPiece: string[] = pieces(list).map((piece: Layout) => toSvg(piece, svgOptions));
 
 void svg;
 void svgAgain;
+void perPiece;
+void split;
+void splitAgain;

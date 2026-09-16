@@ -3,6 +3,7 @@ import {toPng} from './formats/png.js';
 import {toImageData} from './formats/image-data.js';
 import {stitch} from './formats/stitch.js';
 import {rasterize} from './backends/bitmap.js';
+import {pieces} from './pieces.js';
 import EscPosRenderer from './renderers/esc-pos.js';
 import StarPrntRenderer from './renderers/star-prnt.js';
 
@@ -82,14 +83,15 @@ const DEFAULT_LANGUAGE = 'esc-pos';
  * option as well.
  */
 class ReceiptPrinterRenderer {
-  /* The two renderers and the four image format helpers are static properties
-     as well as named exports, so that the UMD build, whose global is this
-     class, reaches all of them */
+  /* The two renderers, the two display list helpers and the four image format
+     helpers are static properties as well as named exports, so that the UMD
+     build, whose global is this class, reaches all of them */
 
   static EscPosRenderer = EscPosRenderer;
   static StarPrntRenderer = StarPrntRenderer;
 
   static rasterize = rasterize;
+  static pieces = pieces;
 
   static toPbm = toPbm;
   static toPng = toPng;
@@ -190,6 +192,7 @@ export {
   EscPosRenderer,
   StarPrntRenderer,
   rasterize,
+  pieces,
   toPbm,
   toPng,
   toImageData,

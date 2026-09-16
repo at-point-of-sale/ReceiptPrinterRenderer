@@ -56,7 +56,7 @@ assert.equal(typeof ReceiptPrinterRenderer.StarPrntRenderer, 'function');
 assert.equal(ReceiptPrinterRenderer.EscPosRenderer.language, 'esc-pos');
 assert.equal(ReceiptPrinterRenderer.StarPrntRenderer.language, 'star-prnt');
 
-for (const helper of ['rasterize', 'toPbm', 'toPng', 'toImageData', 'stitch']) {
+for (const helper of ['rasterize', 'pieces', 'toPbm', 'toPng', 'toImageData', 'stitch']) {
   assert.equal(typeof ReceiptPrinterRenderer[helper], 'function', `${helper} is attached to the class`);
 }
 

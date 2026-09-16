@@ -17,9 +17,10 @@ import * as svg from './svg.js';
     document`.
 
     svg, of section 4 of the SVG plan, is odder still: it is not another
-    project's renderer at all but our own SVG output, rasterized by resvg, so
-    that the vector output stands next to the dots with the number of the dots
-    that agree. Its column is titled `our SVG, rasterized by resvg`.
+    project's renderer at all but our own SVG output, the document itself on
+    the page, so that the vector output stands next to the dots as what it is;
+    resvg only rasterizes it for the number of the dots that agree. Its column
+    is titled `our SVG, measured by resvg`.
 
     Every module says what it is, where it looks for its tool and what it runs,
     in its own header. None of them is needed by npm test, none of them is a
