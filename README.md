@@ -75,4 +75,4 @@ See [Usage and installation](documentation/usage.md) for the options, the item s
 
 This library has been created by Niels Leenheer under the [MIT license](LICENSE). Feel free to use it in your products. The development of this library is sponsored by Salonhub.
 
-<a href="https://salonhub.nl"><img src="https://salonhub.nl/assets/images/salonhub.svg" width=140></a>
+<a href="https://salonhub.nl"><img src="https://point-of-sale.dev/logo.svg" width=100></a>
