@@ -14,6 +14,7 @@ Render the ESC/POS and StarPRNT commands created by [ReceiptPrinterEncoder](http
   - [Feed items and maximum height](#feed-items-and-maximum-height)
   - [Image format helpers](#image-format-helpers)
   - [Previewing a receipt](#previewing-a-receipt)
+  - [Command line](#command-line)
   - [The display list](#the-display-list)
   - [Drivers and applications](#drivers-and-applications)
   - [What is not rendered](#what-is-not-rendered)
@@ -26,7 +27,7 @@ Render the ESC/POS and StarPRNT commands created by [ReceiptPrinterEncoder](http
 
 ## Usage and installation
 
-This package is compatible with browsers and Node. It provides bundled versions for direct use in the browser and can also be used as an input for your own bundler. And of course there are ES6 modules and CommonJS versions for use in Node and Deno.
+This package is compatible with browsers and Node. It provides bundled versions for direct use in the browser and can also be used as an input for your own bundler. And of course there are ES6 modules and CommonJS versions for use in Node and Deno. It also ships with a command line, for rendering a stream of commands to an image from the shell without writing a script.
 
 <br>
 
@@ -330,6 +331,59 @@ canvas.getContext('2d').putImageData(image, 0, 0);
 ```
 
 To preview the same receipt for a Star printer, encode it with `language: 'star-prnt'` and render it with the same language and `codepageMapping: 'star'`. Nothing else changes.
+
+<br>
+
+### Command line
+
+The package ships with a command of its own: printer commands in, an image out, without writing a script for it. It is the renderer and the helpers of this page with arguments in front of them and nothing else, which makes it the quickest way to look at a stream someone sent you, and a usable step in a build or a test script.
+
+There is one bin and it is named as the package without its scope, so it runs without installing anything:
+
+```
+npx @point-of-sale/receipt-printer-renderer receipt.bin -o receipt.png
+```
+
+Installed, globally or as a dependency of a project, the same command is `receipt-printer-renderer`:
+
+```
+receipt-printer-renderer receipt.bin -o receipt.png
+receipt-printer-renderer -l star-prnt -c 32 receipt.bin -o receipt.svg
+receipt-printer-renderer --cut-marker receipt.bin -o receipt.png
+receipt-printer-renderer --pieces receipt.bin -o receipt.png     # receipt.png, receipt.2.png, ...
+cat receipt.bin | receipt-printer-renderer > receipt.png
+```
+
+The input is a file of printer commands. Left out, or `-`, it is standard input, read to the end. A bare invocation at a terminal, one with nothing to read, writes the usage to standard error and exits with 1 rather than waiting for a stream nobody is typing.
+
+These are the options. The defaults are the common case, an ESC/POS receipt on an 80 mm roll at 203 dpi, so that the first example above needs none of them:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `-l, --language <name>` | `esc-pos` | The language the commands are in: `esc-pos`, `star-prnt`, `star-line` or `star-graphics`. |
+| `-w, --width <dots>` | `576` | Width of the paper in dots, a positive multiple of 8. 576 is the 80 mm roll at 203 dpi. |
+| `-c, --columns <n>` | | Width as a number of font A columns, 12 dots each in every profile: `-c 48` is 576 dots, `-c 32` is 384. Exclusive with `--width`. |
+| `-m, --codepage-mapping <name>` | `epson` for ESC/POS, `star` for the Star languages | The mapping the commands were encoded with, the `codepageMapping` option of the renderer. |
+| `-p, --profile <name>` | `epson` for ESC/POS, `star` for the Star languages | The printer family the defaults come from, the `profile` option of the renderer. |
+| `-o, --output <path>` | standard output | Where the image goes. `-` is standard output, the way it is for the input. With `--pieces` the path is the pattern the names are made from. |
+| `-f, --format <name>` | the extension of `--output`, `png` for standard output | `png`, `svg`, `pbm` or `json`, which is the display list. |
+| `--pieces` | off | One image per piece of paper, the stream split at its cuts. Needs `--output`. |
+| `--cut-marker` | off | A dashed line where the paper is cut, in one image of the whole roll. Nothing with `--pieces`, which has no cut inside a piece. |
+| `--commands <list>` | none | Comma separated `cut`, `pulse`, `feed` and `unknown`, the commands the printer performs. A cut is added when `--pieces` or `--cut-marker` needs one, listed or not. |
+| `--line-spacing <dots>` | the profile's | Default line spacing in dots, the option of the same name. |
+| `--units <name>` | `dots` | SVG only: `dots`, `mm`, `pt` or `px`, the units of the width and the height of the document. |
+| `--background <colour>` | `#fff` | SVG only: the colour of the paper, `none` for a transparent one. |
+| `--ink <colour>` | `#000` | SVG only: the colour of the ink. |
+| `-h, --help` | | The usage, on standard output, exit 0. |
+| `-v, --version` | | The version of the package, exit 0. |
+
+**Formats.** `png` and `pbm` are the stitched paper, the bitmap of `stitch()` written by `toPng()` or `toPbm()`. `svg` is `toSvg()` of the display list, and the three SVG options above are ignored by the other formats. `json` is the display list itself, indented, for looking at what a stream lays out. The format is the extension of the output file when `--format` says nothing, so `-o receipt.svg` writes SVG; a name with an extension the command does not know, or with none at all, needs `--format`. Standard output gets PNG unless `--format` says otherwise, and `-o -` is standard output as surely as leaving `--output` out is.
+
+**Pieces.** `--pieces` writes one image per piece of paper, the stream split at its cuts. The files are named after `--output` the way the contact sheet names them: the first piece keeps the name and the rest are numbered from 2 before the extension, `receipt.png`, `receipt.2.png`, `receipt.3.png`. A stream without a cut in it writes one file under the plain name, and a piece with no rows on it, which is what a cut at the very end leaves, is skipped and takes no number. Because the names are the point, `--pieces` needs `--output` and is refused without it. A cut is only ever in the way of the paper when the printer performs it, so `--pieces` and `--cut-marker` both add `cut` to the commands whether or not `--commands` lists it: without that an image would have no cut to be split or marked at, and the PNG and the SVG of one stream would disagree.
+
+**Exit codes and errors.** 0 when the image was written. 1 for a usage error: an option the command does not know, a language, a format, a profile or a codepage mapping the package does not have, a width that is not a positive multiple of 8, `--pieces` without `--output`, a file that cannot be read or written. 2 when the renderer or the writer could not handle the stream, which tells a script that the command was called correctly and the commands in it were the problem. Every error is one line on standard error, `receipt-printer-renderer: ` and the message, and a usage error ends in `, see --help`. The messages name the names: an unknown language lists the four, an unknown profile or codepage mapping lists the ones that language has.
+
+The command needs Node 18 or later, as the package does, for `parseArgs` and the `CompressionStream` the PNG is written with. It is the API and nothing more, so anything it does is a few lines in a script of your own: [Image format helpers](#image-format-helpers) for the PNG, the PBM and the stitched paper, [The display list](#the-display-list) for the JSON and the pieces, and [SVG output](#svg-output) for the SVG and its options.
 
 <br>
 

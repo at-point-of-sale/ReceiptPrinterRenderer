@@ -107,6 +107,7 @@ bytes ──▶ parser ──▶ layout engine ──▶ sink ──▶ items
 - **Painter.** `src/painter.js` is the wiring of the two: it owns an engine with a bitmap back-end and is the interface both parsers talk to, so the split changed nothing they see.
 - **Items.** The output stream, see [Output contract](#output-contract). The other output is the [display list](#the-display-list).
 - **SVG.** `src/svg.js` is a sub-entry of the package, `@point-of-sale/receipt-printer-renderer/svg`, and a third consumer of the display list next to the two back-ends: `toSvg(layout, options)` writes one SVG document of a list, see [SVG output](#svg-output). It is an entry of its own because it carries the glyph outlines of `data/fonts/outlines.js`, which nothing else imports.
+- **Command line.** `src/cli.js` is the command the package ships as a bin, `run(argv, io)`, which is the arguments of a shell in front of `render()`, `layout()`, `stitch()`, `pieces()` and the four writers and nothing else of its own, so that a stream of commands becomes a PNG, a PBM, an SVG or the display list without a script, see [Command line](usage.md#command-line). `bin/receipt-printer-renderer.js` is the shim that runs it, the one file of the package that touches the process: it hands the command the three standard streams and the version of the manifest and puts what it returns in the exit code, so that the command itself is driven over buffers by the tests.
 
 Repository layout, mirroring ReceiptPrinterEncoder:
 
@@ -137,6 +138,9 @@ src/
     writer.js                   the display list as an SVG document: the defs, the lines, the cells, the pages
     png.js                      a PNG of stored deflate blocks, so that the writer stays synchronous
     trace.js                    a 1-bit bitmap as the rectangles of a path, for the glyphs a stream downloads to the SVG output
+  cli.js                        the command line as a function, run(argv, io): the arguments, the formats and the pieces
+bin/
+  receipt-printer-renderer.js   the shim of the command, the one file with the process in it
 data/
   fonts/                        the packed fonts and the glyph outlines, exported by ReceiptPrinterFontEditor,
                                 the licences of the faces they are derived from, and the project file
@@ -848,7 +852,8 @@ The TSP100LAN, TSP143IIILAN and TSP143IIIW speak the same raster protocol over a
 5. **NetworkReceiptPrinter.** Same option and wrapper as the USB branch.
 6. **PDF417.** The complete symbology in this package, in both languages, read back with a barcode reader in the tests.
 7. **GS1 DataBar.** Omnidirectional, Truncated, Limited and Expanded in this package, in both languages, compared with a second encoder and read back with a barcode reader in the tests.
-8. **Later.** The TSP100 profile moves to the StarPRNT renderer, a UTF-8 mode in the encoder for Unicode text on graphics printers, the stacked and composite forms of GS1 DataBar if there is demand, fonts for non-Latin codepages, incremental `write` and `end`.
+8. **Command line.** The package as a bin, `receipt-printer-renderer`, and `npx` without installing: a stream of commands to a PNG, a PBM, an SVG or the display list, one image of the roll or one per piece of paper, the arguments in front of the helpers that were there already.
+9. **Later.** The TSP100 profile moves to the StarPRNT renderer, a UTF-8 mode in the encoder for Unicode text on graphics printers, the stacked and composite forms of GS1 DataBar if there is demand, fonts for non-Latin codepages, incremental `write` and `end`.
 
 <br>
 
