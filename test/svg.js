@@ -311,7 +311,19 @@ function all(element, name) {
  * @return {object[]}       The elements of the body
  */
 function body(svg) {
-  return svg.children.filter((child) => child.name !== 'defs' && child.name !== 'rect');
+  const group = svg.children.find((child) => child.name === 'g');
+
+  return group ? group.children : [];
+}
+
+/**
+ * The group that holds the body of a document, clipped to the paper
+ *
+ * @param  {object}   svg   The root element
+ * @return {object}         The group, or undefined for a document without a body
+ */
+function wrapper(svg) {
+  return svg.children.find((child) => child.name === 'g');
 }
 
 /**
@@ -591,18 +603,34 @@ describe('toSvg()', function() {
     });
   });
 
+  describe('the body', function() {
+    it('is one group clipped to the paper, in the frame of the paper', function() {
+      const svg = parse(toSvg(list([cell()], {y: 210})));
+      const group = wrapper(svg);
+
+      assert.equal(group.name, 'g');
+      assert.notProperty(group.attributes, 'transform');
+      assert.deepEqual(clipBox(definition(svg, group.attributes['clip-path'])), {x: 0, y: 0, width: 576, height: 60});
+      assert.equal(svg.children.filter((child) => child.name === 'g').length, 1);
+    });
+
+    it('is left out of a document that draws nothing, with its clip', function() {
+      const svg = parse(toSvg(list([], {y: 10})));
+
+      assert.isUndefined(wrapper(svg));
+      assert.equal(all(svg, 'clipPath').length, 0);
+    });
+  });
+
   describe('a line', function() {
-    it('is a group at the row of the paper it stands on, clipped to the paper', function() {
+    it('is a group at the row of the paper it stands on, and carries no clip of its own', function() {
       const svg = parse(toSvg(list([cell()], {y: 210})));
       const group = body(svg)[0];
 
       assert.equal(group.name, 'g');
       assert.deepEqual(apply(group.attributes.transform, [0, 0]), [0, 210]);
       assert.deepEqual(apply(group.attributes.transform, [12, 24]), [12, 234]);
-
-      const clip = definition(svg, group.attributes['clip-path']);
-
-      assert.deepEqual(clipBox(clip), {x: 0, y: 0, width: 576, height: 60});
+      assert.notProperty(group.attributes, 'clip-path');
     });
 
     it('turns the whole of it by 180 degrees when the line does', function() {
@@ -701,6 +729,36 @@ describe('toSvg()', function() {
 
       assert.equal(all(svg, 'clipPath').length, 1, 'the paper is the only clip of the document');
     });
+
+    if (Resvg) {
+      it('draws the part of a glyph that reaches above its line box, on the line above', async function() {
+        /* A brace on the second line of a paper of two lines: its top two dots
+           lie in the rows of the first line, and the document draws them
+           there, where a clip in the frame of the line would have cut them */
+
+        const brace = 0x7b;
+        const document = toSvg({
+          version: 1, language: 'esc-pos', width: 576, height: 60, dpi: 203,
+          entries: [
+            {type: 'line', y: 0, height: 30, rotation: 0, operations: []},
+            {type: 'line', y: 30, height: 30, rotation: 0, operations: [cell({codepoint: brace})]},
+          ],
+        });
+
+        const png = new Resvg(document, {fitTo: {mode: 'original'}}).render().asPng();
+        const raster = await fromPng(new Uint8Array(png));
+
+        const above = [];
+
+        for (let x = 0; x < 12; x++) {
+          if (Bitmap.getPixel(raster, x, 29) || Bitmap.getPixel(raster, x, 28)) {
+            above.push(x);
+          }
+        }
+
+        assert.isAbove(above.length, 0, 'the top of the brace is drawn above its line box');
+      });
+    }
 
     it('draws nothing for a glyph whose outline is empty', function() {
       for (const codepoint of [0x20, 0x0d, 0xa0]) {

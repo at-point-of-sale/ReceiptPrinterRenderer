@@ -28,7 +28,11 @@ import {toStoredPng} from './png.js';
     list states and the bitmap back-end applies by construction:
 
       - A line is clipped to the width of its surface, because the line bitmap of
-        the back-end has that width. One clipPath serves every line of the paper.
+        the back-end has that width. The body of the document is one group
+        clipped to the paper, in the frame of the paper, which cuts every line
+        at the edges of the paper and nowhere else: a clip on the line itself
+        would sit in the line's own frame and cut a glyph at the top of its
+        line box, which is what the first version of this writer did.
       - An area of a page is clipped to the intersection of the area and the
         page, because an area can be taller than the page it stands on.
 
@@ -244,11 +248,10 @@ class SvgWriter {
      */
   write() {
     const layout = this.#layout;
-    const paper = this.#clip('paper', box(0, 0, layout.width, this.#height));
 
     for (const entry of layout.entries || []) {
       if (entry.type === 'line') {
-        this.#line(entry, layout.width, paper);
+        this.#line(entry, layout.width);
       } else if (entry.type === 'page') {
         this.#page(entry);
       } else if (entry.type === 'cut' && this.#options.cutMarker) {
@@ -284,6 +287,13 @@ class SvgWriter {
       );
     }
 
+    /* The body is one group clipped to the paper. The clip is in the frame of
+       the paper, so it cuts at the edges of the paper and at nothing inside
+       it, and a glyph that reaches above its line box is drawn there; a
+       document that draws nothing has no body and no clip */
+
+    const paper = this.#body.length ? this.#clip('paper', box(0, 0, layout.width, this.#height)) : '';
+
     /* The glyphs first, then the clip paths, which is the order the plan of the
        section writes them in and the order they are needed in */
 
@@ -292,7 +302,10 @@ class SvgWriter {
     parts.push(...this.#clips.values());
     parts.push('</defs>');
 
-    parts.push(...this.#body);
+    if (paper) {
+      parts.push(`<g clip-path="url(#${paper})">`, ...this.#body, '</g>');
+    }
+
     parts.push('</svg>');
 
     return `${parts.join('\n')}\n`;
@@ -341,9 +354,8 @@ class SvgWriter {
      *
      * @param  {LineEntry}   entry     The line
      * @param  {number}      width     Width of the surface the line was laid out on
-     * @param  {string}      [clip]    Id of the clip path of the surface, none inside an area
      */
-  #line(entry, width, clip) {
+  #line(entry, width) {
     const operations = entry.operations || [];
 
     if (operations.length === 0) {
@@ -390,9 +402,7 @@ class SvgWriter {
       return;
     }
 
-    this.#body.push(
-        `<g transform="${transform}"${clip ? ` clip-path="url(#${clip})"` : ''}>${content.join('')}</g>`,
-    );
+    this.#body.push(`<g transform="${transform}">${content.join('')}</g>`);
   }
 
   /**
@@ -784,7 +794,7 @@ class SvgWriter {
 
       for (const box of area.entries || []) {
         if (box.type === 'line') {
-          this.#line(box, width, null);
+          this.#line(box, width);
         }
       }
 
