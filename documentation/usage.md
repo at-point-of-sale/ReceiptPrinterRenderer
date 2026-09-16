@@ -18,7 +18,6 @@ Render the raw data sent to a receipt printer, ESC/POS, StarPRNT, Star Line or S
   - [The display list](#the-display-list)
   - [Drivers and applications](#drivers-and-applications)
   - [What is not rendered](#what-is-not-rendered)
-- [The display list](display-list.md)
 
 <br>
 
