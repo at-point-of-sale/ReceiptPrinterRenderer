@@ -1021,7 +1021,7 @@ function pageArea(x, y, width, height) {
 }
 
 /**
- * ESC GS P 2, the same area in StarPRNT
+ * ESC GS P 3, the same area in StarPRNT, which calls it the print region
  *
  * @param  {number}     x        Horizontal origin in dots
  * @param  {number}     y        Vertical origin in dots
@@ -1030,7 +1030,18 @@ function pageArea(x, y, width, height) {
  * @return {number[]}            The bytes of the command
  */
 function starPageArea(x, y, width, height) {
-  return [ESC, GS, 0x50, 0x32, ...word(x), ...word(y), ...word(width), ...word(height)];
+  return [ESC, GS, 0x50, 0x33, ...word(x), ...word(y), ...word(width), ...word(height)];
+}
+
+/**
+ * ESC GS P 2, the print direction of page mode in StarPRNT, which is ESC T of
+ * ESC/POS and takes the same four numbers
+ *
+ * @param  {number}     direction   0, 1, 2 or 3
+ * @return {number[]}               The bytes of the command
+ */
+function starPageDirection(direction) {
+  return [ESC, GS, 0x50, 0x32, direction];
 }
 
 /**
@@ -1609,10 +1620,10 @@ const raw = {
         ESC, '@',
         'Four directions on one page', LF,
         ESC, GS, 'P', '0',
-        starPageArea(0, 0, 288, 120), ESC, GS, 'P', '3', 0, 'Dir 0', LF, '----------', LF,
-        starPageArea(288, 0, 288, 120), ESC, GS, 'P', '3', 1, 'Dir 1', LF, '----------', LF,
-        starPageArea(0, 120, 288, 120), ESC, GS, 'P', '3', 2, 'Dir 2', LF, '----------', LF,
-        starPageArea(288, 120, 288, 120), ESC, GS, 'P', '3', 3, 'Dir 3', LF, '----------', LF,
+        starPageDirection(0), starPageArea(0, 0, 288, 120), 'Dir 0', LF, '----------', LF,
+        starPageDirection(1), starPageArea(288, 0, 288, 120), 'Dir 1', LF, '----------', LF,
+        starPageDirection(2), starPageArea(0, 120, 288, 120), 'Dir 2', LF, '----------', LF,
+        starPageDirection(3), starPageArea(288, 120, 288, 120), 'Dir 3', LF, '----------', LF,
         ESC, GS, 'P', '1',
         'Standard mode again', LF,
     ),

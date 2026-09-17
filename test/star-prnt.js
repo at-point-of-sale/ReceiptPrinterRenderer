@@ -554,8 +554,9 @@ describe('StarPrntRenderer', function() {
         in between, which composes an empty page and prints nothing at all, so
         every job the encoder writes comes out as it always did.
 
-        The area, the direction and the positions of functions 2 to 5 count in
-        dots, the unit of the Star position commands.
+        Function 2 is the print direction, function 3 the print region and
+        functions 4 and 5 the positions, all of them counted in dots, the unit
+        of the Star position commands.
     */
 
     const page = (...parts) => stitch(render(stream(ESC, '@', ESC, GS, 'P', '0', ...parts,
@@ -563,7 +564,7 @@ describe('StarPrntRenderer', function() {
 
     const word = (value) => [value & 0xff, (value >> 8) & 0xff];
     const area = (x, y, width, height) =>
-      [ESC, GS, 0x50, 0x32, ...word(x), ...word(y), ...word(width), ...word(height)];
+      [ESC, GS, 0x50, 0x33, ...word(x), ...word(y), ...word(width), ...word(height)];
 
     it('should ignore the flush the encoder sends around a job', function() {
       assert.deepEqual(
@@ -593,7 +594,7 @@ describe('StarPrntRenderer', function() {
 
     it('should turn the layout by the print direction', function() {
       const directions = (direction) => page(
-          area(0, 0, 288, 288), ESC, GS, 'P', '3', direction, 'Hi', LF, '.', LF,
+          ESC, GS, 'P', '2', direction, area(0, 0, 288, 288), 'Hi', LF, '.', LF,
       );
 
       const crop = (bitmap) => {
@@ -638,6 +639,69 @@ describe('StarPrntRenderer', function() {
       assert.equal(paper.height, 128);
       assert.equal(Bitmap.getPixel(paper, 3, 10), 1);
       assert.equal(Bitmap.getPixel(paper, 291, 74), 1);
+    });
+
+    it('should print the region and keep it on function 6', function() {
+      /* ESC GS P 6 prints what the region holds and keeps the data, the region
+         and the position, so the page that ESC GS P 1 prints behind it is the
+         same page again, Star Line page 162 */
+
+      const twice = page(area(0, 0, WIDTH, 32), 'In the page', LF, ESC, GS, 'P', '6');
+      const once = page(area(0, 0, WIDTH, 32), 'In the page', LF);
+
+      assert.equal(twice.height, 64);
+      assert.equal(dots(Bitmap.extractRows(twice, 0, 32)), dots(once));
+      assert.equal(dots(Bitmap.extractRows(twice, 32, 32)), dots(once));
+    });
+
+    it('should print the region and recover to standard mode on function 7', function() {
+      const recovered = stitch(render(stream(ESC, '@', ESC, GS, 'P', '0',
+          area(0, 0, WIDTH, 32), 'In the page', LF, ESC, GS, 'P', '7')), {width: WIDTH});
+
+      assert.deepEqual(recovered, page(area(0, 0, WIDTH, 32), 'In the page', LF));
+    });
+
+    it('should keep the print region over function 7', function() {
+      /* The region is a setting of the printer here, so the page behind the
+         recovery starts in it and prints on the right half of the paper; the
+         references initialize the region instead, see the reference page */
+
+      const kept = stitch(render(stream(ESC, '@',
+          ESC, GS, 'P', '0', area(288, 0, 288, 32), 'A', LF, ESC, GS, 'P', '7',
+          ESC, GS, 'P', '0', 'A', LF, ESC, GS, 'P', '1',
+      )), {width: WIDTH});
+
+      /* The same two pages with an ESC @ behind the recovery, which does put
+         the region back: the second page then starts at the left edge */
+
+      const reset = stitch(render(stream(ESC, '@',
+          ESC, GS, 'P', '0', area(288, 0, 288, 32), 'A', LF, ESC, GS, 'P', '7',
+          ESC, '@', ESC, GS, 'P', '0', 'A', LF, ESC, GS, 'P', '1',
+      )), {width: WIDTH});
+
+      assert.equal(kept.height, 64);
+      assert.equal(dots(Bitmap.extractRows(kept, 32, 32)), dots(Bitmap.extractRows(kept, 0, 32)));
+      assert.notEqual(dots(Bitmap.extractRows(reset, 32, 32)), dots(Bitmap.extractRows(reset, 0, 32)));
+    });
+
+    it('should throw the data of every region away on function 8', function() {
+      const cancelled = page(area(0, 0, WIDTH, 32), 'Not printed', LF, ESC, GS, 'P', '8');
+
+      assert.equal(cancelled.height, 32);
+      assert.equal(dots(cancelled), dots(Bitmap.create(WIDTH, 32)));
+
+      /* A page of two regions comes out empty as well: this renderer throws
+         away what every region holds where the references erase the data of
+         the region that is set, see the reference page */
+
+      const both = page(
+          area(0, 0, 288, 32), 'Left', LF,
+          area(288, 0, 288, 32), 'Right', LF,
+          ESC, GS, 'P', '8',
+      );
+
+      assert.equal(both.height, 32);
+      assert.equal(dots(both), dots(Bitmap.create(WIDTH, 32)));
     });
 
     it('should accept the functions as binary numbers as well as digits', function() {
@@ -1048,6 +1112,32 @@ describe('StarPrntRenderer', function() {
 
       assert.equal(items.length, 1);
       assert.equal(items[0].height, 32);
+    });
+
+    it('should report the manual data command and store nothing of it', function() {
+      /* ESC GS y D 2 a [m nL nH d..] x a, the manual setting. The tokenizer cuts
+         it whole, so the text behind it is text, and nothing of its blocks is
+         stored: the print behind it has no data and draws no symbol */
+
+      const items = render(stream(
+          ESC, '@',
+          ESC, GS, 'yD', [0x32, 0x01, 0x02, 4, 0], 'test',
+          ESC, GS, 'yP',
+          'A', LF,
+      ), {commands: ['unknown']});
+
+      const unknown = items.filter((item) => item.type === 'unknown');
+
+      assert.equal(unknown.length, 1);
+      assert.deepEqual(
+          Array.from(unknown[0].data),
+          [ESC, GS, 0x79, 0x44, 0x32, 0x01, 0x02, 4, 0, 0x74, 0x65, 0x73, 0x74],
+      );
+
+      const images = items.filter((item) => item.type === 'image');
+
+      assert.equal(images.length, 1);
+      assert.equal(images[0].height, 32);
     });
 
     it('should keep the data of a QR code until the next store', function() {
@@ -1521,7 +1611,7 @@ describe('StarPrntRenderer', function() {
       ['ESC ACK SOH', [ESC, 0x06, 0x01]],
       ['ESC s n1 n2', [ESC, 0x73, 0x30, 0x30]],
       ['ESC GS ETX s n1 n2', [ESC, GS, 0x03, 1, 0, 0]],
-      ['ESC GS # n', [ESC, GS, 0x23, 2]],
+      ['ESC GS # m N n1 n2 n3 n4 LF NUL', [ESC, GS, 0x23, 0x57, 0x30, 0x30, 0x30, 0x30, 0x30, LF, 0x00]],
       ['ESC RS a n', [ESC, RS, 0x61, 0]],
       ['ESC RS d n', [ESC, RS, 0x64, 3]],
       ['ESC RS r n', [ESC, RS, 0x72, 1]],
@@ -1840,7 +1930,7 @@ describe('StarPrntRenderer', function() {
       ['ESC GS BEL', [ESC, GS, 0x07, 1, 2]],
       ['ESC GS EM', [ESC, GS, 0x19, 0x11, 1, 2]],
       ['ESC GS P', [ESC, GS, 0x50]],
-      ['ESC GS P 2', [ESC, GS, 0x50, 0x32, 0, 0, 0, 0]],
+      ['ESC GS P 3', [ESC, GS, 0x50, 0x33, 0, 0, 0, 0]],
       ['ESC GS P 4', [ESC, GS, 0x50, 0x34, 0]],
     ];
 
@@ -1873,8 +1963,8 @@ describe('StarPrntRenderer', function() {
       ['ESC * r m r n NUL', [ESC, 0x2a, 0x72, 0x6d, 0x72, 0x30, 0x00]],
       ['ESC FF NUL', [ESC, 0x0c, 0x00]],
       ['ESC GS P 0 and ESC GS P 1', [ESC, GS, 0x50, 0x30, ESC, GS, 0x50, 0x31]],
-      ['ESC GS P 2 n1..n8', [ESC, GS, 0x50, 0x32, 0, 0, 0, 0, 0, 0, 0, 0]],
-      ['ESC GS P 3 n', [ESC, GS, 0x50, 0x33, 0]],
+      ['ESC GS P 2 n', [ESC, GS, 0x50, 0x32, 0]],
+      ['ESC GS P 3 n1..n8', [ESC, GS, 0x50, 0x33, 0, 0, 0, 0, 0, 0, 0, 0]],
       ['ESC GS P 4 n1 n2', [ESC, GS, 0x50, 0x34, 0, 0]],
       ['ESC GS P 5 n1 n2', [ESC, GS, 0x50, 0x35, 0, 0]],
     ];

@@ -16,8 +16,12 @@ import printerProfiles from '../../generated/profiles.js';
  * @typedef {import('@point-of-sale/receipt-printer-decoder/tokenizer').Token} Token
  */
 
-/* The control bytes a printer acts on, the eight the tokenizer hands back as a
-   control token, and the two arguments of ESC FF that are control bytes too */
+/* The eight bytes of the tokenizer's control set #control() has a case for: HT
+   tabs, LF feeds, CR does nothing, CAN throws the line away, BEL and FS open the
+   first drawer and SUB and EM the second. The nine it has no case for, SO, SI,
+   DC2, DC4, VT, FF, ENQ, EOT and ETB, are taken as nothing. NUL and EOT stand
+   here as well because they are the two arguments of ESC FF that are control
+   bytes of their own */
 
 const BEL = 0x07;
 const HT = 0x09;
@@ -184,21 +188,17 @@ const QRCODE_DEFAULTS = {model: 2, moduleSize: 3, errorLevel: 'L'};
 
 const PDF417_DEFAULTS = {columns: 0, rows: 0, moduleWidth: 2, rowHeight: 2, errorLevel: 0};
 
-/* The functions of ESC GS P, the page mode group, and the number of argument
-   bytes behind each of them: 0 and 1 enter and leave page mode, 2 sets the
-   print area, 3 the print direction, and 4 and 5 the absolute and the relative
-   position along the vertical axis of that direction. The numbers are accepted
-   as the binary values and as the ASCII digits, the way every other Star
-   parameter is; the encoder writes the digits.
-
-   Only the first two are settled by a producer, see the reference page: the
-   encoder's flush is ESC GS P '0' ESC GS P '1' around a job. The four others
-   are the ESC/POS group of page mode under Star's numbering, which is a
-   reading, and the lengths are part of that reading. */
+/* The functions of ESC GS P, the page mode group: 0 and 1 enter and leave page
+   mode, 2 selects the print direction, 3 sets the print region, 4 and 5 are the
+   absolute and the relative position along the vertical axis of that direction,
+   6 prints the region, 7 prints it and recovers to standard mode and 8 throws
+   the data of the region away. The numbers are accepted as the binary values
+   and as the ASCII digits, the way every other Star parameter is; the encoder
+   writes the digits, and its flush is ESC GS P '0' ESC GS P '1' around a job. */
 
 const PAGE_MODE_FUNCTIONS = Object.assign(Object.create(null), {
-  0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5,
-  48: 0, 49: 1, 50: 2, 51: 3, 52: 4, 53: 5,
+  0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8,
+  48: 0, 49: 1, 50: 2, 51: 3, 52: 4, 53: 5, 54: 6, 55: 7, 56: 8,
 });
 
 /* The number of dot rows an ESC k band carries, which the command does not
@@ -526,9 +526,13 @@ class StarPrntRenderer {
   }
 
   /**
-     * A control token: one of the eight control bytes a Star printer acts on,
-     * or a row of dots of raster mode, which carries its data as the arguments
-     * of the token and says with its byte whether the paper feeds behind it
+     * A control token: one of the control bytes a Star printer acts on, or a
+     * row of dots of raster mode, which carries its data as the arguments of
+     * the token and says with its byte whether the paper feeds behind it.
+     *
+     * A control byte this renderer has no case for changes nothing but the run
+     * of text it stands in, which ends there, the way a byte the printer
+     * ignores does: the switch below falls through and reports nothing.
      *
      * @param  {Token}   token   The control token
      */
@@ -691,20 +695,20 @@ class StarPrntRenderer {
         0x69: {run: (a) => this.#size(a[0], a[1])},
         0x6b: {run: (a) => this.#bandImage(a)}, /* bit image, twenty four dot band */
         0x6c: {run: (a) => this.#leftMargin(a[0])},
-        0x73: {run: null}, /* ESC s n1 n2, a printer setting, parsed, see the reference page */
+        0x73: {run: null}, /* ESC s n1 n2, the Kanji character spacing, parsed, see the reference page */
         0x7a: {run: (a) => this.#lineSpacing(a[0])},
       },
 
       /* The status, the settings and the buzzer are parsed: none of them puts a
          dot on the paper, and the item stream carries neither a status nor a
-         sound. ESC GS b and ESC GS c are not among them, the sensor settings
-         move the paper and the colour is a second ribbon */
+         sound. ESC GS b and ESC GS c are not among them, smoothing and reduced
+         printing both change the dots */
 
       [GROUP_GS]: {
-        0x03: {run: null}, /* ESC GS ETX s n1 n2, automatic status */
-        0x07: {run: null}, /* ESC GS BEL m n1 n2, buzzer */
+        0x03: {run: null}, /* ESC GS ETX s n1 n2, the print end counter */
+        0x07: {run: null}, /* ESC GS BEL m t1 t2, the buzzer */
         0x19: {run: null}, /* ESC GS EM DC1 or DC2 m n1 n2, buzzer */
-        0x23: {run: null}, /* print density */
+        0x23: {run: null}, /* ESC GS # m N n1 n2 n3 n4 LF NUL, the memory switch */
         0x41: {run: (a) => this.#painter.position(a[0] + a[1] * 256)},
         0x50: {run: (a) => this.#pageMode(a)}, /* the page mode group */
         0x52: {run: (a) => this.#relative(a)},
@@ -712,12 +716,12 @@ class StarPrntRenderer {
         0x61: {run: (a) => this.#align(a[0])},
         0x74: {run: (a) => this.#selectCodepage(a[0])},
         0x78: {run: (a) => this.#pdf417Symbol(a)},
-        0x79: {run: (a) => this.#symbol(a)},
+        0x79: {run: (a, consumed) => this.#symbol(a, consumed)},
       },
 
       [GROUP_RS]: {
         0x46: {run: (a) => this.#font(a[0])},
-        0x61: {run: null}, /* print start control */
+        0x61: {run: null}, /* ESC RS a n, the status transmission conditions */
         0x64: {run: null}, /* print density */
         0x72: {run: null}, /* print speed */
       },
@@ -816,14 +820,16 @@ class StarPrntRenderer {
   /**
      * ESC GS y .., the QR code group: S 0 n is the model, S 1 n the error
      * correction level, S 2 n the size of a module in dots, D 1 m nL nH d..
-     * stores the data of the next symbol, and P prints it.
+     * stores the data of the next symbol, and P prints it. D 2, the manual
+     * setting, is reported, see the branch below.
      *
      * The data stays stored until the next store, so printing twice prints the
      * same symbol twice.
      *
-     * @param  {Uint8Array}   args   The arguments of the command
+     * @param  {Uint8Array}   args       The arguments of the command
+     * @param  {Uint8Array}   consumed   The whole command, for the unknown item
      */
-  #symbol(args) {
+  #symbol(args, consumed) {
     if (args[0] === 0x53 && args.length >= 3) {
       if (args[1] === 0x30) {
         this.#qrcode.model = args[2] === 1 ? 1 : 2;
@@ -837,6 +843,17 @@ class StarPrntRenderer {
         this.#qrcode.moduleSize = Math.min(8, Math.max(1, args[2]));
       }
 
+      return;
+    }
+
+    /* ESC GS y D 2 a [m nL nH d..] x a, the manual setting, carries its data in
+       as many blocks as `a` says. The tokenizer cuts it right, so the stream
+       stays in sync, and this renderer stores none of it: reading the blocks as
+       the D 1 layout would store a slice of the wrong bytes, so the command is
+       reported instead and the symbol that was stored before it stays */
+
+    if (args[0] === 0x44 && args[1] === 0x32) {
+      this.#unknown(consumed);
       return;
     }
 
@@ -1132,14 +1149,20 @@ class StarPrntRenderer {
      * ESC GS P n .., the page mode group.
      *
      * Function 0 enters page mode and function 1 leaves it, printing the page
-     * the printer composed. The encoder's flush is those two commands with
-     * nothing in between, which composes an empty page and prints nothing,
-     * exactly as it did while this renderer only parsed them.
+     * the printer composed. The references erase the page instead of printing
+     * it; the encoder's flush is these two commands with nothing in between,
+     * around a job and not around a page, and a job that composed a page and
+     * left page mode means to see it, see the reference page.
      *
-     * Functions 2 to 5 are the print area, the print direction and the two
-     * vertical positions of page mode, all of them in dots, which is the unit
-     * of the Star position commands. They are the ESC/POS group under Star's
-     * numbering and are a reading, see documentation/commands-star-prnt.md.
+     * Function 2 is the print direction, function 3 the print region and
+     * functions 4 and 5 the absolute and the relative position along the
+     * vertical axis of the direction, all of them in dots, which is the unit of
+     * the Star position commands. Function 6 prints the page and keeps it with
+     * its data, function 7 prints it and recovers to standard mode, which is
+     * what function 1 does here, and function 8 throws away what every region
+     * of the page holds. The print region survives all three: it is a setting
+     * of the printer here and only ESC @ puts it back, where the references
+     * initialize it with function 1 and function 7.
      *
      * @param  {Uint8Array}   args   The arguments of the command
      */
@@ -1151,13 +1174,18 @@ class StarPrntRenderer {
       return;
     }
 
-    if (fn === 1) {
+    if (fn === 1 || fn === 7) {
       this.#painter.printPage();
       this.#painter.page(false);
       return;
     }
 
     if (fn === 2) {
+      this.#painter.pageDirection(args[1] >= 48 ? args[1] - 48 : args[1]);
+      return;
+    }
+
+    if (fn === 3) {
       this.#painter.pageArea({
         x: args[1] + args[2] * 256,
         y: args[3] + args[4] * 256,
@@ -1168,16 +1196,21 @@ class StarPrntRenderer {
       return;
     }
 
-    if (fn === 3) {
-      this.#painter.pageDirection(args[1] >= 48 ? args[1] - 48 : args[1]);
-      return;
-    }
-
     if (fn === 4 || fn === 5) {
       const value = args[1] + args[2] * 256;
       const relative = fn === 5;
 
       this.#painter.pageVertical(relative && value > 32767 ? value - 65536 : value, {relative});
+      return;
+    }
+
+    if (fn === 6) {
+      this.#painter.printPage({keep: true});
+      return;
+    }
+
+    if (fn === 8) {
+      this.#painter.cancelPage();
     }
   }
 
