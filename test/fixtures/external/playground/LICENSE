@@ -1,5 +1,5 @@
 ReceiptPrinterPlayground
-https://github.com/NielsLeenheer/ReceiptPrinterPlayground
+https://github.com/at-point-of-sale/ReceiptPrinterPlayground
 
 The checkout of the playground carries no licence file and its package.json is
 private without a licence field, so there was nothing to copy here. It is the

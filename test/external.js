@@ -435,6 +435,8 @@ const PLAYGROUND_EXCEPTIONS = {
   'text': 'the Arabic line is two characters different: the Star Arabic page has no ي, so the encoder ' +
     'writes a question mark for it, where the cp864 of ESC/POS carries the letter',
   'tables': null,
+  'markdown': null,
+  'receiptline': null,
   'images': null,
   'barcodes': 'five barcodes of the sample are a different symbol in the two languages, all of them because ' +
     'the encoder asks the two printer families for the symbology in their own way: a Code 128 of digits ' +

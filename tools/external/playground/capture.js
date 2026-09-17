@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
+import {createRequire} from 'node:module';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 
 import ReceiptPrinterEncoder from '@point-of-sale/receipt-printer-encoder';
 
@@ -24,7 +25,9 @@ import {write, report, today} from '../shared.js';
     src/utils/encoder.js of the playground. This script does the same, in an
     async function with those two names in scope, and encodes what the script
     left in the encoder. The scripts are read out of a checkout of the
-    playground next to this repository, they are not copied in here.
+    playground next to this repository, they are not copied in here, and so is
+    the receiptline module the playground hands its encoder, which the
+    receiptline sample prints through.
 
         node tools/external/playground/capture.js
         node tools/external/playground/capture.js text-esc-pos-48
@@ -51,7 +54,7 @@ const TEMPLATES = 'src/assets/templates';
    the empty starting point of the menu and prints one line, so it is not a
    fixture. */
 
-const SAMPLES = ['text', 'tables', 'images', 'barcodes', 'qrcode', 'pdf417'];
+const SAMPLES = ['text', 'tables', 'markdown', 'receiptline', 'images', 'barcodes', 'qrcode', 'pdf417'];
 
 /* The two languages a printer of this ecosystem speaks, each with the codepage
    mapping that belongs to it */
@@ -172,6 +175,20 @@ export function licence() {
 }
 
 /**
+ * The receiptline module the playground gives its encoder, @point-of-sale/receiptline,
+ * resolved out of the checkout the way the playground resolves it, so that a
+ * capture prints a receiptline document through the same module the page does
+ * and this repository does not carry the package for one sample's sake
+ *
+ * @return {Promise<object>}   The module, with its transform()
+ */
+async function receiptline() {
+  const require = createRequire(path.join(checkout(), 'package.json'));
+
+  return import(pathToFileURL(require.resolve('@point-of-sale/receiptline')).href);
+}
+
+/**
  * The version of ReceiptPrinterEncoder that produced the bytes. The playground
  * itself is not versioned, it is a private package of the commit above, and the
  * bytes of a sample are the encoder's.
@@ -265,6 +282,7 @@ export async function stream(sample, options) {
     language: options.language,
     codepageMapping: options.codepageMapping,
     columns: options.columns,
+    receiptline: await receiptline(),
   });
 
   const script = new AsyncFunction('encoder', 'model', 'Image', read(sample));
@@ -318,6 +336,10 @@ function notes(item) {
       'the eight scripts of the codepage test and a cut at the end',
     'tables': 'Two tables, the first in font B below 42 columns, with cells that are callbacks, ' +
       'rules inside cells and a double width cell',
+    'markdown': 'The Markdown subset of markdown(): headings as sizes and bold, the inline styles, ' +
+      'a link and an escape, and two tables that take the width of the paper',
+    'receiptline': 'The receipt and the guest check of the receiptline examples, printed through ' +
+      '@point-of-sale/receiptline, with rounded corners and the logo image of both',
     'images': 'The 128 by 128 logo of the playground, dithered with Atkinson and centred',
     'barcodes': 'Every symbology the encoder can ask a printer for, with the widths, the heights, ' +
       'the HRI text and the alignments',
@@ -332,6 +354,10 @@ function notes(item) {
     (item.sample === 'images' ?
       ', and with an `Image` that reads the data URI of the sample with the PNG reader of the contact ' +
       'sheet instead of a canvas, see tools/external/playground/capture.js' :
+      '') +
+    (item.sample === 'receiptline' ?
+      ', and with the receiptline module resolved out of the checkout of the playground, whose Node ' +
+      'entry decodes the images of a document with pngjs' :
       '') +
     '. Reviewed as ASCII art against the render of the other language of the same width.';
 }

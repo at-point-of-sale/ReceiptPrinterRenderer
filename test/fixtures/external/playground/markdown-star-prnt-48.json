@@ -1,0 +1,16 @@
+{
+  "source": "https://github.com/at-point-of-sale/ReceiptPrinterPlayground",
+  "file": "src/assets/templates/markdown.js",
+  "commit": "c64795491d1ecc208bfb8b9335241ec85e3cc2da",
+  "licence": "MIT",
+  "setup": "npm install, and a checkout of ReceiptPrinterPlayground next to this repository, RENDERER_PLAYGROUND overrides the path, see tools/external/playground/capture.js",
+  "command": "node tools/external/playground/capture.js markdown-star-prnt-48",
+  "version": "4.0.0",
+  "language": "star-prnt",
+  "columns": 48,
+  "width": 576,
+  "codepageMapping": "star",
+  "captured": "2026-09-17",
+  "unknown": 0,
+  "notes": "The markdown sample of the playground's \"New...\" menu, section 16g. The Markdown subset of markdown(): headings as sizes and bold, the inline styles, a link and an escape, and two tables that take the width of the paper. Evaluated the way src/utils/encoder.js of the playground does, in an async function with an `encoder` of 48 columns and a `model` of 'Generic', which is what the playground puts there when no printer model is selected. Reviewed as ASCII art against the render of the other language of the same width."
+}
