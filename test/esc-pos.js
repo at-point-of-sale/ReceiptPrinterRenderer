@@ -646,11 +646,13 @@ describe('EscPosRenderer', function() {
     it('should consume the arguments of the user memory commands', function() {
       const known = render(stream(ESC, '@', 'AB', LF));
 
+      /* The selector is the ASCII digit of the reference, FS g 1 and FS g 2 */
+
       const write = render(stream(
-          ESC, '@', 'A', FS, 'g', [1, 0, 0, 0, 0, 0, 3, 0], 'xyz', 'B', LF,
+          ESC, '@', 'A', FS, 'g', '1', [0, 0, 0, 0, 0, 3, 0], 'xyz', 'B', LF,
       ));
 
-      const read = render(stream(ESC, '@', 'A', FS, 'g', [2, 0, 0, 0, 0, 0, 3, 0], 'B', LF));
+      const read = render(stream(ESC, '@', 'A', FS, 'g', '2', [0, 0, 0, 0, 0, 3, 0], 'B', LF));
 
       assert.equal(dots(stitch(write, {width: WIDTH})), dots(stitch(known, {width: WIDTH})));
       assert.equal(dots(stitch(read, {width: WIDTH})), dots(stitch(known, {width: WIDTH})));
@@ -2484,6 +2486,7 @@ describe('EscPosRenderer', function() {
       ['DLE EOT n', [0x10, 0x04, 1]],
       ['DLE EOT 7 n', [0x10, 0x04, 7, 1]],
       ['DLE EOT 8 n', [0x10, 0x04, 8, 3]],
+      ['DLE EOT 18 a', [0x10, 0x04, 18, 1]],
       ['DLE ENQ n', [0x10, 0x05, 1]],
     ];
 
@@ -2503,13 +2506,56 @@ describe('EscPosRenderer', function() {
     const realTime = [
       ['DLE DC4 1 m t', [0x10, 0x14, 1, 0, 1]],
       ['DLE DC4 2 a b', [0x10, 0x14, 2, 1, 8]],
-      ['DLE DC4 3 a', [0x10, 0x14, 3, 1]],
+      ['DLE DC4 3 a n r t1 t2', [0x10, 0x14, 3, 1, 2, 3, 0, 1]],
       ['DLE DC4 7 n', [0x10, 0x14, 7, 1]],
       ['DLE DC4 8 d1..d7', [0x10, 0x14, 8, 1, 3, 20, 1, 6, 2, 8]],
     ];
 
     for (const [name, bytes] of realTime) {
       it(`should consume ${name} with its own length`, function() {
+        const items = render(stream(ESC, '@', bytes, 'Hi', LF), {commands: ['unknown']});
+        const unknown = items.filter((item) => item.type === 'unknown');
+
+        assert.equal(unknown.length, 1);
+        assert.deepEqual(Array.from(unknown[0].data), bytes);
+
+        assert.equal(
+            dots(stitch(items.filter((item) => item.type === 'image'), {width: WIDTH})),
+            dots(stitch(render(stream(ESC, '@', 'Hi', LF)), {width: WIDTH})),
+        );
+      });
+    }
+  });
+
+  describe('the commands with a length and no handler', function() {
+    /* The tokenizer carries the length of every command of Epson's reference,
+       so each of these is consumed whole, reported as one unknown item, and
+       the text behind it lands on the paper untouched, see
+       documentation/commands-esc-pos.md */
+
+    const ascii = (text) => Array.from(text, (character) => character.charCodeAt(0));
+
+    const reported = [
+      ['ESC ( A pL pH fn n c t', [ESC, 0x28, 0x41, 4, 0, 48, 1, 3, 2]],
+      ['ESC ( Y pL pH m n', [ESC, 0x28, 0x59, 2, 0, 48, 1]],
+      ['GS ^ r t m', [GS, 0x5e, 2, 5, 0]],
+
+      /* A BMP of eight bytes, the two byte signature and the four byte size of
+         the whole file, which is the only length the payload has */
+
+      ['GS D m fn a kc1 kc2 b c and a BMP',
+        [GS, 0x44, 48, 67, 48, 0x20, 0x20, 1, 1, 0x42, 0x4d, 8, 0, 0, 0, 0x00, 0x00]],
+      ['GS C 0 n m', [GS, 0x43, 0x30, 2, 0]],
+      ['GS C ; sa;sb;sn;sr;sc;', [GS, 0x43, 0x3b, ...ascii('1;10;5;1;0;')]],
+      ['GS Q 0 m xL xH yL yH d1', [GS, 0x51, 0x30, 0, 1, 0, 1, 0, 0x41]],
+      ['FS g 1 m a1..a4 nL nH d1 d2', [FS, 0x67, 0x31, 0, 0, 0, 0, 0, 2, 0, 0x41, 0x42]],
+      ['FS g 2 m a1..a4 nL nH', [FS, 0x67, 0x32, 0, 0, 0, 0, 0, 16, 0]],
+      ['GS z 0 t1 t2', [GS, 0x7a, 0x30, 1, 2]],
+      ['GS ( V pL pH fn m', [GS, 0x28, 0x56, 2, 0, 48, 0]],
+    ];
+
+    for (const [name, bytes] of reported) {
+      it(`should consume ${name} with its own length and report it`, function() {
         const items = render(stream(ESC, '@', bytes, 'Hi', LF), {commands: ['unknown']});
         const unknown = items.filter((item) => item.type === 'unknown');
 
@@ -3287,6 +3333,13 @@ describe('EscPosRenderer', function() {
       ['DLE DC4', [0x10, 0x14]],
       ['DLE DC4 1', [0x10, 0x14, 1, 0]],
       ['DLE DC4 8', [0x10, 0x14, 8, 1, 3]],
+      ['ESC ( A', [ESC, 0x28, 0x41, 4, 0, 48, 1]],
+      ['GS ^', [GS, 0x5e, 2, 5]],
+      ['GS D inside the header of its BMP', [GS, 0x44, 48, 67, 48, 0x20, 0x20, 1, 1, 0x42, 0x4d, 8, 0]],
+      ['GS C 1', [GS, 0x43, 0x31, 1, 0, 100, 0]],
+      ['GS Q 0', [GS, 0x51, 0x30, 0, 2, 0, 1, 0, 0x41]],
+      ['FS g 1', [FS, 0x67, 0x31, 0, 0, 0, 0, 0, 4, 0, 0x41]],
+      ['GS z 0', [GS, 0x7a, 0x30, 1]],
       ['ESC T', [ESC, 0x54]],
       ['ESC W', [ESC, 0x57, 0, 0, 0, 0]],
       ['GS $', [GS, 0x24, 10]],
