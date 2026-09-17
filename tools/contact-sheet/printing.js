@@ -146,6 +146,9 @@ export function styles() {
   .print button { border: none; border-radius: 6px; height: 32px; padding: 0 12px; cursor: pointer;
     font-family: system-ui; font-weight: 600; font-size: 10pt; background: #eaeaea; }
   .print button:disabled { cursor: default; opacity: .5; }
+  .print .inspect { display: inline-flex; align-items: center; height: 32px; padding: 0 12px;
+    border-radius: 6px; background: #eee; color: #333; text-decoration: none; font-size: 13px; }
+  .print .inspect:hover { background: #e0e0e0; }
   .print .result { font-family: var(--font-stack-mono); font-size: 11px; color: #888; }
   .print .result.error { color: #b71c1c; }
   .language { color: #666; font-family: var(--font-stack-mono); }`;

@@ -40,6 +40,15 @@ import {drivers, scripts, styles, header, script} from './contact-sheet/printing
         npm run contact-sheet
         npm run contact-sheet:serve
 
+    Every card also links to the inspector, the page of the playground that
+    shows a stream as a hex dump, as the paper and as its decoded commands, so
+    that a fixture can be opened and read command by command from the sheet.
+    The bytes travel in the link, base64url behind `#data=`, which the inspector
+    reads without the fragment ever reaching a server; the largest fixture is
+    under fifty kilobytes, which every browser carries. The address is the
+    published one, and INSPECTOR_URL in the environment points a sheet at a
+    local build of the playground instead.
+
     Everything it writes lands in build/contact-sheet and nothing of it is
     committed; build/ is in .gitignore. Run it to review a capture or to see
     what a change to the renderer did to the streams of the wild.
@@ -53,6 +62,11 @@ import {drivers, scripts, styles, header, script} from './contact-sheet/printing
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const target = path.join(root, 'build', 'contact-sheet');
+
+/* The inspector every card links to, the published page unless the
+   environment names a local build of the playground */
+
+const inspector = process.env.INSPECTOR_URL || 'https://point-of-sale.dev/receipt-printer/inspector/';
 
 /**
  * Escape text for HTML
@@ -224,6 +238,11 @@ async function sheet(library, rows, bytes) {
 
     bytes[key] = Buffer.from(fixture.bytes).toString('base64');
 
+    /* The same bytes as base64url in the link to the inspector, which is the
+       alphabet a fragment carries without escaping */
+
+    const link = `${inspector}#data=${Buffer.from(fixture.bytes).toString('base64url')}`;
+
     html += `<section data-language="${escape(fixture.provenance.language)}" data-columns="${
       fixture.provenance.columns}" data-width="${fixture.provenance.width}">
   <div class="title">
@@ -231,6 +250,7 @@ async function sheet(library, rows, bytes) {
   fixture.bytes.length} bytes</span></h3>
     <div class="print">
       <span class="result"></span>
+      <a class="inspect" href="${escape(link)}" target="_blank" rel="noopener">Inspect</a>
       <button data-fixture="${escape(key)}" disabled>Print</button>
     </div>
   </div>
