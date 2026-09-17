@@ -1,7 +1,7 @@
 {
   "source": "https://github.com/at-point-of-sale/ReceiptPrinterPlayground",
   "file": "src/assets/templates/markdown.js",
-  "commit": "c64795491d1ecc208bfb8b9335241ec85e3cc2da",
+  "commit": "f84b0305538d68147108fa79ff5758b945e99f33",
   "licence": "MIT",
   "setup": "npm install, and a checkout of ReceiptPrinterPlayground next to this repository, RENDERER_PLAYGROUND overrides the path, see tools/external/playground/capture.js",
   "command": "node tools/external/playground/capture.js markdown-esc-pos-48",

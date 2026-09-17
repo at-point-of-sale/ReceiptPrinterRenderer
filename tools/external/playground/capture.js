@@ -7,6 +7,7 @@ import {fileURLToPath, pathToFileURL} from 'node:url';
 import ReceiptPrinterEncoder from '@point-of-sale/receipt-printer-encoder';
 
 import {decodePng} from '../../contact-sheet/references/shared.js';
+import {Resvg, unavailable} from '../../../test/helpers/resvg.js';
 import {write, report, today} from '../shared.js';
 
 /*
@@ -227,8 +228,11 @@ function read(sample) {
  * plain object on purpose: the encoder decides what an input is by the name of
  * its constructor, and an `Image` is the element it wants a canvas for.
  *
- * The `src` is either a data URI, which is what the samples carry today, or a
- * path in the checkout, which is what an asset file would be.
+ * The `src` is a data URI, which is what the samples carry today, a PNG in
+ * base64 or an SVG, or a path in the checkout, which is what an asset file
+ * would be. An SVG is what a browser draws at the size the document carries,
+ * and here it is rasterized at that size by the resvg the tests carry,
+ * test/helpers/resvg.js, into the PNG the reader below takes.
  *
  * @return {object}   The image, an empty {width, height, data} until it decodes
  */
@@ -245,11 +249,24 @@ function image() {
      * @return {Promise<void>}   When the image is there
      */
     async decode() {
-      const match = /^data:image\/png;base64,(.*)$/.exec(result.src);
+      const png = /^data:image\/png;base64,(.*)$/.exec(result.src);
+      const svg = /^data:image\/svg\+xml(;charset=[^;,]+)?(;base64)?,(.*)$/.exec(result.src);
 
-      const bytes = match ?
-        Uint8Array.from(Buffer.from(match[1], 'base64')) :
-        Uint8Array.from(fs.readFileSync(path.join(checkout(), result.src)));
+      let bytes;
+
+      if (png) {
+        bytes = Uint8Array.from(Buffer.from(png[1], 'base64'));
+      } else if (svg) {
+        if (!Resvg) {
+          throw new Error(`An SVG image needs resvg, which did not load: ${unavailable}`);
+        }
+
+        const document = svg[2] ? Buffer.from(svg[3], 'base64').toString('utf8') : decodeURIComponent(svg[3]);
+
+        bytes = new Uint8Array(new Resvg(document, {fitTo: {mode: 'original'}}).render().asPng());
+      } else {
+        bytes = Uint8Array.from(fs.readFileSync(path.join(checkout(), result.src)));
+      }
 
       const decoded = await decodePng(bytes);
 
@@ -340,7 +357,8 @@ function notes(item) {
       'a link and an escape, and two tables that take the width of the paper',
     'receiptline': 'The receipt and the guest check of the receiptline examples, printed through ' +
       '@point-of-sale/receiptline, with rounded corners and the logo image of both',
-    'images': 'The 128 by 128 logo of the playground, dithered with Atkinson and centred',
+    'images': 'The 128 by 128 logo of the playground in column mode, dithered with Atkinson, and the ' +
+      '288 by 288 logo as an SVG in raster mode, which goes out as 255 rows and 33, both centred',
     'barcodes': 'Every symbology the encoder can ask a printer for, with the widths, the heights, ' +
       'the HRI text and the alignments',
     'qrcode': 'Both models, the sizes and the four error levels',
@@ -352,8 +370,9 @@ function notes(item) {
     `\`encoder\` of ${item.columns} columns and a \`model\` of '${MODEL}', which is what the playground ` +
     'puts there when no printer model is selected' +
     (item.sample === 'images' ?
-      ', and with an `Image` that reads the data URI of the sample with the PNG reader of the contact ' +
-      'sheet instead of a canvas, see tools/external/playground/capture.js' :
+      ', and with an `Image` that reads the PNG data URI of the sample with the PNG reader of the contact ' +
+      'sheet instead of a canvas and rasterizes the SVG one with the resvg of the tests, see ' +
+      'tools/external/playground/capture.js' :
       '') +
     (item.sample === 'receiptline' ?
       ', and with the receiptline module resolved out of the checkout of the playground, whose Node ' +

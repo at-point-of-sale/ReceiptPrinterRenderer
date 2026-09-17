@@ -1,10 +1,14 @@
 [
   {
     "type": "feed",
-    "height": 50
+    "height": 37
   },
   {
     "type": "feed",
-    "height": 59
+    "height": 76
+  },
+  {
+    "type": "feed",
+    "height": 30
   }
 ]

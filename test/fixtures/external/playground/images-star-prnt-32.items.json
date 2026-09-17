@@ -5,10 +5,14 @@
   },
   {
     "type": "feed",
-    "height": 54
+    "height": 41
   },
   {
     "type": "feed",
-    "height": 61
+    "height": 80
+  },
+  {
+    "type": "feed",
+    "height": 32
   }
 ]
