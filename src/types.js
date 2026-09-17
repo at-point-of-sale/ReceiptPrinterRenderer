@@ -26,6 +26,16 @@
  */
 
 /**
+ * The bytes of the stream something came from: the byte that printed a cell of
+ * text, or the command token that drew a block. The offsets are counted in the
+ * stream that was given to layout(), and nothing of the stream itself is kept.
+ *
+ * @typedef {object} Source
+ * @property {number} offset   Position of the first byte in the stream
+ * @property {number} length   Number of bytes, at least one
+ */
+
+/**
  * A rendered segment of the receipt
  *
  * @typedef {object} ImageItem
@@ -151,6 +161,7 @@
  * @property {'feed'} type
  * @property {number} y        Row of the paper the feed starts on
  * @property {number} height   Number of rows
+ * @property {Source} source   The command that fed, or the line feed of an empty line
  */
 
 /**
@@ -160,6 +171,7 @@
  * @property {'cut'} type
  * @property {number} y
  * @property {'full' | 'partial'} value
+ * @property {Source} source   The command that cut the paper
  */
 
 /**
@@ -171,6 +183,7 @@
  * @property {number} device   0 or 1
  * @property {number} on       Pulse on time in milliseconds
  * @property {number} off      Pulse off time in milliseconds
+ * @property {Source} source   The command that opened the drawer
  */
 
 /**
@@ -180,6 +193,7 @@
  * @property {'unknown'} type
  * @property {number} y
  * @property {Uint8Array} data
+ * @property {Source} source   The command that was not understood
  */
 
 /** @typedef {TextOperation | RectOperation | ImageOperation} LineOperation */
@@ -204,6 +218,7 @@
  * @property {TextStyle} style           The style of the cell
  * @property {number} rotation           0, or 90 for the quarter turn of ESC V
  * @property {number} spacing            Dots of right side character spacing behind the box, scaled, cut to the area
+ * @property {Source} source             The byte that printed the cell, or the command that drew its block
  */
 
 /**
@@ -226,6 +241,7 @@
  * @property {number} y
  * @property {number} width
  * @property {number} height
+ * @property {Source} source   The command that drew the symbol
  */
 
 /**
@@ -238,6 +254,7 @@
  * @property {number} width
  * @property {number} height
  * @property {Uint8Array} data   Packed rows, Math.ceil(width / 8) bytes per row
+ * @property {Source} source     The command that drew the image
  */
 
 /**

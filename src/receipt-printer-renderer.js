@@ -51,6 +51,7 @@ import StarPrntRenderer from './renderers/star-prnt.js';
  * @typedef {import('./types.js').RectOperation} RectOperation
  * @typedef {import('./types.js').ImageOperation} ImageOperation
  * @typedef {import('./types.js').TextStyle} TextStyle
+ * @typedef {import('./types.js').Source} Source
  * @typedef {import('./types.js').RasterizeOptions} RasterizeOptions
  * @typedef {import('./formats/stitch.js').StitchOptions} StitchOptions
  */

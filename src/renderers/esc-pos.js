@@ -12,6 +12,7 @@ import printerProfiles from '../../generated/profiles.js';
  * @typedef {import('../types.js').Layout} Layout
  * @typedef {import('../types.js').RendererOptions} RendererOptions
  * @typedef {import('../types.js').RenderItem} RenderItem
+ * @typedef {import('../types.js').Source} Source
  * @typedef {import('@point-of-sale/receipt-printer-decoder/tokenizer').Token} Token
  */
 
@@ -269,6 +270,9 @@ class EscPosRenderer {
   #direction;
   #dpi;
   #text;
+  #textSources;
+  #source;
+  #base;
   #graphics;
   #barcode;
   #refusing;
@@ -404,6 +408,13 @@ class EscPosRenderer {
        the one after it */
 
     try {
+      /* The offsets of the tokens are counted in this stream, from its first
+         byte, and only the data of a refused barcode is parsed with a base of
+         its own, see drawBarcode() */
+
+      this.#base = 0;
+      this.#source = null;
+
       this.#initialize();
       this.#dispatch(tokenize(data, EscPosRenderer.language));
 
@@ -411,6 +422,7 @@ class EscPosRenderer {
     } finally {
       this.#painter.discard();
       this.#text = [];
+      this.#textSources = [];
     }
   }
 
@@ -428,6 +440,7 @@ class EscPosRenderer {
     this.#userDefined = false;
     this.#direction = 0;
     this.#text = [];
+    this.#textSources = [];
 
     /* The graphics print buffer is part of the print buffer of the printer,
        which an initialize empties. The images the definition commands stored
@@ -451,6 +464,13 @@ class EscPosRenderer {
      */
   #dispatch(tokens) {
     for (const token of tokens) {
+      /* Everything the painter places from here on comes from this token, and
+         a run of text hands a source per character to the painter instead */
+
+      this.#source = {offset: this.#base + token.offset, length: token.length};
+
+      this.#painter.source(this.#source);
+
       switch (token.type) {
         case 'text':
           this.#printText(token);
@@ -496,11 +516,17 @@ class EscPosRenderer {
      */
   #printText(token) {
     const bytes = token.bytes;
+    const offset = this.#source.offset;
 
     if (token.multibyte) {
       this.#flushText();
 
       for (let index = 0; index + 1 < bytes.length; index += 2) {
+        /* The pair is what printed the character, so the glyph of the code and
+           both cells of the placeholder carry the two bytes */
+
+        this.#painter.source({offset: offset + index, length: 2});
+
         if (!this.#painter.glyph(bytes[index] * 256 + bytes[index + 1], {multibyte: true})) {
           this.#painter.placeholder(2);
         }
@@ -509,14 +535,19 @@ class EscPosRenderer {
       return;
     }
 
-    for (const byte of bytes) {
+    for (let index = 0; index < bytes.length; index++) {
+      const byte = bytes[index];
+      const source = {offset: offset + index, length: 1};
+
       if (this.#userDefined && this.#painter.hasGlyph(byte)) {
         this.#flushText();
+        this.#painter.source(source);
         this.#painter.glyph(byte);
         continue;
       }
 
       this.#text.push(byte);
+      this.#textSources.push(source);
     }
   }
 
@@ -574,8 +605,28 @@ class EscPosRenderer {
       return;
     }
 
-    this.#painter.text(this.#decode(this.#text));
+    this.#painter.text(this.#decode(this.#text), this.#textSources);
+
     this.#text = [];
+    this.#textSources = [];
+  }
+
+  /**
+     * One source per byte of a run of text, which is what the layout gives
+     * every cell of it: the bytes of a run are bytes of the stream in order
+     *
+     * @param  {number}     offset   Position of the first byte in the stream
+     * @param  {number}     count    Number of bytes
+     * @return {Source[]}            The sources, one per byte
+     */
+  #sources(offset, count) {
+    const sources = [];
+
+    for (let index = 0; index < count; index++) {
+      sources.push({offset: offset + index, length: 1});
+    }
+
+    return sources;
   }
 
   /**
@@ -1535,6 +1586,11 @@ class EscPosRenderer {
 
     const data = args[0] >= 65 ? args.subarray(2, 2 + args[1]) : args.subarray(1, args.length - 1);
 
+    /* Where the data of the command starts in the stream: the arguments are
+       the tail of the token, and the data is the tail of the arguments */
+
+    const offset = this.#source.offset + this.#source.length - args.length + (args[0] >= 65 ? 2 : 1);
+
     const drawn = this.#painter.barcode({
       symbology,
       data: this.#ascii(data),
@@ -1548,16 +1604,29 @@ class EscPosRenderer {
     }
 
     if (this.#refusing) {
-      this.#painter.text(this.#decode(data));
+      this.#painter.text(this.#decode(data), this.#sources(offset, data.length));
       return;
     }
 
     this.#refusing = true;
 
+    /* The payload is tokenized on its own, so its tokens are counted from its
+       own first byte: the base puts them back where they stand in the stream,
+       and the source of this command is restored behind them */
+
+    const base = this.#base;
+    const source = this.#source;
+
+    this.#base = offset;
+
     try {
       this.#dispatch(tokenize(data, EscPosRenderer.language));
     } finally {
       this.#refusing = false;
+      this.#base = base;
+      this.#source = source;
+
+      this.#painter.source(source);
     }
   }
 

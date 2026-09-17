@@ -3315,8 +3315,11 @@ describe('Painter', function() {
       const list = paper.end();
 
       assert.deepEqual(list.entries.map((entry) => entry.type), ['line', 'cut', 'pulse']);
-      assert.deepEqual(list.entries[1], {type: 'cut', y: 30, value: 'partial'});
-      assert.deepEqual(list.entries[2], {type: 'pulse', y: 30, device: 0, on: 100, off: 500});
+      /* The source of an entry is the bytes its command came from, which a
+         parser sets and a caller of the painter itself never does */
+
+      assert.deepEqual(list.entries[1], {type: 'cut', y: 30, value: 'partial', source: null});
+      assert.deepEqual(list.entries[2], {type: 'pulse', y: 30, device: 0, on: 100, off: 500, source: null});
 
       /* And the render of the same stream drops both of them, because the
          driver does not support them */

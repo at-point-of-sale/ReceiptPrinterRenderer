@@ -46,14 +46,16 @@ The top level, in stream order, which is the order a printer prints them and the
 |---|---|---|
 | `line` | `y`, `height`, `rotation`, `operations` | A line box: a text line, or a block on a line of its own. It spans the width of the surface, and it is as tall as the tallest operation on it. `rotation` is 0 or 180, the upside down printing of `ESC {` at the moment the line was committed. |
 | `page` | `y`, `height`, `areas` | A page of page mode as it reaches the paper, one block of the paper width. |
-| `feed` | `y`, `height` | Rows the paper advanced without printing: an empty line, the feed of `ESC J` and `ESC d` beyond the height of the line, a Star raster move. |
-| `cut` | `y`, `value` | The paper is cut between row `y - 1` and row `y`. `full` or `partial`. |
-| `pulse` | `y`, `device`, `on`, `off` | The drawer opens when the paper is at row `y`. |
-| `unknown` | `y`, `data` | A command that was not understood, with a copy of its bytes. |
+| `feed` | `y`, `height`, `source` | Rows the paper advanced without printing: an empty line, the feed of `ESC J` and `ESC d` beyond the height of the line, a Star raster move. |
+| `cut` | `y`, `value`, `source` | The paper is cut between row `y - 1` and row `y`. `full` or `partial`. |
+| `pulse` | `y`, `device`, `on`, `off`, `source` | The drawer opens when the paper is at row `y`. |
+| `unknown` | `y`, `data`, `source` | A command that was not understood, with a copy of its bytes. |
 
 The `y` of a line or a page is the position of the paper when it was committed. After a reverse feed a later entry has a smaller `y` than an earlier one, and its dots are added to the rows that are already there: a consumer that paints in order paints black over black and is right. A marker stands at the position the paper has when its command arrives, so a cut after the last line stands at the bottom of that line. A cut or a pulse that arrived while a page was being composed stands behind the page, at its bottom, which is where the items of the item stream put it. The gap the line spacing leaves below the cells of a line is part of the line, not a feed.
 
 A command the printer performs takes the paper in front of it away: after a cut or a pulse the driver supports, the print head stands at the bottom of the paper that left, whatever a reverse feed did to the position before it, and no entry behind it has a smaller `y` than that marker. A reverse feed cannot move above the last such marker, the way a printer cannot pull back paper it has cut off.
+
+`source` is the bytes of the stream the entry came from, see [The source](#the-source): the command that cut the paper, opened the drawer or was not understood, the command that fed the paper, or the line feed of an empty line. A `line` and a `page` carry none, the operations on them do: a line is a run of bytes and the boxes inside it say which.
 
 The list is not filtered by the `commands` option: every cut, pulse, feed and unknown command is in it. What `commands` does decide is which of them the printer performs, and therefore where the paper leaves it: a list of a stream that moves the paper back over a cut the driver performs is not the list of the same stream for a driver that ignores it, and neither is the paper.
 
@@ -65,9 +67,9 @@ Inside a line. `x` is from the left edge of the surface, `y` from the top of the
 
 | Type | Fields | Meaning |
 |---|---|---|
-| `text` | `x`, `y`, `width`, `height`, `codepoint` or `bitmap`, `font`, `cell`, `glyph`, `baseline`, `scale`, `style`, `rotation`, `spacing` | One cell of text. |
-| `rect` | `x`, `y`, `width`, `height` | A filled black rectangle: a bar of a barcode, a run of adjacent black modules of a QR code, a PDF417 symbol or a DataBar, or one line of the hollow box a Code 93 prints for its start and stop character, which the font has no glyph for and which is therefore rectangles of the barcode block instead of a text cell: four of them, one per side, or two when the cell is too small for the sides to have any height. |
-| `image` | `x`, `y`, `width`, `height`, `data` | A 1-bit bitmap in the format of the output contract, one dot on one dot: a strip of a column mode image inside a text line, a raster image, a downloaded or NV image with the scaling of its print command applied, a Star raster mode buffer. `data` is a copy the layout owns, never a view on the stream. |
+| `text` | `x`, `y`, `width`, `height`, `codepoint` or `bitmap`, `font`, `cell`, `glyph`, `baseline`, `scale`, `style`, `rotation`, `spacing`, `source` | One cell of text. |
+| `rect` | `x`, `y`, `width`, `height`, `source` | A filled black rectangle: a bar of a barcode, a run of adjacent black modules of a QR code, a PDF417 symbol or a DataBar, or one line of the hollow box a Code 93 prints for its start and stop character, which the font has no glyph for and which is therefore rectangles of the barcode block instead of a text cell: four of them, one per side, or two when the cell is too small for the sides to have any height. |
+| `image` | `x`, `y`, `width`, `height`, `data`, `source` | A 1-bit bitmap in the format of the output contract, one dot on one dot: a strip of a column mode image inside a text line, a raster image, a downloaded or NV image with the scaling of its print command applied, a Star raster mode buffer. `data` is a copy the layout owns, never a view on the stream. |
 
 ### Text
 
@@ -91,6 +93,22 @@ An operation can start inside the surface and end past its right edge: the human
 `width` and `height` are the box of the operation on the line: the scaled cell, or the scaled cell with its sides swapped when `rotation` is 90. The code points U+2500 to U+259F are stretched to the edges of the cell, as the bitmap font stretches them. Every text operation carries its whole style; there are no state changes in the list.
 
 The glyph box and the baseline are the ones of the built in bitmap font, whatever font drew the dots: the `font` option of a renderer is an option of the bitmap back-end and the layout has no font at all.
+
+### The source
+
+`source` is `{offset, length}`, the bytes of the stream the operation came from, counted in the byte array that was given to `layout()`. It is two numbers and never a copy of the bytes; a consumer that wants them reads them out of the stream it has. A stream that is fed in pieces is out of scope: the offsets of a list are offsets of the array of that call.
+
+| The operation | Its source |
+|---|---|
+| A cell of text | The byte that printed it, `length` 1, or the two bytes of a multibyte character, `length` 2, which both placeholder cells of such a character carry. |
+| A cell of a glyph the stream downloaded | The byte that printed it, not the `ESC &` or `FS 2` that defined it. |
+| A strip of a column mode image | The command that carries the dots: `ESC *` of ESC/POS, `ESC X`, `ESC K`, `ESC L` or `ESC k` of Star. |
+| A raster image | The command that carries the dots, `GS v 0` or `ESC GS S`, and for the graphics print buffer of `GS ( L` the function that printed the buffer. |
+| A downloaded or NV image | The command that printed it, not the command that defined it. |
+| A Star raster mode buffer | From the first raster token that filled the buffer to the last, the rows of dots and the moves of the position alike, and not the execute command that printed it, which draws nothing of its own. |
+| The rectangles of a barcode, a QR code, a PDF417 symbol or a DataBar, and the cells of a barcode's human readable text | The command that drew the symbol. |
+
+So the cells of a run of text each point at one byte and the boxes of a block all point at the same command: a consumer that wants to know which bytes drew a thing on the paper, or which thing on the paper a byte drew, has it both ways round. The one range that can hold bytes of something else is a Star raster buffer's, which runs from its first row to its last and takes in whatever was printed between them.
 
 <br>
 
@@ -132,6 +150,7 @@ The total line of the `receipt` fixture, `test/fixtures/esc-pos/receipt.bin`, is
       style: {bold: true, underline: 0, upperline: 0, invert: false},
       rotation: 0,
       spacing: 0,
+      source: {offset: 292, length: 1},       // the T of the stream
     },
     // 'otal', then the spaces of the table, then '16.75', the last cell at x 564
   ],
@@ -143,14 +162,18 @@ The cells are 24 dots tall in a line box of 30, and they sit at the top of it: t
 The barcode below it, the tenth entry, is one line box of 88 dots: 30 rectangles of the bars, 60 dots tall and as wide as the bar they stand for, 3, 6, 9 or 12 dots for a module width of 3, the first of them at `x` 145, and 13 text cells of the human readable text underneath, four dots below the bars at `y` 64, the first of them at `x` 209.
 
 ```js
-{type: 'rect', x: 145, y: 0, width: 3, height: 60}
+{type: 'rect', x: 145, y: 0, width: 3, height: 60, source: {offset: 365, length: 17}}
 {type: 'text', x: 209, y: 64, width: 12, height: 24, codepoint: 52, font: 'A', ... }
 ```
+
+Both carry the same source, the seventeen bytes of the `GS k` that drew the barcode.
 
 <br>
 
 ## Versioning
 
 `version` is 1. A field or a type that is added does not change it and a consumer ignores what it does not know; a change in the meaning of an existing field does. `rasterize()` and `toSvg()` accept version 1 and throw on any other.
+
+The `source` of an operation and of a `feed`, `cut`, `pulse` and `unknown` entry was added in 1.1.0, which is such an addition: the version of the format stayed 1 and a consumer written against 1.0.0 reads a list of 1.1.0 as it read the one before it.
 
 The golden lists next to the fixtures, `test/fixtures/esc-pos/receipt.layout.json` and four others, freeze the format the way the PBM files freeze the dots.

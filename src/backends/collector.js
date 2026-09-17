@@ -32,6 +32,16 @@ function copyBitmap(bitmap) {
 }
 
 /**
+ * A copy of the bytes something came from, two numbers the list owns
+ *
+ * @param  {object}   source   The range, or null
+ * @return {object}            A copy of it, or null
+ */
+function copySource(source) {
+  return source ? {offset: source.offset, length: source.length} : source;
+}
+
+/**
  * A copy of one operation of a line
  *
  * @param  {LineOperation}   operation   The operation
@@ -39,6 +49,10 @@ function copyBitmap(bitmap) {
  */
 function copyOperation(operation) {
   const result = Object.assign({}, operation);
+
+  if (result.source) {
+    result.source = copySource(operation.source);
+  }
 
   if (result.cell) {
     result.cell = {width: operation.cell.width, height: operation.cell.height};
@@ -75,6 +89,10 @@ function copyOperation(operation) {
  */
 function copyEntry(entry) {
   const result = Object.assign({}, entry);
+
+  if (result.source) {
+    result.source = copySource(entry.source);
+  }
 
   if (entry.operations) {
     result.operations = entry.operations.map(copyOperation);

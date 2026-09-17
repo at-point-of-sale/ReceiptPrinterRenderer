@@ -9,6 +9,7 @@ import {pdf417 as encodePdf417} from './symbologies/pdf417.js';
  * @typedef {import('./types.js').PageEntry} PageEntry
  * @typedef {import('./types.js').FeedEntry} FeedEntry
  * @typedef {import('./types.js').LineOperation} LineOperation
+ * @typedef {import('./types.js').Source} Source
  */
 
 /**
@@ -318,6 +319,7 @@ class LayoutEngine {
   #line;
   #definitions;
   #glyphs;
+  #source;
 
   #pageHeight;
   #pageSetup;
@@ -483,19 +485,46 @@ class LayoutEngine {
   }
 
   /**
+     * The bytes of the stream the calls that follow come from, which a parser
+     * sets to the token it is handling: everything that is placed from here on
+     * carries it, so that a consumer of the list can point at the command that
+     * drew a block or at the byte that printed a character.
+     *
+     * A run of text is the exception: the parser gathers it and hands the
+     * source of every character to text(), the bytes having been read long
+     * before the call that places them.
+     *
+     * @param  {Source|null}   range   The range of the token, null for none
+     */
+  source(range) {
+    this.#source = range || null;
+  }
+
+  /**
      * Append text to the current line, one cell per character, in the current
      * style. A character that does not fit on the rest of the line wraps to the
      * next one, the way a printer wraps.
      *
      * The string is already decoded, the parser owns the codepage.
      *
-     * @param  {string}   value   The text to print
+     * @param  {string}     value       The text to print
+     * @param  {Source[]}   [sources]   The bytes of every character, the current source when left out
      */
-  text(value) {
+  text(value, sources) {
     const ascent = this.#ascent();
 
+    let index = 0;
+
     for (const character of value) {
-      this.#place(this.#cell(character.codePointAt(0)), this.#spacing * this.#style.width, ascent);
+      const source = sources ? sources[index] : null;
+
+      this.#place(
+          this.#cell(character.codePointAt(0), null, null, source),
+          this.#spacing * this.#style.width,
+          ascent,
+      );
+
+      index++;
     }
   }
 
@@ -1505,6 +1534,11 @@ class LayoutEngine {
      * @param  {object}   item   The item to emit, cut, pulse or unknown
      */
   command(item) {
+    /* The bytes of the command travel with the item, because an item that
+       waits for a page is emitted long after the parser moved on */
+
+    const carried = Object.assign({}, item, {source: this.#source});
+
     /* A cut or a drawer pulse that arrives while a page is being composed
        waits for that page: the page is not on the paper yet, so an item in
        front of it would tell the driver to cut paper that is still to be
@@ -1512,13 +1546,13 @@ class LayoutEngine {
        reported where it stands */
 
     if (this.#page && (item.type === 'cut' || item.type === 'pulse')) {
-      this.#held.push(item);
+      this.#held.push(carried);
       return;
     }
 
-    this.#leave(item);
+    this.#leave(carried);
 
-    this.#sink.command(this.#marker(item));
+    this.#sink.command(this.#marker(carried));
   }
 
   /**
@@ -1569,6 +1603,7 @@ class LayoutEngine {
     this.#floor = 0;
     this.#page = null;
     this.#held = [];
+    this.#source = null;
   }
 
   /**
@@ -1577,9 +1612,10 @@ class LayoutEngine {
      * @param  {number}   codepoint   Unicode code point
      * @param  {string}   [name]      Font of the cell, the current font when it is left out
      * @param  {Style}    [style]     Style of the cell, the current style when it is left out
+     * @param  {Source}   [source]    Bytes the cell came from, the current source when it is left out
      * @return {object}               The operation, with the size of its box
      */
-  #cell(codepoint, name, style) {
+  #cell(codepoint, name, style, source) {
     name = name || this.#font;
     style = style || this.#style;
 
@@ -1590,6 +1626,7 @@ class LayoutEngine {
         name,
         {width: size.width, height: size.height},
         style,
+        source,
     );
   }
 
@@ -1621,13 +1658,14 @@ class LayoutEngine {
      * by ESC V has the sides of its box swapped, because the turn is a quarter
      * turn clockwise about the top left corner of the unturned cell.
      *
-     * @param  {object}     glyph   The code point or the bitmap, and the glyph box
-     * @param  {string}     name    Font of the cell, 'A' or 'B'
-     * @param  {CellSize}   cell    The unscaled cell
-     * @param  {Style}      style   The style of the cell
-     * @return {object}             The operation, with the size of its box
+     * @param  {object}     glyph      The code point or the bitmap, and the glyph box
+     * @param  {string}     name       Font of the cell, 'A' or 'B'
+     * @param  {CellSize}   cell       The unscaled cell
+     * @param  {Style}      style      The style of the cell
+     * @param  {Source}     [source]   Bytes the cell came from, the current source when it is left out
+     * @return {object}                The operation, with the size of its box
      */
-  #textOperation(glyph, name, cell, style) {
+  #textOperation(glyph, name, cell, style, source) {
     const rotation = this.#rotated(style) ? 90 : 0;
 
     const width = cell.width * style.width;
@@ -1660,6 +1698,12 @@ class LayoutEngine {
 
     fields.spacing = 0;
 
+    /* The byte that printed this cell, or the command that drew the block it
+       belongs to: a run of text carries a source per character, everything
+       else the source of the token the parser is handling */
+
+    fields.source = source || this.#source;
+
     return {
       type: 'text',
       width: rotation === 90 ? height : width,
@@ -1679,7 +1723,7 @@ class LayoutEngine {
       type: 'image',
       width: bitmap.width,
       height: bitmap.height,
-      fields: {data: bitmap.data},
+      fields: {data: bitmap.data, source: this.#source},
     };
   }
 
@@ -2245,7 +2289,15 @@ class LayoutEngine {
       this.#offset(width, this.#surface()) :
       this.#left() + this.#offset(width);
 
-    const placed = operations.map((operation) => Object.assign({}, operation, {x: operation.x + offset}));
+    /* The rectangles and the images of a block are made by the methods above
+       and carry no source of their own, so they take the one of the command
+       that drew the block: the bars of a barcode, the cells of its human
+       readable text and the dots of an image all point at the same token */
+
+    const placed = operations.map((operation) => Object.assign({}, operation, {
+      x: operation.x + offset,
+      source: operation.source || this.#source,
+    }));
 
     this.#append({type: 'line', y: 0, height, rotation: this.#rotation(), operations: placed});
   }
@@ -2318,7 +2370,7 @@ class LayoutEngine {
     }
 
     if (this.#page) {
-      this.#current().entries.push({type: 'feed', y: this.#page.y, height: count});
+      this.#current().entries.push({type: 'feed', y: this.#page.y, height: count, source: this.#source});
 
       this.#page.top = Math.min(this.#page.top, this.#page.y);
       this.#page.y += count;
@@ -2327,7 +2379,7 @@ class LayoutEngine {
       return;
     }
 
-    this.#sink.feed({type: 'feed', y: this.#position, height: count});
+    this.#sink.feed({type: 'feed', y: this.#position, height: count, source: this.#source});
 
     this.#advance(count);
   }

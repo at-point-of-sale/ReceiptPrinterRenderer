@@ -50,6 +50,7 @@ import type {
   RectOperation,
   ImageOperation,
   TextStyle,
+  Source,
   RasterizeOptions,
 } from '@point-of-sale/receipt-printer-renderer';
 
@@ -219,6 +220,15 @@ for (const entry of list.entries) {
       for (const operation of line.operations) {
         const one: LineOperation = operation;
 
+        /* Every operation says which bytes of the stream it came from */
+
+        const from: Source = one.source;
+        const offset: number = from.offset;
+        const length: number = from.length;
+
+        void offset;
+        void length;
+
         if (one.type === 'text') {
           const cell: TextOperation = one;
           const style: TextStyle = cell.style;
@@ -264,7 +274,9 @@ for (const entry of list.entries) {
 
     case 'feed': {
       const feed: FeedEntry = box;
+      const fed: Source = feed.source;
       void feed.height;
+      void fed;
       break;
     }
 

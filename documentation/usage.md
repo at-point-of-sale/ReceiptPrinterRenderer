@@ -362,6 +362,8 @@ let layout = renderer.layout(bytes);
 
 A `line` entry holds `text` operations, one per character cell, with the code point, the font, the cell, the size, the style and the position of the cell, `rect` operations for the bars of a barcode and the modules of a QR code, and `image` operations for the bitmaps a stream sent. A `page` entry holds the print areas of a page of page mode. Every operation carries its whole style, so a consumer needs no state of its own.
 
+Every operation carries a `source` as well, `{offset, length}`, the bytes of the stream it came from: the byte that printed a cell of text, the command that drew a barcode or an image. So do the `feed`, `cut`, `pulse` and `unknown` entries. It is two numbers and never a copy of the bytes, which is what a view that puts a receipt next to its hex dump needs.
+
 The list is a description, not an image: it says that an `A` of font A in bold stands at dot 24 of the line that starts at row 210, and it leaves drawing the `A` to whoever consumes it. That is what an SVG or a PDF writer needs, and what a debugging view of a receipt needs.
 
 `rasterize(layout, options)` draws a list again and returns the items `render()` returns, so the two paths are interchangeable:

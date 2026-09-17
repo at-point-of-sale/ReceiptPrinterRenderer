@@ -12,6 +12,7 @@ import printerProfiles from '../../generated/profiles.js';
  * @typedef {import('../types.js').Layout} Layout
  * @typedef {import('../types.js').RendererOptions} RendererOptions
  * @typedef {import('../types.js').RenderItem} RenderItem
+ * @typedef {import('../types.js').Source} Source
  * @typedef {import('@point-of-sale/receipt-printer-decoder/tokenizer').Token} Token
  */
 
@@ -279,6 +280,9 @@ class StarPrntRenderer {
   #characterSet;
   #pulse;
   #text;
+  #textSources;
+  #source;
+  #base;
   #qrcode;
   #refusing;
   #pdf417;
@@ -425,6 +429,13 @@ class StarPrntRenderer {
     try {
       this.#pulse = {on: DEFAULT_PULSE, off: DEFAULT_PULSE};
 
+      /* The offsets of the tokens are counted in this stream, from its first
+         byte, and only the data of a refused barcode is parsed with a base of
+         its own, see drawBarcode() */
+
+      this.#base = 0;
+      this.#source = null;
+
       this.#initialize();
       this.#dispatch(tokenize(data, StarPrntRenderer.language));
 
@@ -437,6 +448,7 @@ class StarPrntRenderer {
     } finally {
       this.#painter.discard();
       this.#text = [];
+      this.#textSources = [];
     }
   }
 
@@ -448,6 +460,7 @@ class StarPrntRenderer {
   #initialize() {
     this.#painter.reset();
     this.#text = [];
+    this.#textSources = [];
     this.#refusing = false;
     this.#characterSet = noCharacterSet();
     this.#leftColumn = 0;
@@ -468,14 +481,22 @@ class StarPrntRenderer {
      */
   #dispatch(tokens) {
     for (const token of tokens) {
+      /* Everything the painter places from here on comes from this token, and
+         a run of text hands a source per character to the painter instead */
+
+      this.#source = {offset: this.#base + token.offset, length: token.length};
+
+      this.#painter.source(this.#source);
+
       switch (token.type) {
         /* Printable bytes are gathered, so that a run of characters becomes
            one call on the painter, in one codepage. Star has no multibyte
            character set, so a run is never pairs of bytes */
 
         case 'text':
-          for (const byte of token.bytes) {
-            this.#text.push(byte);
+          for (let index = 0; index < token.bytes.length; index++) {
+            this.#text.push(token.bytes[index]);
+            this.#textSources.push({offset: this.#source.offset + index, length: 1});
           }
 
           break;
@@ -569,8 +590,28 @@ class StarPrntRenderer {
       return;
     }
 
-    this.#painter.text(this.#decode(this.#text));
+    this.#painter.text(this.#decode(this.#text), this.#textSources);
+
     this.#text = [];
+    this.#textSources = [];
+  }
+
+  /**
+     * One source per byte of a run of text, which is what the layout gives
+     * every cell of it: the bytes of a run are bytes of the stream in order
+     *
+     * @param  {number}     offset   Position of the first byte in the stream
+     * @param  {number}     count    Number of bytes
+     * @return {Source[]}            The sources, one per byte
+     */
+  #sources(offset, count) {
+    const sources = [];
+
+    for (let index = 0; index < count; index++) {
+      sources.push({offset: offset + index, length: 1});
+    }
+
+    return sources;
   }
 
   /**
@@ -725,6 +766,11 @@ class StarPrntRenderer {
 
     const data = args.subarray(4, args.length - 1);
 
+    /* Where the data of the command starts in the stream: the arguments are
+       the tail of the token, and the data is the tail of the arguments */
+
+    const offset = this.#source.offset + this.#source.length - args.length + 4;
+
     /* n2 is 1 for a barcode without text and 2 for one with the text below it,
        which a Star printer draws in font A */
 
@@ -741,16 +787,29 @@ class StarPrntRenderer {
     }
 
     if (this.#refusing) {
-      this.#painter.text(this.#decode(data));
+      this.#painter.text(this.#decode(data), this.#sources(offset, data.length));
       return;
     }
 
     this.#refusing = true;
 
+    /* The payload is tokenized on its own, so its tokens are counted from its
+       own first byte: the base puts them back where they stand in the stream,
+       and the source of this command is restored behind them */
+
+    const base = this.#base;
+    const source = this.#source;
+
+    this.#base = offset;
+
     try {
       this.#dispatch(tokenize(data, StarPrntRenderer.language));
     } finally {
       this.#refusing = false;
+      this.#base = base;
+      this.#source = source;
+
+      this.#painter.source(source);
     }
   }
 
@@ -1424,7 +1483,35 @@ class StarPrntRenderer {
       height: 0,
       current: null,
       pending: false,
+      source: null,
     };
+  }
+
+  /**
+     * Grow the range of the stream the rows in the image buffer came from,
+     * which is the source of the block they are printed as: from the first
+     * raster token that filled the buffer to the last, the rows of dots and
+     * the moves of the position alike. The execute command that prints the
+     * buffer is not part of it, it draws nothing of its own.
+     */
+  #rasterSource() {
+    const range = this.#source;
+
+    if (!range) {
+      return;
+    }
+
+    const source = this.#raster.source;
+
+    if (!source) {
+      this.#raster.source = {offset: range.offset, length: range.length};
+      return;
+    }
+
+    const end = Math.max(source.offset + source.length, range.offset + range.length);
+
+    source.offset = Math.min(source.offset, range.offset);
+    source.length = end - source.offset;
   }
 
   /**
@@ -1435,6 +1522,7 @@ class StarPrntRenderer {
     this.#raster.height = 0;
     this.#raster.current = null;
     this.#raster.pending = false;
+    this.#raster.source = null;
   }
 
   /**
@@ -1449,6 +1537,8 @@ class StarPrntRenderer {
      */
   #rasterRow(data, feed) {
     const rowBytes = Bitmap.rowBytes(this.#painter.width);
+
+    this.#rasterSource();
 
     if (!this.#raster.current) {
       this.#raster.current = new Uint8Array(rowBytes);
@@ -1525,6 +1615,8 @@ class StarPrntRenderer {
       rows--;
     }
 
+    this.#rasterSource();
+
     if (rows > 0) {
       this.#rasterBlank(rows);
       this.#raster.height += rows;
@@ -1553,6 +1645,7 @@ class StarPrntRenderer {
     const width = this.#painter.width;
     const rowBytes = Bitmap.rowBytes(width);
     const bitmap = Bitmap.create(width, height);
+    const source = this.#raster.source;
 
     let y = 0;
 
@@ -1566,11 +1659,19 @@ class StarPrntRenderer {
 
     this.#rasterClear();
 
+    /* The block came from the rows, not from the command that printed them,
+       so it is placed with the range of the tokens that filled the buffer and
+       the source of the current token is put back behind it */
+
+    this.#painter.source(source || this.#source);
+
     /* The rows carry their own position, the left margin of the raster, so
        they are placed on the paper and not inside the print area of the line
        mode: an ESC l or an ESC Q must not shift or clip them */
 
     this.#painter.block(bitmap, {margins: false});
+
+    this.#painter.source(this.#source);
 
     return true;
   }

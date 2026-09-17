@@ -5,6 +5,7 @@ import Collector from './backends/collector.js';
 /**
  * @typedef {import('./types.js').Bitmap} Bitmap
  * @typedef {import('./types.js').Layout} Layout
+ * @typedef {import('./types.js').Source} Source
  * @typedef {import('./types.js').RenderItem} RenderItem
  * @typedef {import('./types.js').RenderLanguage} RenderLanguage
  * @typedef {import('./font.js').PackedFont} PackedFont
@@ -174,13 +175,24 @@ class Painter {
   }
 
   /**
+     * The bytes of the stream the calls that follow come from, which the
+     * parser sets to the token it is handling
+     *
+     * @param  {Source|null}   range   The range of the token, null for none
+     */
+  source(range) {
+    this.#engine.source(range);
+  }
+
+  /**
      * Append text to the current line, one cell per character, in the current
      * style
      *
-     * @param  {string}   value   The text to print
+     * @param  {string}     value       The text to print
+     * @param  {Source[]}   [sources]   The bytes of every character, the current source when left out
      */
-  text(value) {
-    this.#engine.text(value);
+  text(value, sources) {
+    this.#engine.text(value, sources);
   }
 
   /**

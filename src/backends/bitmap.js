@@ -234,10 +234,14 @@ class BitmapBackend {
       return;
     }
 
+    /* The row the command stands on and the bytes it came from are fields of
+       the display list, which says where everything of a stream is; the item
+       stream is what a driver sends on, and it carries neither */
+
     const item = {type: entry.type};
 
     for (const key of Object.keys(entry)) {
-      if (key !== 'type' && key !== 'y') {
+      if (key !== 'type' && key !== 'y' && key !== 'source') {
         item[key] = entry[key];
       }
     }

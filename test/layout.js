@@ -150,6 +150,29 @@ function draw(operations, width, height, left = 0, top = 0) {
 }
 
 /**
+ * Where a run of bytes stands in a stream, written as the characters of the
+ * bytes, so that a test can name what it is looking for the way it reads
+ *
+ * @param  {Uint8Array}   stream   The bytes of the fixture
+ * @param  {string}       value    The bytes to find, one character per byte
+ * @param  {number}       [from]   Where to start looking
+ * @return {number}                The offset of the first byte of the run
+ */
+function find(stream, value, from = 0) {
+  const wanted = Array.from(value, (character) => character.charCodeAt(0));
+
+  for (let offset = from; offset + wanted.length <= stream.length; offset++) {
+    if (wanted.every((byte, index) => stream[offset + index] === byte)) {
+      return offset;
+    }
+  }
+
+  assert.fail(`the stream does not hold ${JSON.stringify(value)}`);
+
+  return -1;
+}
+
+/**
  * The dots of a bitmap, as a string, so that two bitmaps can be compared
  *
  * @param  {object}   bitmap   The bitmap
@@ -310,6 +333,56 @@ describe('the display list', function() {
 
           assert.deepEqual(markers, expected);
         });
+
+        it('should carry the bytes of the stream in every operation', function() {
+          const renderer = new ReceiptPrinterRenderer(entry.options);
+          const stream = bytes(entry);
+          const list = renderer.layout(stream);
+
+          const carries = (source, where) => {
+            assert.isOk(source, `${where} carries no source`);
+            assert.isTrue(Number.isInteger(source.offset), `${where} starts at ${source.offset}`);
+            assert.isTrue(Number.isInteger(source.length), `${where} is ${source.length} bytes`);
+            assert.isAtLeast(source.offset, 0, `${where} starts at ${source.offset}`);
+            assert.isAtLeast(source.length, 1, `${where} is ${source.length} bytes`);
+            assert.isAtMost(
+                source.offset + source.length,
+                stream.length,
+                `${where} ends at ${source.offset + source.length} of ${stream.length}`,
+            );
+          };
+
+          const operations = (line, where) => {
+            for (const operation of line.operations) {
+              carries(operation.source, `${where} ${operation.type}`);
+            }
+          };
+
+          for (const box of list.entries) {
+            if (box.type === 'line') {
+              operations(box, 'a line');
+              continue;
+            }
+
+            /* A page carries no bytes of its own, the boxes of its areas do */
+
+            if (box.type === 'page') {
+              for (const area of box.areas) {
+                for (const line of area.entries) {
+                  if (line.type === 'line') {
+                    operations(line, 'an area');
+                  } else {
+                    carries(line.source, `an area ${line.type}`);
+                  }
+                }
+              }
+
+              continue;
+            }
+
+            carries(box.source, `a ${box.type} entry`);
+          }
+        });
       });
     }
   });
@@ -346,6 +419,7 @@ describe('the display list', function() {
         style: {bold: false, underline: 0, upperline: 0, invert: false},
         rotation: 0,
         spacing: 0,
+        source: {offset: 10, length: 1},
       });
 
       /* The cells follow each other by the width of the cell, and the gap of
@@ -953,6 +1027,100 @@ describe('the display list', function() {
         assert.equal(entry.operations[0].x, 0);
         assert.equal(entry.operations[0].width, WIDTH);
         assert.equal(entry.operations[0].height, entry.height);
+      }
+    });
+  });
+
+  describe('the bytes of the stream', function() {
+    it('should be the byte that printed a cell of text', function() {
+      const stream = fixture('esc-pos', 'receipt').bytes;
+      const list = layout('esc-pos', 'receipt');
+
+      const line = list.entries.find((entry) => entry.type === 'line');
+      const cells = line.operations.filter((operation) => operation.type === 'text');
+
+      /* The first line of the receipt is the padding of a centred line and the
+         name of the shop, and both runs stand in the stream as they print */
+
+      assert.equal(text(line), '                THE CORNER STORE');
+
+      const padding = find(stream, '                ');
+      const name = find(stream, 'THE CORNER STORE');
+
+      assert.deepEqual(cells[0].source, {offset: padding, length: 1});
+      assert.deepEqual(cells[16].source, {offset: name, length: 1});
+
+      /* And the cells of a run follow each other byte by byte */
+
+      assert.deepEqual(
+          cells.slice(16).map((operation) => operation.source.offset),
+          Array.from(cells.slice(16), (operation, index) => name + index),
+      );
+    });
+
+    it('should be the byte that printed a glyph the stream downloaded', function() {
+      const stream = fixture('esc-pos/raw', 'user-defined').bytes;
+      const list = layout('esc-pos/raw', 'user-defined');
+
+      /* The A, the B and the C of the line that ESC % selected the user
+         defined glyphs for, which are drawn as the glyphs of those bytes */
+
+      const offset = find(stream, 'ABC', find(stream, '\x1b%\x01'));
+
+      const glyphs = list.entries
+          .filter((entry) => entry.type === 'line')
+          .flatMap((entry) => entry.operations)
+          .filter((operation) => operation.type === 'text' && operation.bitmap);
+
+      assert.isAbove(glyphs.length, 0);
+
+      const printed = glyphs.filter((operation) =>
+        operation.source.offset >= offset && operation.source.offset < offset + 3);
+
+      assert.deepEqual(
+          printed.map((operation) => operation.source),
+          [
+            {offset, length: 1},
+            {offset: offset + 1, length: 1},
+            {offset: offset + 2, length: 1},
+          ],
+      );
+    });
+
+    it('should be the command that drew a raster image', function() {
+      const stream = fixture('esc-pos', 'image-raster').bytes;
+      const list = layout('esc-pos', 'image-raster');
+
+      const image = block(list, 'image').operations.find((operation) => operation.type === 'image');
+
+      /* GS v 0 m xL xH yL yH d.., the whole command: eight bytes of header and
+         the rows of dots behind them, xL and xH being the bytes of a row */
+
+      const offset = find(stream, '\x1dv0');
+      const bytes = stream[offset + 4] + stream[offset + 5] * 256;
+      const rows = stream[offset + 6] + stream[offset + 7] * 256;
+
+      assert.deepEqual(image.source, {offset, length: 8 + bytes * rows});
+    });
+
+    it('should be the command that drew a barcode, its bars and its text alike', function() {
+      const stream = fixture('esc-pos', 'hri').bytes;
+      const list = layout('esc-pos', 'hri');
+
+      /* The second GS k of the fixture, an EAN-13 of function A, whose data
+         ends at a NUL byte: the first one prints no human readable text */
+
+      const offset = find(stream, '\x1dk\x02', find(stream, '\x1dk\x02') + 1);
+      const length = stream.indexOf(0, offset + 3) + 1 - offset;
+
+      const line = list.entries.find((entry) => entry.type === 'line' &&
+          entry.operations.some((operation) => operation.type === 'rect') &&
+          entry.operations.some((operation) => operation.type === 'text'));
+
+      assert.isAbove(line.operations.length, 30);
+
+      for (const operation of line.operations) {
+        assert.deepEqual(operation.source, {offset, length}, `the ${operation.type} of the barcode`);
       }
     });
   });
