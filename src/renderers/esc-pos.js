@@ -640,7 +640,12 @@ class EscPosRenderer {
   #command(token) {
     this.#flushText();
 
-    const command = this.#commands[token.prefix][token.code];
+    /* A group this renderer has no table for at all is an unknown item the
+       same way a command of a known group is: the tokenizer reads groups this
+       renderer never learned, the BS commands of a Bixolon among them */
+
+    const group = this.#commands[token.prefix];
+    const command = group ? group[token.code] : undefined;
 
     if (!command) {
       this.#unknown(token.bytes);
