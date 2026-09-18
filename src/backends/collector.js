@@ -14,6 +14,7 @@
  * @property {RenderLanguage} language   Language of the commands the entries came from
  * @property {number} width              Width of the paper in dots
  * @property {number} dpi                Resolution of the printer in dots per inch
+ * @property {number} [cutterDistance]   Distance between the cutter and the print head in dots
  */
 
 /* The version of the display list this collector writes */
@@ -123,6 +124,7 @@ class Collector {
   #language;
   #width;
   #dpi;
+  #cutterDistance;
   #entries;
   #height;
 
@@ -137,6 +139,7 @@ class Collector {
     this.#language = settings.language;
     this.#width = settings.width;
     this.#dpi = settings.dpi;
+    this.#cutterDistance = settings.cutterDistance || 0;
 
     this.discard();
   }
@@ -184,7 +187,7 @@ class Collector {
      * @return {Layout}   The list
      */
   end() {
-    return {
+    const list = {
       version: VERSION,
       language: this.#language,
       width: this.#width,
@@ -192,6 +195,17 @@ class Collector {
       dpi: this.#dpi,
       entries: this.#entries,
     };
+
+    /* The paper of a list says how far the cutter stands above the print head,
+       so that a consumer that draws the list again knows which rows a command
+       leaves in the printer. A printer without a distance, which is every list
+       of a driver, carries no such field at all */
+
+    if (this.#cutterDistance > 0) {
+      list.cutterDistance = this.#cutterDistance;
+    }
+
+    return list;
   }
 
   /**

@@ -72,6 +72,7 @@ const options: RendererOptions = {
   commands,
   maxHeight: 1024,
   feedThreshold: 24,
+  cutterDistance: 0,
 };
 
 const escpos = new EscPosRenderer(options);
@@ -274,7 +275,11 @@ for (const entry of list.entries) {
 
     case 'feed': {
       const feed: FeedEntry = box;
-      const fed: Source = feed.source;
+
+      /* The blank paper of a cutter distance came from no bytes at all, so a
+         feed is the one entry whose source can be null */
+
+      const fed: Source | null = feed.source;
       void feed.height;
       void fed;
       break;

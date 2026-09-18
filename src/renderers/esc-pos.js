@@ -328,6 +328,7 @@ class EscPosRenderer {
       commands: settings.commands || [],
       maxHeight: settings.maxHeight,
       lineSpacing: settings.lineSpacing,
+      cutterDistance: settings.cutterDistance,
       feedThreshold: settings.feedThreshold,
       font: settings.font,
     });

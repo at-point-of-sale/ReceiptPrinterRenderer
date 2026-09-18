@@ -92,6 +92,7 @@
  * @property {RenderCommand[]} [commands]                Command types that appear in the output, the rest is dropped
  * @property {number} [maxHeight]                        Maximum height of an image item, taller segments are split
  * @property {number} [lineSpacing]                      Default line spacing in dots, defaults to the profile
+ * @property {number} [cutterDistance]                   Distance between the cutter and the print head in dots
  * @property {string|Profile} [profile]                  Printer family defaults, a name or a profile, per language
  * @property {number} [feedThreshold]                    Runs of blank rows at least this tall become feed items
  * @property {Object<string, PackedFont>} [font]         Font data, in the packed format of the built in fonts
@@ -115,6 +116,7 @@
  * @property {number} height                Height of the paper in dots, from its first row to its last
  * @property {number} dpi                   Resolution of the printer in dots per inch
  * @property {LayoutEntry[]} entries        The entries, in stream order, which is draw order
+ * @property {number} [cutterDistance]      Distance between the cutter and the print head in dots, when there is one
  */
 
 /** @typedef {LineEntry | PageEntry | FeedEntry | CutEntry | PulseEntry | UnknownEntry} LayoutEntry */
@@ -161,7 +163,8 @@
  * @property {'feed'} type
  * @property {number} y        Row of the paper the feed starts on
  * @property {number} height   Number of rows
- * @property {Source} source   The command that fed, or the line feed of an empty line
+ * @property {Source|null} source   The command that fed, the line feed of an empty line, or null for
+ *                                   the blank paper of the cutter distance at the top of a job
  */
 
 /**

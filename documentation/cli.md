@@ -177,6 +177,14 @@ A stream without a cut in it writes one file under the plain name, so `--pieces`
 
 Both options need the printer to perform the cut, see the next section, and both see to that themselves.
 
+`--cutter-distance` is the distance between the cutter of the printer and its print head, in dots, and it is 0 by default. The cutter sits above the head, so the paper between the two is blank and already past the head when a job starts: the job prints that far below the cut edge, and the paper is cut that far above the row the cut command was given at. With it, `--pieces` writes the pieces as a printer with that cutter leaves them, the blank margin at the top of each and the lines a receipt feeds in front of its cut at the top of the piece behind it.
+
+```
+receipt-printer-renderer --cutter-distance 120 --pieces receipt.bin -o receipt.png
+```
+
+The distance is a property of the mechanism, and data sheets give it in lines of the standard line spacing: four lines of 30 dots is 120. A cut can then fall inside a line or inside an image, which is what a printer does when it cuts through the ink, and the rows above it go on the piece above and the rows below it on the piece below. Without the option the cuts stay where the stream has them, which is what a driver rendering for a printer wants, since that printer's own cutter applies its own distance.
+
 <br>
 
 ### Commands the printer performs
@@ -238,6 +246,7 @@ A pipe that closes before the image is through, `| head` on a PNG, is not an err
 | `-f, --format <name>` | the extension of `--output`, `png` for standard output | `png`, `svg`, `pbm`, `json`, which is the display list, or `commands`, which is the stream as text. |
 | `--pieces` | off | One image per piece of paper, the stream split at its cuts. Needs `--output`, and is refused with `--format commands`. |
 | `--cut-marker` | off | A dashed line where the paper is cut, in one image of the whole roll. Nothing with `--pieces`. |
+| `--cutter-distance <dots>` | `0` | Distance between the cutter and the print head: the blank paper a job starts with, and the rows a cut leaves for the next piece. |
 | `--commands <list>` | none | Comma separated `cut`, `pulse`, `feed` and `unknown`, the commands the printer performs. A cut is added when `--pieces` or `--cut-marker` needs one. |
 | `--line-spacing <dots>` | the profile's | Default line spacing in dots. |
 | `--units <name>` | `dots` | SVG only: `dots`, `mm`, `pt` or `px`, the units of the width and the height of the document. |

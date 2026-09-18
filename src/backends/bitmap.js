@@ -20,6 +20,8 @@ import Font from '../font.js';
  * @property {number} [maxHeight]                  Maximum height of an image item, taller segments are split
  * @property {number} [feedThreshold]              Runs of blank rows at least this tall become feed items
  * @property {Object<string, PackedFont>} [font]   Font data, instead of the built in fonts
+ * @property {number} [height]                     Height of the paper in dots, rows outside it are clipped
+ * @property {number} [cutterDistance]             Distance between the cutter and the print head in dots
  */
 
 /* The built in fonts the two printer fonts are drawn from. Font A is the 12x24
@@ -66,6 +68,8 @@ class BitmapBackend {
   #commands;
   #maxHeight;
   #feedThreshold;
+  #height;
+  #cutterDistance;
 
   #fonts;
   #cache;
@@ -105,6 +109,22 @@ class BitmapBackend {
     if (!Number.isInteger(this.#feedThreshold) || this.#feedThreshold < 1) {
       throw new Error('Feed threshold must be a positive integer');
     }
+
+    /* The paper of a display list is its height, and an entry that reaches
+       past it is clipped to it, which is what a piece of paper with a cut
+       through a line needs: the rows below the cut belong to the next piece.
+       A back-end that draws a stream has no such limit, the paper is as long
+       as the stream prints */
+
+    this.#height = typeof settings.height === 'undefined' || settings.height === null ?
+      null :
+      Math.max(0, settings.height);
+
+    /* The rows between the cutter and the print head never leave at a command:
+       they are the paper that stays in the printer and becomes the top of the
+       next piece, whatever the command is, see command() */
+
+    this.#cutterDistance = settings.cutterDistance || 0;
 
     /* The glyphs come from the built in fonts, unless an application supplied
        its own font data in the same packed format */
@@ -246,7 +266,20 @@ class BitmapBackend {
       }
     }
 
-    this.#flush();
+    /* The rows in front of the command leave the printer, the rows behind it
+       stay in it: a cut stands above the rows that were printed last, and those
+       become the top of the next piece of paper. A cut stands at the row the
+       paper is cut at, every other command at the row of the print head, and
+       the cutter holds its distance of rows back at both, so that the cut that
+       comes after a pulse still has them to leave behind. A command of a stream
+       without a distance stands at the bottom of the paper and takes all of it */
+
+    if (typeof entry.y !== 'number') {
+      this.#flush(Infinity);
+    } else {
+      this.#flush(entry.type === 'cut' ? entry.y : entry.y - this.#cutterDistance);
+    }
+
     this.#items.push(item);
   }
 
@@ -256,7 +289,7 @@ class BitmapBackend {
      * @return {RenderItem[]}   The items of this stream, in order
      */
   end() {
-    this.#flush();
+    this.#flush(Infinity);
 
     return this.#items;
   }
@@ -539,11 +572,16 @@ class BitmapBackend {
 
     const rowBytes = Bitmap.rowBytes(this.#width);
     const start = y - this.#origin;
+    const bottom = this.#bottom();
+
+    if (start >= bottom) {
+      return;
+    }
 
     this.#skip(start);
-    this.#reserve(Math.max(0, start + bitmap.height));
+    this.#reserve(Math.max(0, Math.min(start + bitmap.height, bottom)));
 
-    for (let row = Math.max(0, -start); row < bitmap.height; row++) {
+    for (let row = Math.max(0, -start); row < bitmap.height && start + row < bottom; row++) {
       const target = start + row;
       const offset = target * rowBytes;
       const source = bitmap.data.subarray(row * rowBytes, (row + 1) * rowBytes);
@@ -573,7 +611,7 @@ class BitmapBackend {
       }
     }
 
-    this.#rows = Math.max(this.#rows, start + bitmap.height);
+    this.#rows = Math.max(this.#rows, Math.min(start + bitmap.height, bottom));
   }
 
   /**
@@ -592,11 +630,16 @@ class BitmapBackend {
 
     const rowBytes = Bitmap.rowBytes(this.#width);
     const start = y - this.#origin;
+    const bottom = this.#bottom();
+
+    if (start >= bottom) {
+      return;
+    }
 
     this.#skip(start);
-    this.#reserve(Math.max(0, start + count));
+    this.#reserve(Math.max(0, Math.min(start + count, bottom)));
 
-    for (let row = Math.max(0, -start); row < count; row++) {
+    for (let row = Math.max(0, -start); row < count && start + row < bottom; row++) {
       const target = start + row;
 
       if (target < this.#rows) {
@@ -607,7 +650,7 @@ class BitmapBackend {
       this.#markBlank(target);
     }
 
-    this.#rows = Math.max(this.#rows, start + count);
+    this.#rows = Math.max(this.#rows, Math.min(start + count, bottom));
   }
 
   /**
@@ -618,19 +661,32 @@ class BitmapBackend {
      * @param  {number}   row   Row of the buffer something is drawn at
      */
   #skip(row) {
-    if (row <= this.#rows) {
+    const limit = Math.min(row, this.#bottom());
+
+    if (limit <= this.#rows) {
       return;
     }
 
     const rowBytes = Bitmap.rowBytes(this.#width);
 
-    this.#reserve(row);
+    this.#reserve(limit);
 
-    while (this.#rows < row) {
+    while (this.#rows < limit) {
       this.#buffer.fill(0, this.#rows * rowBytes, (this.#rows + 1) * rowBytes);
       this.#markBlank(this.#rows);
       this.#rows++;
     }
+  }
+
+  /**
+     * The row of the buffer the paper ends at: the height of the list this
+     * back-end draws, counted from the rows it holds, and no limit at all when
+     * it draws a stream
+     *
+     * @return {number}   The first row that is not on the paper any more
+     */
+  #bottom() {
+    return this.#height === null ? Infinity : this.#height - this.#origin;
   }
 
   /**
@@ -702,17 +758,30 @@ class BitmapBackend {
   }
 
   /**
-     * Turn the rows that were drawn into items and empty the buffer. Runs of
-     * blank rows of at least feedThreshold dots become feed items and split the
-     * image around them, but only when the driver supports feed, otherwise they
-     * stay in the image as white rows.
+     * Turn the rows that were drawn into items and empty the buffer, up to a
+     * row of the paper: everything in front of that row becomes items and
+     * everything behind it stays in the buffer, for the paper that is still in
+     * the printer. `Infinity` takes every row there is, which is what a flush
+     * without a cutter distance does, since a command then stands at the bottom
+     * of the paper.
+     *
+     * Runs of blank rows of at least feedThreshold dots become feed items and
+     * split the image around them, but only when the driver supports feed,
+     * otherwise they stay in the image as white rows. A run the flush cuts
+     * through counts as the part of it that leaves.
+     *
+     * @param  {number}   limit   Row of the paper the rows are taken up to
      */
-  #flush() {
+  #flush(limit) {
     if (this.#rows === 0) {
       this.#blankRuns = [];
       this.#overprinted = false;
       return;
     }
+
+    const upto = limit === Infinity ?
+      this.#rows :
+      Math.max(0, Math.min(this.#rows, limit - this.#origin));
 
     if (this.#overprinted) {
       this.#rescan();
@@ -722,23 +791,52 @@ class BitmapBackend {
 
     if (this.#commands.has('feed')) {
       for (const run of this.#blankRuns) {
-        if (run.end - run.start < this.#feedThreshold) {
+        if (run.start >= upto) {
+          break;
+        }
+
+        const end = Math.min(run.end, upto);
+
+        if (end - run.start < this.#feedThreshold) {
           continue;
         }
 
         this.#emit(emitted, run.start);
-        this.#items.push({type: 'feed', height: run.end - run.start});
+        this.#items.push({type: 'feed', height: end - run.start});
 
-        emitted = run.end;
+        emitted = end;
       }
     }
 
-    this.#emit(emitted, this.#rows);
+    this.#emit(emitted, upto);
 
-    this.#origin += this.#rows;
-    this.#rows = 0;
+    this.#keep(upto);
+  }
+
+  /**
+     * Drop the rows that were flushed and keep the ones behind them, which move
+     * to the top of the buffer: the paper that is still in the printer, between
+     * the cutter and the print head
+     *
+     * @param  {number}   flushed   Number of rows that left
+     */
+  #keep(flushed) {
+    const kept = this.#rows - flushed;
+
+    if (kept > 0) {
+      const rowBytes = Bitmap.rowBytes(this.#width);
+
+      this.#buffer.copyWithin(0, flushed * rowBytes, this.#rows * rowBytes);
+    }
+
+    this.#origin += flushed;
+    this.#rows = kept;
     this.#blankRuns = [];
     this.#overprinted = false;
+
+    if (kept > 0) {
+      this.#rescan();
+    }
   }
 }
 
@@ -746,6 +844,11 @@ class BitmapBackend {
  * Draw a display list and return the items a render of the same commands
  * returns. The entries are drawn in the order they stand in, which is the order
  * a printer prints them.
+ *
+ * The paper of a list is its height, and the rows of an entry that lie above
+ * row 0 or below the height are not on it and are not drawn: that is what a
+ * piece of `pieces()` with a cut through a line needs, where the entry stands
+ * on both pieces and each draws the rows it holds.
  *
  * @param  {Layout}             layout      The display list, as layout() returned it
  * @param  {RasterizeOptions}   [options]   How the output looks
@@ -768,6 +871,8 @@ function rasterize(layout, options) {
     maxHeight: settings.maxHeight,
     feedThreshold: settings.feedThreshold,
     font: settings.font,
+    height: typeof layout.height === 'number' ? layout.height : null,
+    cutterDistance: layout.cutterDistance,
   });
 
   for (const entry of layout.entries || []) {

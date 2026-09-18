@@ -26,10 +26,36 @@
     or two cuts at the same row, leave no paper between them and no piece: a
     piece is never empty, though it may be blank, a feed and nothing on it.
 
+    An entry the cut runs through, which a cutter distance can put there since
+    a cut then lands wherever the command stood, is on both pieces: the printer
+    cuts through the ink, so the rows above the cut are on the piece above and
+    the rows below it on the piece below. Such an entry is in both lists, at
+    its row relative to each, which is negative on the lower piece, and a
+    consumer draws the rows of it that are on the piece and no others:
+    `rasterize()` clips to the height of the list and the SVG writer clips the
+    body to the paper, so both do. A piece carries no cutter distance of its
+    own: it is paper that has left the printer, and nothing is held back on it.
+
     The list is not changed: every piece is a copy, with copies of its entries,
     and the operations and the areas, which are relative to their entry, are
     shared with the list, as the list itself shares them with nobody.
 */
+
+/**
+ * Whether any row of an entry is on a piece of paper: an entry that takes up
+ * rows is on every piece its rows reach, a command, which takes up none, on
+ * the piece the row it stands on belongs to
+ *
+ * @param  {LayoutEntry}   entry    The entry
+ * @param  {number}        top      First row of the piece
+ * @param  {number}        bottom   Row after the last one of the piece
+ * @return {boolean}                True when the entry is on the piece
+ */
+function covers(entry, top, bottom) {
+  const end = entry.y + (entry.height || 0);
+
+  return entry.y < bottom && Math.max(end, entry.y + 1) > top;
+}
 
 /**
  * The pieces of paper of a display list, one list per run between two cuts,
@@ -66,12 +92,20 @@ export function pieces(layout) {
       continue;
     }
 
-    result.push(Object.assign({}, layout, {
+    const piece = Object.assign({}, layout, {
       height: bottom - top,
       entries: entries
-          .filter((entry) => entry.type !== 'cut' && entry.y >= top && entry.y < bottom)
+          .filter((entry) => entry.type !== 'cut' && covers(entry, top, bottom))
           .map((entry) => Object.assign({}, entry, {y: entry.y - top})),
-    }));
+    });
+
+    /* A piece has left the printer, so there is no cutter below it holding
+       rows back: the distance belongs to the list of the job and not to the
+       paper it cut */
+
+    delete piece.cutterDistance;
+
+    result.push(piece);
   }
 
   return result;

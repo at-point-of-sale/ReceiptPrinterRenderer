@@ -17,7 +17,7 @@ const items = rasterize(layout, { commands: ['cut'] });   // the same dots rende
 
 `rasterize(layout, options)` draws a list again and returns the items of the output contract. It takes `commands`, `maxHeight`, `feedThreshold` and `font`, the options of a renderer that decide how the dots come out, and it is a named export as well as a static of `ReceiptPrinterRenderer`.
 
-`pieces(layout)` splits a list at its cuts into the pieces of paper that leave the printer, one list per piece in order, each with the height of the paper between two cuts and the entries that start on it moved up to row 0, and without the cuts, which are the boundaries. The paper is cut between row `y - 1` and row `y` of a cut, so row `y` is the first row of the next piece; a cut at the very top or bottom, or two on one row, leave no piece, and a piece with nothing on it, a feed and then a cut, is a blank one. The list is not changed. It is a named export as well as a static, and a piece is a list like any other: `rasterize(piece)` draws the same dots as the items of a render between the same two cuts, stitched, and `toSvg(piece)` writes a document of the piece.
+`pieces(layout)` splits a list at its cuts into the pieces of paper that leave the printer, one list per piece in order, each with the height of the paper between two cuts and the entries that stand on it moved up to row 0, and without the cuts, which are the boundaries. The paper is cut between row `y - 1` and row `y` of a cut, so row `y` is the first row of the next piece; a cut at the very top or bottom, or two on one row, leave no piece, and a piece with nothing on it, a feed and then a cut, is a blank one. An entry the cut runs through is on both pieces, see [The cutter's distance](#the-cutters-distance). The list is not changed. It is a named export as well as a static, and a piece is a list like any other: `rasterize(piece)` draws the same dots as the items of a render between the same two cuts, stitched, and `toSvg(piece)` writes a document of the piece.
 
 <br>
 
@@ -34,6 +34,8 @@ const items = rasterize(layout, { commands: ['cut'] });   // the same dots rende
 }
 ```
 
+A list of a renderer with a cutter distance carries it as well, `cutterDistance: 120`, the field that says which rows a command leaves in the printer; a list without one, which is every list of a driver, has no such field at all. See [The cutter's distance](#the-cutters-distance).
+
 Everything is in dots, as integers. The origin of the paper is its top left corner, `x` runs right and `y` runs down. `height` is the height the paper has when `stitch()` joins the items of a render with the feeds expanded; a reverse feed can leave the position above it, the height is the extent.
 
 <br>
@@ -46,7 +48,7 @@ The top level, in stream order, which is the order a printer prints them and the
 |---|---|---|
 | `line` | `y`, `height`, `rotation`, `operations` | A line box: a text line, or a block on a line of its own. It spans the width of the surface, and it is as tall as the tallest operation on it. `rotation` is 0 or 180, the upside down printing of `ESC {` at the moment the line was committed. |
 | `page` | `y`, `height`, `areas` | A page of page mode as it reaches the paper, one block of the paper width. |
-| `feed` | `y`, `height`, `source` | Rows the paper advanced without printing: an empty line, the feed of `ESC J` and `ESC d` beyond the height of the line, a Star raster move. |
+| `feed` | `y`, `height`, `source` | Rows the paper advanced without printing: an empty line, the feed of `ESC J` and `ESC d` beyond the height of the line, a Star raster move, and the blank paper of a cutter distance at the top of a job, whose `source` is `null` because it came from no bytes. |
 | `cut` | `y`, `value`, `source` | The paper is cut between row `y - 1` and row `y`. `full` or `partial`. |
 | `pulse` | `y`, `device`, `on`, `off`, `source` | The drawer opens when the paper is at row `y`. |
 | `unknown` | `y`, `data`, `source` | A command that was not understood, with a copy of its bytes. |
@@ -112,6 +114,26 @@ So the cells of a run of text each point at one byte and the boxes of a block al
 
 <br>
 
+## The cutter's distance
+
+The cutter of a printer sits above the print head, so the paper between the two is blank and already past the head when a job starts. The `cutterDistance` option of a renderer is that distance in dots; it is 0 by default and then nothing below happens, which is the paper as the commands describe it.
+
+With a distance the paper of a job is the distance of blank rows followed by the rows of the job, and every cut lands at the row its command was given at, counted in the rows of the job. In the list that is:
+
+- The list carries `cutterDistance`, and its first entry is a `feed` of that many rows at row 0, the blank paper that was already past the head. The `source` of that feed is `null`: it came from no bytes. A stream that leaves nothing in the list at all, no box and no command, has no paper and no such entry; a stream of nothing but a cut, a pulse or an unknown command has the blank paper and a `height` of the distance, since that paper is in the printer whatever the stream does with it.
+- Every entry that takes up paper, and every `pulse` and `unknown` marker, stands `cutterDistance` rows further down than it would without the option, and `height` is that much taller.
+- Every `cut` stands at the row it has without the option, which is `cutterDistance` above the row its command arrived at, and never above row 0. Cuts keep their order, and the entry stays where it is in the list, so a cut has a smaller `y` than the entries in front of it: the rows between the cut and the print head are the last ones printed, and they stay in the printer as the top of the next piece.
+
+The `source` of everything is what it was: the shift moves the paper, not the bytes.
+
+A cut can then fall inside a line or inside an image, where a printer cuts through the ink. `pieces()` puts such an entry on both pieces, at its row relative to each, which is negative on the lower one, and a consumer draws the rows of it that are on the piece and no others. The two consumers of this package do: `rasterize()` draws no row above row 0 or below the `height` of the list it is given, and the SVG writer clips the body of a document to the paper. The pieces of a cut, stacked, are the paper of the job again, row for row.
+
+A command the printer performs takes the paper in front of the cutter away, and not the paper in front of the print head: a reverse feed after a cut can move back over the rows between the two and print on them, which is the top of the next piece. That is the one thing a distance changes about where the paper leaves the printer.
+
+`render()` follows the same rule, without a display list: the bitmap back-end holds the rows that are still between the cutter and the print head back at every command it performs, so a `cut` item stands between the image of the paper that left and the image of the paper that stayed, and a `pulse` or an `unknown` item, which stands at the row of the print head, leaves those rows for the cut that comes after it. The item stream of a job with a distance is the paper in order with the commands where the stream has them, which makes it a preview and not a job to send: a driver renders with no distance and lets the printer's own cutter apply its own. `rasterize(layout(bytes))` is the item stream of `render(bytes)` with a cutter distance as it is without one, and the runs of that stream between its cuts are the pieces of `pieces()`, row for row.
+
+<br>
+
 ## Pages
 
 `areas` is a list of print areas in the order the stream composed them; an area the stream set twice is in the list twice, and an area that held nothing is not in it at all, though the page is still as tall as the areas it was given.
@@ -174,6 +196,6 @@ Both carry the same source, the seventeen bytes of the `GS k` that drew the barc
 
 `version` is 1. A field or a type that is added does not change it and a consumer ignores what it does not know; a change in the meaning of an existing field does. `rasterize()` and `toSvg()` accept version 1 and throw on any other.
 
-The `source` of an operation and of a `feed`, `cut`, `pulse` and `unknown` entry was added in 1.1.0, which is such an addition: the version of the format stayed 1 and a consumer written against 1.0.0 reads a list of 1.1.0 as it read the one before it.
+The `source` of an operation and of a `feed`, `cut`, `pulse` and `unknown` entry was added in 1.1.0, which is such an addition: the version of the format stayed 1 and a consumer written against 1.0.0 reads a list of 1.1.0 as it read the one before it. The `cutterDistance` of the list is another: it is there only when a renderer was given one, and a consumer that does not know it reads the paper as it stands.
 
 The golden lists next to the fixtures, `test/fixtures/esc-pos/receipt.layout.json` and four others, freeze the format the way the PBM files freeze the dots.

@@ -38,6 +38,7 @@ import {pdf417 as encodePdf417} from './symbologies/pdf417.js';
  * @property {Profile} profile        Printer family defaults
  * @property {number} [lineSpacing]   Default line spacing in dots, defaults to the profile
  * @property {string[]} [commands]    Command types the driver supports, which decide where the paper leaves
+ * @property {number} [cutterDistance]   Distance between the cutter and the print head in dots, 0 by default
  */
 
 /**
@@ -292,6 +293,13 @@ function hriBox(x, y, size) {
  * are the same number until a reverse feed moves the position back over rows
  * that are already on the paper, which the lines behind it are then drawn over.
  *
+ * The paper of a job begins at the cutter's distance, the blank rows that
+ * stand between the cut edge and the print head when the job starts: the
+ * position starts there, every entry is that far down, and a cut is emitted
+ * that far above the row its command arrived at, since the cutter is that far
+ * above the head. Without the option the distance is zero and none of it
+ * happens, which is the paper as the commands describe it.
+ *
  * In page mode it composes a page instead of the paper: the lines and the
  * blocks go into a print area of a page held in memory, in the coordinate
  * system of the print direction, and the page reaches the paper as one entry
@@ -330,6 +338,9 @@ class LayoutEngine {
   #extent;
   #floor;
 
+  #cutterDistance;
+  #opened;
+
   /**
      * Create a layout engine
      *
@@ -356,6 +367,17 @@ class LayoutEngine {
 
     if (!Number.isInteger(this.#defaultLineSpacing) || this.#defaultLineSpacing < 1) {
       throw new Error('Line spacing must be a positive integer');
+    }
+
+    /* The cutter sits above the print head: the paper between the two is blank
+       and already past the head when a job starts, so the job prints that far
+       below the cut edge and its cuts land that far above the print head, see
+       #open() and #marker() */
+
+    this.#cutterDistance = typeof settings.cutterDistance === 'undefined' ? 0 : settings.cutterDistance;
+
+    if (!Number.isInteger(this.#cutterDistance) || this.#cutterDistance < 0) {
+      throw new Error('Cutter distance must be a whole number of dots');
     }
 
     this.#cells = {
@@ -1552,6 +1574,7 @@ class LayoutEngine {
 
     this.#leave(carried);
 
+    this.#open();
     this.#sink.command(this.#marker(carried));
   }
 
@@ -1598,12 +1621,37 @@ class LayoutEngine {
      * Drop the position and the page, which is what a new stream starts with
      */
   #clear() {
-    this.#position = 0;
-    this.#extent = 0;
-    this.#floor = 0;
+    /* The paper of a job starts below the blank rows that stand between the
+       cut edge and the print head, so the head of a job is at the cutter's
+       distance and nothing can be printed or fed back above it */
+
+    this.#position = this.#cutterDistance;
+    this.#extent = this.#cutterDistance;
+    this.#floor = this.#cutterDistance;
+    this.#opened = false;
     this.#page = null;
     this.#held = [];
     this.#source = null;
+  }
+
+  /**
+     * Put the blank paper of the cutter's distance at the top of the stream,
+     * the rows that were already past the print head when the job started.
+     *
+     * It is emitted at the first entry of the stream and not when the stream
+     * begins, because the sink of a stream is attached after the engine was
+     * cleared, and a stream that prints nothing leaves no paper at all.
+     */
+  #open() {
+    if (this.#opened) {
+      return;
+    }
+
+    this.#opened = true;
+
+    if (this.#cutterDistance > 0) {
+      this.#sink.feed({type: 'feed', y: 0, height: this.#cutterDistance, source: null});
+    }
   }
 
   /**
@@ -2082,6 +2130,7 @@ class LayoutEngine {
     for (const item of held) {
       this.#leave(item);
 
+      this.#open();
       this.#sink.command(this.#marker(item));
     }
   }
@@ -2098,6 +2147,12 @@ class LayoutEngine {
      * move above it any more. A command the driver does not support changes
      * nothing at all, the way it changes nothing in the output.
      *
+     * With a cutter distance only the paper above the cutter has left: the rows
+     * between the cutter and the print head are still in the printer, and a
+     * reverse feed may go back over them and print there, which is the top of
+     * the next piece. So the floor is the cutter and not the head, and it never
+     * moves back up, since the paper of an earlier command is gone for good.
+     *
      * @param  {object}   item   The item, cut, pulse or unknown
      */
   #leave(item) {
@@ -2106,7 +2161,7 @@ class LayoutEngine {
     }
 
     this.#position = this.#extent;
-    this.#floor = this.#extent;
+    this.#floor = Math.max(this.#floor, this.#extent - this.#cutterDistance);
   }
 
   /**
@@ -2116,7 +2171,16 @@ class LayoutEngine {
      * @return {object}          The entry
      */
   #marker(item) {
-    const entry = {type: item.type, y: this.#position};
+    /* The cutter stands the cutter's distance above the print head, so the
+       paper is cut that far above the row the command arrived at: the rows
+       between the two are the last ones printed, which stay in the printer and
+       become the top of the next receipt */
+
+    const y = item.type === 'cut' ?
+      Math.max(0, this.#position - this.#cutterDistance) :
+      this.#position;
+
+    const entry = {type: item.type, y};
 
     for (const key of Object.keys(item)) {
       if (key !== 'type') {
@@ -2347,6 +2411,8 @@ class LayoutEngine {
       return;
     }
 
+    this.#open();
+
     entry.y = this.#position;
 
     if (entry.type === 'page') {
@@ -2379,6 +2445,7 @@ class LayoutEngine {
       return;
     }
 
+    this.#open();
     this.#sink.feed({type: 'feed', y: this.#position, height: count, source: this.#source});
 
     this.#advance(count);

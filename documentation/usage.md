@@ -14,6 +14,7 @@ Render images based on raw ESC/POS, StarPRNT, Star Line or Star Graphics printer
   - [Feed items and maximum height](#feed-items-and-maximum-height)
   - [Image format helpers](#image-format-helpers)
   - [Previewing a receipt](#previewing-a-receipt)
+  - [The cutter's distance](#the-cutters-distance)
   - [The display list](#the-display-list)
   - [SVG output](#svg-output)
   - [Drivers and applications](#drivers-and-applications)
@@ -106,6 +107,7 @@ These are the options:
 | `commands` | `[]` | Command types that may appear in the output: `cut`, `pulse`, `feed` and `unknown`. Everything else falls back, see [Commands the printer supports](#commands-the-printer-supports). |
 | `maxHeight` | none | Maximum height of an image item in dots. Taller segments are split. |
 | `lineSpacing` | from the profile | Default line spacing in dots, 30 for the Epson profile and 32 for the Star profile. |
+| `cutterDistance` | `0` | Distance between the cutter and the print head in dots, see [The cutter's distance](#the-cutters-distance). |
 | `profile` | `epson` for ESC/POS, `star` for StarPRNT | Printer family defaults: line spacing, font B cell size, vertical motion unit and resolution. A name, or a profile of your own. |
 | `feedThreshold` | `24` | Minimum run of blank dot rows that becomes a feed item. |
 | `font` | built in | Font data, for applications that want a different look. The same packed format as the generated font. |
@@ -330,6 +332,24 @@ canvas.getContext('2d').putImageData(image, 0, 0);
 ```
 
 To preview the same receipt for a Star printer, encode it with `language: 'star-prnt'` and render it with the same language and `codepageMapping: 'star'`. Nothing else changes.
+
+<br>
+
+### The cutter's distance
+
+The cutter of a receipt printer sits above the print head. The paper between the two is blank and already past the head when a job starts, so the first line of a job prints that far below the cut edge, and the paper is cut that far above the row the cut command was given at: the blank lines an encoder feeds in front of its cut are still in the printer when the paper is cut, and they are the top of the next receipt, which is the blank margin a real receipt has.
+
+`cutterDistance` is that distance in dots, and it is 0 by default, which is the paper as the commands describe it and what a driver that sends the items to a printer wants: the printer's own cutter applies its own distance. With a distance the paper of a job is the distance of blank rows followed by the rows of the job, and every cut lands at the row its command was given at, counted in the rows of the job.
+
+```js
+let renderer = new ReceiptPrinterRenderer({ language: 'esc-pos', width: 576, commands: [ 'cut' ], cutterDistance: 120 });
+
+let documents = pieces(renderer.layout(bytes)).map((piece) => toSvg(piece));
+```
+
+So a receipt that prints its text, feeds four lines and cuts comes out as a piece with the blank margin at the top and the text below it, and the four blank lines at the top of the piece behind it, the way it comes out of the printer. The distance a printer has is a property of its mechanism, in lines of the standard line spacing on most data sheets: four lines of 30 dots is 120.
+
+Everything follows the shift: `layout()` puts the blank paper at the top as a `feed` entry and the distance in the list, `render()` holds the rows that stay in the printer back at every command it performs, so that the cut item stands between the right images, and `pieces()`, `rasterize()` and `toSvg()` split the paper where the cut falls. The runs of the item stream between its cuts are the pieces `pieces()` gives, row for row, whatever the printer performs. A cut can now fall inside a line or inside an image, which is what a printer does when it cuts through the ink: the entry is on both pieces, the rows above the cut on the one above and the rows below it on the one below, see [The display list](display-list.md#the-cutters-distance).
 
 <br>
 

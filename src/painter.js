@@ -31,6 +31,7 @@ import Collector from './backends/collector.js';
  * @property {number} [maxHeight]             Maximum height of an image item, taller segments are split
  * @property {number} [lineSpacing]           Default line spacing in dots, defaults to the profile
  * @property {number} [feedThreshold]         Runs of blank rows at least this tall become feed items
+ * @property {number} [cutterDistance]        Distance between the cutter and the print head in dots, 0 by default
  * @property {Object<string, PackedFont>} [font]   Font data, instead of the built in fonts
  * @property {RenderLanguage} [language]      Language of the commands, which the display list reports
  */
@@ -59,6 +60,7 @@ class Painter {
   #backend;
   #collecting;
   #language;
+  #cutterDistance;
 
   /**
      * Create a painter
@@ -78,6 +80,7 @@ class Painter {
       profile: settings.profile,
       lineSpacing: settings.lineSpacing,
       commands: settings.commands,
+      cutterDistance: settings.cutterDistance,
     });
 
     this.#backend = new BitmapBackend({
@@ -86,9 +89,11 @@ class Painter {
       maxHeight: settings.maxHeight,
       feedThreshold: settings.feedThreshold,
       font: settings.font,
+      cutterDistance: settings.cutterDistance,
     });
 
     this.#language = settings.language;
+    this.#cutterDistance = settings.cutterDistance || 0;
     this.#collecting = false;
 
     this.#engine.attach(this.#backend);
@@ -162,6 +167,7 @@ class Painter {
       language: this.#language,
       width: this.#engine.width,
       dpi: this.#engine.dpi,
+      cutterDistance: this.#cutterDistance,
     }));
   }
 

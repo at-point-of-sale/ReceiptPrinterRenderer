@@ -695,6 +695,55 @@ describe('cli', function() {
       );
     });
 
+    it('should pass --cutter-distance on, which moves the cuts and the pieces of paper', async function() {
+      /* The cutter sits above the print head, so the blank lines the receipt
+         fixture feeds in front of its cut stay in the printer and become the
+         top of the next piece, and the job starts on the blank paper that was
+         left there before it: the first piece keeps its rows and the second
+         one grows by the distance */
+
+      await cli([file('esc-pos', 'receipt'), '--cutter-distance', '120', '--pieces', '-o', output('shifted.png')]);
+
+      assert.deepEqual(fs.readdirSync(target).sort(), ['shifted.2.png', 'shifted.png']);
+
+      const options = {commands: ['cut'], cutterDistance: 120};
+      const items = new ReceiptPrinterRenderer(Object.assign({width: WIDTH}, options)).render(
+          bytes('esc-pos', 'receipt'),
+      );
+
+      const papers = runs(items).map((run) => stitch(run, {width: WIDTH})).filter((paper) => paper.height > 0);
+
+      assert.deepEqual(papers.map((paper) => paper.height), [683, 150]);
+
+      for (const [index, paper] of papers.entries()) {
+        assert.deepEqual(
+            Array.from(written(index ? `shifted.${index + 1}.png` : 'shifted.png')),
+            Array.from(await toPng(paper)),
+            `piece ${index + 1}`,
+        );
+      }
+
+      /* And without the option the same stream leaves the last piece thirty
+         rows tall, the feed of one line that stands behind its cut */
+
+      await cli([file('esc-pos', 'receipt'), '--pieces', '-o', output('plain.png')]);
+
+      const plain = new ReceiptPrinterRenderer({width: WIDTH, commands: ['cut']}).render(bytes('esc-pos', 'receipt'));
+
+      assert.deepEqual(
+          runs(plain).map((run) => stitch(run, {width: WIDTH})).filter((paper) => paper.height > 0)
+              .map((paper) => paper.height),
+          [683, 30],
+      );
+    });
+
+    it('should refuse a --cutter-distance that is not a whole number', async function() {
+      const {code, stderr} = await cli([file('esc-pos', 'cut'), '--cutter-distance', 'far', '-o', output('x.png')]);
+
+      assert.equal(code, 1);
+      assert.match(stderr.text(), /--cutter-distance takes a whole number, not far/);
+    });
+
     it('should pass --line-spacing on', async function() {
       await cli([file('esc-pos', 'receipt'), '--line-spacing', '40', '-o', output('spaced.png')]);
       await cli([file('esc-pos', 'receipt'), '-o', output('plain.png')]);

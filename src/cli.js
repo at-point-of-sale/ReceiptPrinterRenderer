@@ -106,6 +106,7 @@ const OPTIONS = {
   'format': {type: 'string', short: 'f'},
   'pieces': {type: 'boolean'},
   'cut-marker': {type: 'boolean'},
+  'cutter-distance': {type: 'string'},
   'commands': {type: 'string'},
   'line-spacing': {type: 'string'},
   'units': {type: 'string'},
@@ -150,6 +151,10 @@ Options:
       --cut-marker               A dashed line where the paper is cut, in one
                                  image of the whole roll. Nothing with
                                  --pieces, which has no cut inside a piece
+      --cutter-distance <dots>   Distance between the cutter and the print
+                                 head: the blank paper a job starts with, and
+                                 the rows a cut leaves for the next piece
+                                 (default: 0)
       --commands <list>          Comma separated cut, pulse, feed and unknown,
                                  the commands the printer performs. A cut is
                                  added when --pieces or --cut-marker needs
@@ -330,6 +335,10 @@ function rendererOptions(values, width) {
 
   if (typeof values['line-spacing'] !== 'undefined') {
     options.lineSpacing = integer(values['line-spacing'], '--line-spacing');
+  }
+
+  if (typeof values['cutter-distance'] !== 'undefined') {
+    options.cutterDistance = integer(values['cutter-distance'], '--cutter-distance');
   }
 
   return options;
