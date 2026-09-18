@@ -2,6 +2,7 @@ import CodepageEncoder from '@point-of-sale/codepage-encoder';
 import {tokenize} from '@point-of-sale/receipt-printer-decoder/tokenizer';
 import Bitmap from '../bitmap.js';
 import Painter from '../painter.js';
+import Capabilities from '../capabilities.js';
 import {internationalCharacterSet, noCharacterSet} from '../charsets.js';
 import codepageMappings from '../../generated/mapping.js';
 import printerProfiles from '../../generated/profiles.js';
@@ -11,6 +12,7 @@ import printerProfiles from '../../generated/profiles.js';
  * @typedef {import('../painter.js').PainterOptions} PainterOptions
  * @typedef {import('../types.js').Layout} Layout
  * @typedef {import('../types.js').RendererOptions} RendererOptions
+ * @typedef {import('../capabilities.js').PrinterCapabilities} PrinterCapabilities
  * @typedef {import('../types.js').RenderItem} RenderItem
  * @typedef {import('../types.js').Source} Source
  * @typedef {import('@point-of-sale/receipt-printer-decoder/tokenizer').Token} Token
@@ -255,6 +257,7 @@ class EscPosRenderer {
   static language = 'esc-pos';
 
   #painter;
+  #capabilities;
   #mapping;
   #commands;
 
@@ -321,10 +324,17 @@ class EscPosRenderer {
       resolved = printerProfiles[profile];
     }
 
+    /* What the printer prints: a command for something it does not have draws
+       nothing and is reported as an unsupported entry of the display list, and
+       font B takes the cell of the profile. Without the option nothing is
+       refused and font B keeps the cell of the printer family */
+
+    this.#capabilities = new Capabilities(settings.capabilities);
+
     this.#painter = new Painter({
       language: EscPosRenderer.language,
       width: settings.width,
-      profile: resolved,
+      profile: this.#capabilities.profile(resolved),
       commands: settings.commands || [],
       maxHeight: settings.maxHeight,
       lineSpacing: settings.lineSpacing,
@@ -989,6 +999,14 @@ class EscPosRenderer {
       return;
     }
 
+    /* Function 112 carries the dots in raster format and function 113 in
+       column format: a printer that does not take that format stores nothing,
+       and the print function behind it prints an empty buffer */
+
+    if (!this.#carries(column ? 'column' : 'raster')) {
+      return;
+    }
+
     const width = parameters[4] + parameters[5] * 256;
     const height = parameters[6] + parameters[7] * 256;
 
@@ -1066,6 +1084,16 @@ class EscPosRenderer {
   #defineGraphics(parameters, prefix, column, consumed) {
     if (parameters.length < 8 || (parameters[0] !== MONOCHROME && parameters[0] !== MULTI_TONE)) {
       this.#unknown(consumed);
+      return;
+    }
+
+    /* The definitions carry their dots in a format as well, 67 and 83 in
+       raster format and 68 and 84 in column format: a definition the printer
+       does not take is not in its memory, so the function that prints that key
+       code finds nothing there and reports it the way it reports any key code
+       the printer was never given */
+
+    if (!this.#carries(column ? 'column' : 'raster')) {
       return;
     }
 
@@ -1267,6 +1295,10 @@ class EscPosRenderer {
      * @param  {Uint8Array}   args   The arguments of the command
      */
   #defineBitImage(args) {
+    if (!this.#carries('column')) {
+      return;
+    }
+
     const width = args[0];
     const height = args[1];
 
@@ -1320,6 +1352,10 @@ class EscPosRenderer {
        an FS q 0 deletes nothing */
 
     if (args[0] < 1) {
+      return;
+    }
+
+    if (!this.#carries('column')) {
       return;
     }
 
@@ -1417,6 +1453,14 @@ class EscPosRenderer {
     }
 
     if (command === 0x51) {
+      /* The data is stored whatever the printer can do, and only the function
+         that prints the symbol is refused */
+
+      if (!this.#capabilities.qrcode()) {
+        this.#unsupported('qrcode');
+        return;
+      }
+
       this.#painter.qrcode({
         data: this.#qrcode.data,
         moduleSize: this.#qrcode.moduleSize,
@@ -1490,6 +1534,14 @@ class EscPosRenderer {
     }
 
     if (command === 0x51) {
+      /* As with the QR code, the store functions are performed and the print
+         function is the one that is refused */
+
+      if (!this.#capabilities.pdf417()) {
+        this.#unsupported('pdf417');
+        return;
+      }
+
       this.#painter.pdf417({
         data: this.#pdf417.data,
         columns: this.#pdf417.columns,
@@ -1590,6 +1642,15 @@ class EscPosRenderer {
       return;
     }
 
+    /* A symbology the printer does not have draws nothing and its data is not
+       printed as text either: the arguments are consumed the way they are
+       here, so the stream stays in sync, and the command is reported */
+
+    if (!this.#capabilities.barcode(symbology)) {
+      this.#unsupported(symbology);
+      return;
+    }
+
     const data = args[0] >= 65 ? args.subarray(2, 2 + args[1]) : args.subarray(1, args.length - 1);
 
     /* Where the data of the command starts in the stream: the arguments are
@@ -1649,6 +1710,10 @@ class EscPosRenderer {
      * @param  {Uint8Array}   args   The arguments of the command
      */
   #columnImage(args) {
+    if (!this.#carries('column')) {
+      return;
+    }
+
     const mode = args[0];
     const columns = args[1] + args[2] * 256;
     const bytes = mode === 32 || mode === 33 ? 3 : 1;
@@ -1675,6 +1740,10 @@ class EscPosRenderer {
   #rasterImage(args, consumed) {
     if (args[0] !== 0x30) {
       this.#unknown(consumed);
+      return;
+    }
+
+    if (!this.#carries('raster')) {
       return;
     }
 
@@ -1713,6 +1782,44 @@ class EscPosRenderer {
      */
   #unknown(consumed) {
     this.#painter.command({type: 'unknown', data: consumed.slice()});
+  }
+
+  /**
+     * Report a command the printer of the capabilities does not perform. It
+     * draws nothing and it advances no paper, the way a printer skips a command
+     * it does not know, and the arguments of the command are consumed as they
+     * are without them, so the stream stays in sync.
+     *
+     * @param  {string}   what   A word for what was refused: the name of a
+     *                           symbology, `qrcode`, `pdf417`, `column image`
+     *                           or `raster image`
+     */
+  #unsupported(what) {
+    this.#painter.command({type: 'unsupported', what});
+  }
+
+  /**
+     * Whether the printer takes the dots of a command that carries them in a
+     * mode, raster or column. A printer that does not is given the dots and
+     * does nothing with them: the command is reported and the data is consumed
+     * as it is without the option, so the stream stays in sync.
+     *
+     * Only the commands that carry dots ask this. The commands that print what
+     * the printer already holds, the graphics print buffer, the NV and the
+     * download memory, print whatever is in there, which is nothing when the
+     * command that filled it was refused.
+     *
+     * @param  {string}    mode   'raster' or 'column', the format of the data
+     * @return {boolean}          True when the dots are taken
+     */
+  #carries(mode) {
+    if (this.#capabilities.image(mode)) {
+      return true;
+    }
+
+    this.#unsupported(`${mode} image`);
+
+    return false;
   }
 
   /**

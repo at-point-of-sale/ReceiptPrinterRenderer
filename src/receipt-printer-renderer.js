@@ -46,6 +46,8 @@ import StarPrntRenderer from './renderers/star-prnt.js';
  * @typedef {import('./types.js').CutEntry} CutEntry
  * @typedef {import('./types.js').PulseEntry} PulseEntry
  * @typedef {import('./types.js').UnknownEntry} UnknownEntry
+ * @typedef {import('./types.js').UnsupportedEntry} UnsupportedEntry
+ * @typedef {import('./capabilities.js').PrinterCapabilities} PrinterCapabilities
  * @typedef {import('./types.js').LineOperation} LineOperation
  * @typedef {import('./types.js').TextOperation} TextOperation
  * @typedef {import('./types.js').RectOperation} RectOperation

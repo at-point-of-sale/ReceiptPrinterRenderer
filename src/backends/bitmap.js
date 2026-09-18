@@ -245,7 +245,11 @@ class BitmapBackend {
      * A command the driver does not support is dropped and changes nothing, per
      * the fallback table in the design: the blank lines the encoder fed before
      * a cut are already in the image and stay in the image it belongs to, and a
-     * pulse or an unknown command leaves nothing behind at all.
+     * pulse or an unknown command leaves nothing behind at all. An
+     * `unsupported` command, which the printer of the `capabilities` option
+     * does not perform, is never in the list of a driver and is dropped here
+     * the way an unknown one is: it is an entry of the display list and no item
+     * of a stream to send.
      *
      * @param  {object}   entry   The command and the row the paper is on
      */

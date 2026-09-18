@@ -173,7 +173,7 @@ class Collector {
 
   /**
      * Keep a command. The list is never filtered by the `commands` option of a
-     * renderer: every cut, pulse and unknown command is in it.
+     * renderer: every cut, pulse, unknown and unsupported command is in it.
      *
      * @param  {object}   entry   The command and the row the paper is on
      */

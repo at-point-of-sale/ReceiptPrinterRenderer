@@ -161,7 +161,7 @@ import {pdf417 as encodePdf417} from './symbologies/pdf417.js';
  * @property {function(LineEntry): void} line         A committed line box with its operations
  * @property {function(PageEntry): void} page         A printed page with its areas
  * @property {function(FeedEntry): void} feed         Rows the paper advanced without printing
- * @property {function(object): void} command         A cut, a pulse or an unknown command, with its y
+ * @property {function(object): void} command         A cut, a pulse, an unknown or an unsupported command, with its y
  * @property {function(): any} end                    The result of the sink
  * @property {function(): void} discard                Throw away what the sink holds
  */
@@ -1553,7 +1553,12 @@ class LayoutEngine {
      * the driver supports. A command the driver does support takes the paper in
      * front of it away, which the engine does record: see #leave().
      *
-     * @param  {object}   item   The item to emit, cut, pulse or unknown
+     * A command the printer of the `capabilities` option does not perform is
+     * one of these as well, an `unsupported` item the parser reports where the
+     * command stood: it draws nothing, it advances no paper, and it is a
+     * diagnostic the way an unknown command is.
+     *
+     * @param  {object}   item   The item to emit, cut, pulse, unknown or unsupported
      */
   command(item) {
     /* The bytes of the command travel with the item, because an item that
@@ -2153,7 +2158,7 @@ class LayoutEngine {
      * the next piece. So the floor is the cutter and not the head, and it never
      * moves back up, since the paper of an earlier command is gone for good.
      *
-     * @param  {object}   item   The item, cut, pulse or unknown
+     * @param  {object}   item   The item, cut, pulse, unknown or unsupported
      */
   #leave(item) {
     if (!this.#commands.has(item.type)) {
@@ -2167,7 +2172,7 @@ class LayoutEngine {
   /**
      * A command entry: the item and the row the paper is on when it arrives
      *
-     * @param  {object}   item   The item, cut, pulse or unknown
+     * @param  {object}   item   The item, cut, pulse, unknown or unsupported
      * @return {object}          The entry
      */
   #marker(item) {

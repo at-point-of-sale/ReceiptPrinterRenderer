@@ -52,14 +52,17 @@ The top level, in stream order, which is the order a printer prints them and the
 | `cut` | `y`, `value`, `source` | The paper is cut between row `y - 1` and row `y`. `full` or `partial`. |
 | `pulse` | `y`, `device`, `on`, `off`, `source` | The drawer opens when the paper is at row `y`. |
 | `unknown` | `y`, `data`, `source` | A command that was not understood, with a copy of its bytes. |
+| `unsupported` | `y`, `what`, `source` | A command the printer of the `capabilities` option does not perform, with a word for what was refused. |
 
 The `y` of a line or a page is the position of the paper when it was committed. After a reverse feed a later entry has a smaller `y` than an earlier one, and its dots are added to the rows that are already there: a consumer that paints in order paints black over black and is right. A marker stands at the position the paper has when its command arrives, so a cut after the last line stands at the bottom of that line. A cut or a pulse that arrived while a page was being composed stands behind the page, at its bottom, which is where the items of the item stream put it. The gap the line spacing leaves below the cells of a line is part of the line, not a feed.
 
 A command the printer performs takes the paper in front of it away: after a cut or a pulse the driver supports, the print head stands at the bottom of the paper that left, whatever a reverse feed did to the position before it, and no entry behind it has a smaller `y` than that marker. A reverse feed cannot move above the last such marker, the way a printer cannot pull back paper it has cut off.
 
-`source` is the bytes of the stream the entry came from, see [The source](#the-source): the command that cut the paper, opened the drawer or was not understood, the command that fed the paper, or the line feed of an empty line. A `line` and a `page` carry none, the operations on them do: a line is a run of bytes and the boxes inside it say which.
+An `unsupported` entry stands where a printer that cannot do something skipped the command: a barcode of a symbology the printer does not have, a QR code or a PDF417 on a printer without one, an image in the mode it does not take. It draws nothing and it advances no paper, so it takes up no rows, and `what` says what was refused in one word, the name of the symbology as the encoder spells it, `qrcode`, `pdf417`, `column image` or `raster image`. It is there only for a renderer that was given the `capabilities` option, see [Commands the printer supports](usage.md#commands-the-printer-supports); without the option everything is drawn and no such entry is made.
 
-The list is not filtered by the `commands` option: every cut, pulse, feed and unknown command is in it. What `commands` does decide is which of them the printer performs, and therefore where the paper leaves it: a list of a stream that moves the paper back over a cut the driver performs is not the list of the same stream for a driver that ignores it, and neither is the paper.
+`source` is the bytes of the stream the entry came from, see [The source](#the-source): the command that cut the paper, opened the drawer, was not understood or was refused, the command that fed the paper, or the line feed of an empty line. A `line` and a `page` carry none, the operations on them do: a line is a run of bytes and the boxes inside it say which.
+
+The list is not filtered by the `commands` option: every cut, pulse, feed, unknown and unsupported command is in it. What `commands` does decide is which of them the printer performs, and therefore where the paper leaves it: a list of a stream that moves the paper back over a cut the driver performs is not the list of the same stream for a driver that ignores it, and neither is the paper.
 
 <br>
 
@@ -80,7 +83,7 @@ Inside a line. `x` is from the left edge of the surface, `y` from the top of the
 | `codepoint` | The Unicode code point the renderer decoded, U+FFFD for a byte the codepage does not map and for the placeholder cells of multibyte text. |
 | `bitmap` | Stands in the place of `codepoint` for a glyph the stream downloaded, the dots as `ESC &` or `FS 2` defined them, a `{width, height, data}` bitmap placed at the top left of an unscaled cell of the size of `cell` and clipped by it. |
 | `font` | `A` or `B`. |
-| `cell` | The unscaled cell of this operation, `{width: 12, height: 24}` for font A, `{width: 9, height: 17}` or `{width: 9, height: 24}` for font B, and twice as wide for a downloaded multibyte glyph. |
+| `cell` | The unscaled cell of this operation, `{width: 12, height: 24}` for font A, `{width: 9, height: 17}` or `{width: 9, height: 24}` for font B, `{width: 10, height: 24}` for the font B of a printer whose capabilities say so, and twice as wide for a downloaded multibyte glyph. |
 | `glyph` | The unscaled glyph box of the font, `{width: 12, height: 24}` or `{width: 8, height: 16}`, which sits in the cell at `floor((cell.width - glyph.width) / 2)` horizontally and on the baseline vertically. A downloaded glyph has the cell as its box, because its dots sit in the corner of the cell. |
 | `baseline` | The row of the cell the glyph stands on, unscaled: three quarters of the height of the cell, 18 for a 24 row cell and 12 for a 17 or 16 row one. The ascent of the cell on the line is `baseline * scale.y`. |
 | `scale` | `{x, y}`, 1 to 8. |
@@ -120,7 +123,7 @@ The cutter of a printer sits above the print head, so the paper between the two 
 
 With a distance the paper of a job is the distance of blank rows followed by the rows of the job, and every cut lands at the row its command was given at, counted in the rows of the job. In the list that is:
 
-- The list carries `cutterDistance`, and its first entry is a `feed` of that many rows at row 0, the blank paper that was already past the head. The `source` of that feed is `null`: it came from no bytes. A stream that leaves nothing in the list at all, no box and no command, has no paper and no such entry; a stream of nothing but a cut, a pulse or an unknown command has the blank paper and a `height` of the distance, since that paper is in the printer whatever the stream does with it.
+- The list carries `cutterDistance`, and its first entry is a `feed` of that many rows at row 0, the blank paper that was already past the head. The `source` of that feed is `null`: it came from no bytes. A stream that leaves nothing in the list at all, no box and no command, has no paper and no such entry; a stream of nothing but a cut, a pulse, an unknown or an unsupported command has the blank paper and a `height` of the distance, since that paper is in the printer whatever the stream does with it.
 - Every entry that takes up paper, and every `pulse` and `unknown` marker, stands `cutterDistance` rows further down than it would without the option, and `height` is that much taller.
 - Every `cut` stands at the row it has without the option, which is `cutterDistance` above the row its command arrived at, and never above row 0. Cuts keep their order, and the entry stays where it is in the list, so a cut has a smaller `y` than the entries in front of it: the rows between the cut and the print head are the last ones printed, and they stay in the printer as the top of the next piece.
 
@@ -196,6 +199,6 @@ Both carry the same source, the seventeen bytes of the `GS k` that drew the barc
 
 `version` is 1. A field or a type that is added does not change it and a consumer ignores what it does not know; a change in the meaning of an existing field does. `rasterize()` and `toSvg()` accept version 1 and throw on any other.
 
-The `source` of an operation and of a `feed`, `cut`, `pulse` and `unknown` entry was added in 1.1.0, which is such an addition: the version of the format stayed 1 and a consumer written against 1.0.0 reads a list of 1.1.0 as it read the one before it. The `cutterDistance` of the list is another: it is there only when a renderer was given one, and a consumer that does not know it reads the paper as it stands.
+The `source` of an operation and of a `feed`, `cut`, `pulse` and `unknown` entry was added in 1.1.0, which is such an addition: the version of the format stayed 1 and a consumer written against 1.0.0 reads a list of 1.1.0 as it read the one before it. The `cutterDistance` of the list is another: it is there only when a renderer was given one, and a consumer that does not know it reads the paper as it stands. The `unsupported` entry is a third: it is there only when a renderer was given the capabilities of a printer, it takes up no rows, and a consumer that does not know the type skips it the way it skips an `unknown` one.
 
 The golden lists next to the fixtures, `test/fixtures/esc-pos/receipt.layout.json` and four others, freeze the format the way the PBM files freeze the dots.

@@ -15,6 +15,7 @@ Render images based on raw ESC/POS, StarPRNT, Star Line or Star Graphics printer
   - [Image format helpers](#image-format-helpers)
   - [Previewing a receipt](#previewing-a-receipt)
   - [The cutter's distance](#the-cutters-distance)
+  - [What the printer can do](#what-the-printer-can-do)
   - [The display list](#the-display-list)
   - [SVG output](#svg-output)
   - [Drivers and applications](#drivers-and-applications)
@@ -108,6 +109,7 @@ These are the options:
 | `maxHeight` | none | Maximum height of an image item in dots. Taller segments are split. |
 | `lineSpacing` | from the profile | Default line spacing in dots, 30 for the Epson profile and 32 for the Star profile. |
 | `cutterDistance` | `0` | Distance between the cutter and the print head in dots, see [The cutter's distance](#the-cutters-distance). |
+| `capabilities` | none | What the printer prints: the `printerCapabilities` object of ReceiptPrinterEncoder, as it is. Without it everything is drawn, see [What the printer can do](#what-the-printer-can-do). |
 | `profile` | `epson` for ESC/POS, `star` for StarPRNT | Printer family defaults: line spacing, font B cell size, vertical motion unit and resolution. A name, or a profile of your own. |
 | `feedThreshold` | `24` | Minimum run of blank dot rows that becomes a feed item. |
 | `font` | built in | Font data, for applications that want a different look. The same packed format as the generated font. |
@@ -353,6 +355,53 @@ Everything follows the shift: `layout()` puts the blank paper at the top as a `f
 
 <br>
 
+### What the printer can do
+
+Not every printer prints everything a stream can ask for: one has no QR code, another has eight symbologies and not the ninth, a third takes its images in raster format and ignores a column mode image. A printer that is given a command it does not have skips it, which Star, Epson and Bixolon printers were all seen to do: the arguments are read and thrown away, and nothing of the command reaches the paper, not even its data as text.
+
+`capabilities` is the `printerCapabilities` object of ReceiptPrinterEncoder, the capabilities of the model the receipt is going to, passed to the renderer as it is. Without the option nothing is refused and every command is drawn, which is the best case of a generic profile and what every version before this one did.
+
+```js
+import ReceiptPrinterEncoder from '@point-of-sale/receipt-printer-encoder';
+
+let encoder = new ReceiptPrinterEncoder({ printerModel: 'bixolon-srp350' });
+
+let renderer = new ReceiptPrinterRenderer({
+    language: encoder.language,
+    width: encoder.printableWidth,
+    capabilities: encoder.printerCapabilities,
+});
+```
+
+With it the preview is what that model prints:
+
+- **A barcode of a symbology the printer does not have draws nothing.** The names are the encoder's, `upca`, `ean13`, `code93`, `gs1-128`, `gs1-databar-omni` and the rest, and the selector of `GS k` and of `ESC b` names one of them. `barcodes.supported` of `false` refuses every symbology. The Code 128 of the Star languages is the one name that is translated: StarPRNT has no way to select a code set, so the renderer draws the automatic variant of the symbology while a Star profile calls that barcode `code128`, which is the name that is asked for.
+- **A QR code draws nothing when `qrcode.supported` is `false`, and a PDF417 when `pdf417.supported` is `false`.** The `models` of the QR code are not enforced: a printer that has QR codes prints the symbol of model 2 whatever the command asked for. The `fallback` a profile without a PDF417 carries is the encoder's business, not the renderer's.
+- **An image draws nothing when it arrives in a mode the printer does not take.** The rule is one sentence: a command that carries dots into the printer is refused when the dots are in a format the printer does not take, and a command that prints dots the printer already holds is never refused, because what is in the memory of a printer has no format any more. `images.mode` of `raster` refuses the column format and `column` refuses the raster format; a profile without an `images` section, which is most of them, takes both.
+
+  | The dots arrive | Format |
+  |---|---|
+  | `ESC *` | column |
+  | `GS v 0` | raster |
+  | `GS ( L` 112, the graphics print buffer | raster |
+  | `GS ( L` 113, the graphics print buffer | column |
+  | `GS ( L` 67 and 83, an NV or a download graphic | raster |
+  | `GS ( L` 68 and 84, an NV or a download graphic | column |
+  | `GS *`, the downloaded bit image, and `FS q`, the NV bit images | column |
+  | `ESC X`, `ESC K`, `ESC L` and `ESC k` of the Star languages | column |
+  | `ESC GS S` and the raster mode of the Star languages | raster |
+
+  The print functions, `GS ( L` 50, 69 and 85, `GS /` and `FS p`, are never refused and draw whatever is there. So a store that was refused leaves an empty graphics print buffer, and the function that prints it prints nothing and says nothing; a definition that was refused is not in the memory, and the function that prints that key code reports the key code it was never given as an `unknown` command, the way it does for any image a stream never defined.
+- **Font B takes the cell of the profile**, `fonts.B.size`: 9 by 17 dots, 9 by 24, or the 10 by 24 of a TM-m30II. The glyphs are the 8 by 16 dot face of the built in font in every one of them, standing centred in the cell on its baseline, the way a printer draws a font that is smaller than its cell, so a cell no profile of this package has needs no font of its own. Font A is 12 by 24 dots on every printer the encoder knows and is left alone.
+
+A refused command is an `unsupported` entry of the display list, with the row the paper was on, the bytes it came from and a word for what was refused, `what`: the name of the symbology, `qrcode`, `pdf417`, `column image` or `raster image`. It draws nothing and advances no paper, so `render()` gives the same dots with a command refused as it would if the command had not been in the stream at all, and the entry is a diagnostic of `layout()` alone: `rasterize()`, `stitch()`, `pieces()` and the SVG writer skip it the way they skip an unknown command, and no item of a render carries it. A command that stores something in the printer, the data of a QR code or of a PDF417 and the graphics print buffer, is performed as it always was and only the function that prints the symbol is refused, which is where the paper would have changed.
+
+A section the capabilities do not carry refuses nothing, and neither does an image mode this version does not know: a profile of a later encoder draws everything it does not describe, rather than refusing what it never meant to refuse.
+
+The command line has no option for this. A profile is an object of a hundred fields, not something to write on a command line, and the models belong to the encoder, which the command line does not depend on.
+
+<br>
+
 ### Command line
 
 Everything on this page is also available from the shell, as `receipt-printer-renderer` or through `npx` without installing: a stream in, a PNG, a PBM, an SVG or the display list out, as one image or one per piece of paper. It can also read the language out of the commands themselves, `-l auto`, and write the stream as a list of its commands rather than as an image, `-f commands`. See [Command line interface](cli.md).
@@ -394,7 +443,7 @@ import ReceiptPrinterRenderer, { rasterize } from '@point-of-sale/receipt-printe
 let items = rasterize(renderer.layout(bytes), { commands: ['cut', 'pulse'] });
 ```
 
-It takes `commands`, `maxHeight`, `feedThreshold` and `font`, the options of a renderer that decide how the dots come out, and it is a static of `ReceiptPrinterRenderer` as well as a named export, so a page that loads the UMD build reaches it too. The list itself is never filtered by `commands`: every cut, pulse, feed and unknown command is in it. What `commands` does decide is which of them the printer performs, so a cut the driver supports takes the paper in front of it away and a reverse feed cannot move above it, in the list exactly as on the paper.
+It takes `commands`, `maxHeight`, `feedThreshold` and `font`, the options of a renderer that decide how the dots come out, and it is a static of `ReceiptPrinterRenderer` as well as a named export, so a page that loads the UMD build reaches it too. The list itself is never filtered by `commands`: every cut, pulse, feed, unknown and unsupported command is in it. What `commands` does decide is which of them the printer performs, so a cut the driver supports takes the paper in front of it away and a reverse feed cannot move above it, in the list exactly as on the paper.
 
 `pieces(layout)` splits a list at its cuts into the pieces of paper that leave the printer, one list per piece, in order: each has the height of the paper between two cuts and the entries that stand on it, moved up so that its first row is row 0, and no cut of its own. A cut at the very top or bottom, or two cuts on one row, leave no piece. It is a static of `ReceiptPrinterRenderer` as well as a named export, and a piece is a list like any other, so `rasterize()` draws it and `toSvg()` writes it:
 

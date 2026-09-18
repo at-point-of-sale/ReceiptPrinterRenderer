@@ -15,10 +15,10 @@
     A piece is a list of its own, with the same version, language, width and
     resolution, the height of the paper between its two cuts, and the entries
     that start on it, moved up so that its first row is row 0. The cuts are the
-    boundaries and are left out of the pieces; a feed, a pulse or an unknown
-    command stays where it stands. `toSvg()` writes one document of a piece
-    and `rasterize()` draws one set of items of it, the same dots stitching the
-    items of a render between two cuts gives.
+    boundaries and are left out of the pieces; a feed, a pulse, an unknown or
+    an unsupported command stays where it stands. `toSvg()` writes one document
+    of a piece and `rasterize()` draws one set of items of it, the same dots
+    stitching the items of a render between two cuts gives.
 
     The paper is cut between row `y - 1` and row `y` of a cut, so row `y` is
     the first row of the next piece, and a piece is the rows from one cut up

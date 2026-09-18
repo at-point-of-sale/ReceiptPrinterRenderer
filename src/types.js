@@ -13,6 +13,7 @@
  * @typedef {import('./layout.js').CellSize} CellSize
  * @typedef {import('./layout.js').Profile} Profile
  * @typedef {import('./font.js').PackedFont} PackedFont
+ * @typedef {import('./capabilities.js').PrinterCapabilities} PrinterCapabilities
  */
 
 /**
@@ -93,6 +94,7 @@
  * @property {number} [maxHeight]                        Maximum height of an image item, taller segments are split
  * @property {number} [lineSpacing]                      Default line spacing in dots, defaults to the profile
  * @property {number} [cutterDistance]                   Distance between the cutter and the print head in dots
+ * @property {PrinterCapabilities} [capabilities]        What the printer prints, the encoder's printerCapabilities
  * @property {string|Profile} [profile]                  Printer family defaults, a name or a profile, per language
  * @property {number} [feedThreshold]                    Runs of blank rows at least this tall become feed items
  * @property {Object<string, PackedFont>} [font]         Font data, in the packed format of the built in fonts
@@ -119,7 +121,7 @@
  * @property {number} [cutterDistance]      Distance between the cutter and the print head in dots, when there is one
  */
 
-/** @typedef {LineEntry | PageEntry | FeedEntry | CutEntry | PulseEntry | UnknownEntry} LayoutEntry */
+/** @typedef {LineEntry | PageEntry | FeedEntry | CutEntry | PulseEntry | UnknownEntry | UnsupportedEntry} LayoutEntry */
 
 /**
  * A line box: a text line, or a block on a line of its own. It spans the width
@@ -197,6 +199,18 @@
  * @property {number} y
  * @property {Uint8Array} data
  * @property {Source} source   The command that was not understood
+ */
+
+/**
+ * A command the printer of the `capabilities` option does not perform, which
+ * draws nothing and advances no paper
+ *
+ * @typedef {object} UnsupportedEntry
+ * @property {'unsupported'} type
+ * @property {number} y
+ * @property {string} what     What was refused: the name of a symbology, `qrcode`,
+ *                             `pdf417`, `column image` or `raster image`
+ * @property {Source} source   The command that was refused
  */
 
 /** @typedef {TextOperation | RectOperation | ImageOperation} LineOperation */

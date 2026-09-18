@@ -501,7 +501,7 @@ class Painter {
   }
 
   /**
-     * Handle a command, cut, pulse or unknown
+     * Handle a command, cut, pulse, unknown or unsupported
      *
      * @param  {object}   item   The item to emit
      */

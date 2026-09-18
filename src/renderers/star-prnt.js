@@ -2,6 +2,7 @@ import CodepageEncoder from '@point-of-sale/codepage-encoder';
 import {tokenize} from '@point-of-sale/receipt-printer-decoder/tokenizer';
 import Bitmap from '../bitmap.js';
 import Painter from '../painter.js';
+import Capabilities from '../capabilities.js';
 import {internationalCharacterSet, noCharacterSet} from '../charsets.js';
 import codepageMappings from '../../generated/mapping.js';
 import printerProfiles from '../../generated/profiles.js';
@@ -11,6 +12,7 @@ import printerProfiles from '../../generated/profiles.js';
  * @typedef {import('../painter.js').PainterOptions} PainterOptions
  * @typedef {import('../types.js').Layout} Layout
  * @typedef {import('../types.js').RendererOptions} RendererOptions
+ * @typedef {import('../capabilities.js').PrinterCapabilities} PrinterCapabilities
  * @typedef {import('../types.js').RenderItem} RenderItem
  * @typedef {import('../types.js').Source} Source
  * @typedef {import('@point-of-sale/receipt-printer-decoder/tokenizer').Token} Token
@@ -128,6 +130,17 @@ const SYMBOLOGIES = Object.assign(Object.create(null), {
   11: 'gs1-databar-truncated',
   12: 'gs1-databar-limited',
   13: 'gs1-databar-expanded',
+});
+
+/* The name a printer profile of the encoder gives a symbology of this table,
+   where it is not the name of the symbology itself. StarPRNT has no way to
+   select a Code 128 code set, so its Code 128 is drawn the way the automatic
+   variant of ESC/POS is, and a Star profile calls that barcode `code128`:
+   asking for `code128-auto` would refuse the only Code 128 these printers
+   have */
+
+const CAPABILITY_NAMES = Object.assign(Object.create(null), {
+  'code128-auto': 'code128',
 });
 
 /* The same table addressed by the ASCII digit of the number, which is how a
@@ -270,6 +283,7 @@ class StarPrntRenderer {
   static language = 'star-prnt';
 
   #painter;
+  #capabilities;
   #mapping;
   #commands;
 
@@ -337,12 +351,19 @@ class StarPrntRenderer {
       resolved = printerProfiles[profile];
     }
 
+    /* What the printer prints: a command for something it does not have draws
+       nothing and is reported as an unsupported entry of the display list, and
+       font B takes the cell of the profile. Without the option nothing is
+       refused and font B keeps the cell of the printer family */
+
+    this.#capabilities = new Capabilities(settings.capabilities);
+
     this.#painter = new Painter({
       language: STAR_LANGUAGES.indexOf(settings.language) === -1 ?
         StarPrntRenderer.language :
         settings.language,
       width: settings.width,
-      profile: resolved,
+      profile: this.#capabilities.profile(resolved),
       commands: settings.commands || [],
       maxHeight: settings.maxHeight,
       lineSpacing: settings.lineSpacing,
@@ -744,6 +765,39 @@ class StarPrntRenderer {
   }
 
   /**
+     * Report a command the printer of the capabilities does not perform. It
+     * draws nothing and it advances no paper, the way a printer skips a command
+     * it does not know, and the arguments of the command are consumed as they
+     * are without them, so the stream stays in sync.
+     *
+     * @param  {string}   what   A word for what was refused: the name of a
+     *                           symbology, `qrcode`, `pdf417`, `column image`
+     *                           or `raster image`
+     */
+  #unsupported(what) {
+    this.#painter.command({type: 'unsupported', what});
+  }
+
+  /**
+     * Whether the printer takes the dots of a command that carries them in a
+     * mode, raster or column. A printer that does not is given the dots and
+     * does nothing with them: the command is reported and the data is consumed
+     * as it is without the option, so the stream stays in sync.
+     *
+     * @param  {string}    mode   'raster' or 'column', the format of the data
+     * @return {boolean}          True when the dots are taken
+     */
+  #carries(mode) {
+    if (this.#capabilities.image(mode)) {
+      return true;
+    }
+
+    this.#unsupported(`${mode} image`);
+
+    return false;
+  }
+
+  /**
      * ESC b n1 n2 n3 n4 d.. RS, a barcode.
      *
      * Data the symbology refuses draws no bars: the bytes are fed back into the
@@ -766,6 +820,18 @@ class StarPrntRenderer {
 
     if (!symbology) {
       this.#unknown(consumed);
+      return;
+    }
+
+    /* A symbology the printer does not have draws nothing and its data is not
+       printed as text either: the arguments are consumed the way they are
+       here, so the stream stays in sync, and the command is reported. The name
+       the profiles of the encoder use is the name of the symbology, except for
+       the Code 128 of this language, which is drawn as the automatic variant
+       and is the `code128` of a Star profile */
+
+    if (!this.#capabilities.barcode(CAPABILITY_NAMES[symbology] || symbology)) {
+      this.#unsupported(CAPABILITY_NAMES[symbology] || symbology);
       return;
     }
 
@@ -864,6 +930,14 @@ class StarPrntRenderer {
     }
 
     if (args[0] === 0x50) {
+      /* The data is stored whatever the printer can do, and only the function
+         that prints the symbol is refused */
+
+      if (!this.#capabilities.qrcode()) {
+        this.#unsupported('qrcode');
+        return;
+      }
+
       this.#painter.qrcode({
         data: this.#qrcode.data,
         moduleSize: this.#qrcode.moduleSize,
@@ -925,6 +999,14 @@ class StarPrntRenderer {
     }
 
     if (args[0] === 0x50) {
+      /* As with the QR code, the store commands are performed and the print
+         command is the one that is refused */
+
+      if (!this.#capabilities.pdf417()) {
+        this.#unsupported('pdf417');
+        return;
+      }
+
       this.#painter.pdf417({
         data: this.#pdf417.data,
         columns: this.#pdf417.columns,
@@ -946,6 +1028,10 @@ class StarPrntRenderer {
      * @param  {Uint8Array}   args   The arguments of the command
      */
   #columnImage(args) {
+    if (!this.#carries('column')) {
+      return;
+    }
+
     this.#painter.strip(this.#strip(args.subarray(2), args[0] + args[1] * 256, 3));
   }
 
@@ -962,6 +1048,10 @@ class StarPrntRenderer {
      * @param  {number}       repeat  How often a column is printed
      */
   #bitImage(args, repeat) {
+    if (!this.#carries('column')) {
+      return;
+    }
+
     const columns = args[0] + args[1] * 256;
     const strip = this.#strip(args.subarray(2), columns, 1);
 
@@ -989,6 +1079,10 @@ class StarPrntRenderer {
        give the line the height of a band */
 
     if (width === 0) {
+      return;
+    }
+
+    if (!this.#carries('column')) {
       return;
     }
 
@@ -1037,6 +1131,10 @@ class StarPrntRenderer {
        commit the line that is being composed for nothing */
 
     if (width === 0 || height === 0) {
+      return;
+    }
+
+    if (!this.#carries('raster')) {
       return;
     }
 
@@ -1676,10 +1774,30 @@ class StarPrntRenderer {
       return false;
     }
 
+    const source = this.#raster.source;
+
+    /* Raster mode is the raster format of this language: a printer that takes
+       its images in column mode prints none of it. The buffer is filled and
+       emptied the way it is on a printer that does, and the rows it holds are
+       reported as one refused image at the range of the tokens that filled it */
+
+    if (!this.#capabilities.image('raster')) {
+      this.#rasterClear();
+
+      /* The rows came from the tokens that filled the buffer, so the refusal
+         is reported at their range and the source of the current token is put
+         back behind it, the way the block below is placed */
+
+      this.#painter.source(source || this.#source);
+      this.#unsupported('raster image');
+      this.#painter.source(this.#source);
+
+      return true;
+    }
+
     const width = this.#painter.width;
     const rowBytes = Bitmap.rowBytes(width);
     const bitmap = Bitmap.create(width, height);
-    const source = this.#raster.source;
 
     let y = 0;
 

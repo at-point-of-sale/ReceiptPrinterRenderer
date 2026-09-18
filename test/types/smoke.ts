@@ -45,6 +45,8 @@ import type {
   CutEntry,
   PulseEntry,
   UnknownEntry,
+  UnsupportedEntry,
+  PrinterCapabilities,
   LineOperation,
   TextOperation,
   RectOperation,
@@ -73,7 +75,20 @@ const options: RendererOptions = {
   maxHeight: 1024,
   feedThreshold: 24,
   cutterDistance: 0,
+  capabilities: {
+    barcodes: {supported: true, symbologies: ['ean13']},
+    qrcode: {supported: false, models: []},
+    pdf417: {supported: false},
+    images: {mode: 'raster'},
+    fonts: {A: {size: '12x24', columns: 48}, B: {size: '9x24', columns: 64}},
+  },
 };
+
+/* The capabilities of a printer, the encoder's object as the renderer takes it */
+
+const capabilities: PrinterCapabilities = {barcodes: {supported: false}};
+
+void capabilities;
 
 const escpos = new EscPosRenderer(options);
 const star = new StarPrntRenderer({width: 576, codepageMapping: 'star', commands});
@@ -300,6 +315,13 @@ for (const entry of list.entries) {
     case 'unknown': {
       const unknown: UnknownEntry = box;
       void unknown.data;
+      break;
+    }
+
+    case 'unsupported': {
+      const unsupported: UnsupportedEntry = box;
+      const what: string = unsupported.what;
+      void what;
       break;
     }
   }
